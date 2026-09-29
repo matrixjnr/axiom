@@ -1,18 +1,20 @@
-# Build decisions — SPEC-0008 / PR 1
+# Build decisions
 
-Source: https://docs.google.com/document/d/17DZ5SIWqlD45czCsEqPwcFQq-hg6B9JIQAL4CKQspyc/edit
+Axiom uses Gradle Kotlin DSL with Java 21 toolchains and `--release 21`, without
+preview features. The wrapper pins Gradle 9.5.1 and verifies its distribution
+checksum. Convention plugins share compilation, JUnit Platform, sources/Javadoc
+archives, and reproducible archive settings.
 
-This implements milestone 0 and section 134: repository bootstrap only.
-Java 21 toolchains and `--release 21` set the baseline, without preview features.
-Gradle 9.5.1 is pinned by the wrapper. Kotlin DSL conventions share compilation,
-JUnit Platform, sources/Javadoc archives, and reproducible archive settings.
+The version catalog contains only dependencies in use. Transport, JSON, benchmark,
+and telemetry dependencies will be selected when their implementations land.
+JPMS, signing, publication, consumer compatibility builds, dependency verification,
+and stress suites are later work. The BOM constrains all five libraries.
 
-The version catalog contains only dependencies used now. Netty, JSON adapters,
-JMH, and telemetry dependencies will be selected when their implementations land.
-Examples and benchmarks have build files but no placeholder runtime classes.
-JPMS, signing, publication, consumer compatibility, dependency verification, and
-stress suites are later milestones. The BOM already constrains all five libraries.
+Module checks enforce dependency direction and prohibit external production
+dependencies in core. Public signature tests scan the exported core and test-client
+classes, including generic types, to reject implementation and third-party types.
+These run as part of `check` alongside behavior and lifecycle tests.
 
-Dependency checks enforce the initial inward module graph and prevent external
-production dependencies in core. Signature-level leakage tests must be added
-with the public programming model; there are no production signatures in PR 1.
+Core discovers the default runtime through a JDK service provider. HTTP and test
+client consumers receive core through `api` and server through `runtimeOnly`.
+The server depends on core; core has no reverse dependency on the runtime.

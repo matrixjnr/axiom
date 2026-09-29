@@ -1,3 +1,3 @@
 plugins { id("axiom.java-library") }
 
-dependencies { implementation(project(":axiom-core")) }
+dependencies { api(project(":axiom-core")) }

@@ -2,4 +2,6 @@
 
 ## Unreleased
 
-- Bootstrap the Java 21 Gradle multi-project build (SPEC-0008, PR 1).
+- Add application creation, exact-path registration, lifecycle controls, and in-memory execution.
+- Add request/response contracts, an in-memory test client, and a runnable Hello World example.
+- Bootstrap the Java 21 Gradle multi-project build.

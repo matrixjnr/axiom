@@ -10,7 +10,7 @@ java {
 
 val architectureTest = tasks.register<CheckModuleBoundaries>("architectureTest") {
     group = "verification"
-    description = "Checks the SPEC-0008 production dependency boundaries."
+    description = "Checks production module dependency boundaries."
     moduleName.set(project.name)
     dependencies.set(provider {
         listOf("api", "implementation", "compileOnly", "compileOnlyApi", "runtimeOnly").flatMap { name ->
