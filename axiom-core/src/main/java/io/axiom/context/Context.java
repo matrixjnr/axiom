@@ -2,6 +2,8 @@ package io.axiom.context;
 
 import io.axiom.http.Request;
 import io.axiom.http.Response;
+import io.axiom.routing.Route;
+import java.util.Map;
 
 /** Request-scoped response settings. A context must not be shared across threads. */
 public interface Context {
@@ -36,6 +38,26 @@ public interface Context {
      * @return this context
      */
     Context status(int status);
+
+    /**
+     * Returns the matched route identity, including its template rather than request values.
+     * @return matched route
+     */
+    Route route();
+
+    /**
+     * Reads a raw path capture without percent-decoding or normalization.
+     * @param name capture name declared in the route template
+     * @return captured segment or wildcard remainder (which may be empty)
+     * @throws IllegalArgumentException if the name is not declared by the matched route
+     */
+    String path(String name);
+
+    /**
+     * Returns all captures in template order, materializing them on first access.
+     * @return immutable parameter map; empty for a static route
+     */
+    Map<String, String> pathParameters();
 
     /**
      * Maps a body using the current status (200 by default).

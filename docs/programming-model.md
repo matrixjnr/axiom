@@ -16,29 +16,36 @@ runtime. There is no external transport or codec dependency yet.
 
 ```java
 var app = Axiom.create();
-app.get("/health", ctx -> "ok");
-app.post("/jobs", ctx -> ctx.status(202).text("accepted"));
-app.route("PROPFIND", "/files", ctx -> "metadata");
+app.get("/users/me", ctx -> "current user");
+app.get("/users/:id", ctx -> "user " + ctx.path("id"));
+app.get("/files/*path", ctx -> ctx.path("path"));
 ```
 
 `get`, `post`, `put`, `patch`, `delete`, `head`, and `options` delegate to `route`.
 A `Route` is an immutable identity; `routes()` returns an immutable snapshot in
-registration order. Duplicate method/path pairs fail without replacing a handler.
+registration order. Duplicate method/template pairs fail without replacing a handler.
+At startup, equally shaped templates for the same method also fail, regardless of
+capture names. No partially compiled router is published on failure.
 
-Matching is exact and case-sensitive. Paths are neither decoded nor normalized:
-`/users`, `/users/`, and `/Users` are distinct, as are `/a%2Fb` and `/a/b`.
-Request metadata contains a raw absolute path, not a URL or query string.
-Parameter and wildcard templates fail explicitly until compiled routing is added.
-This initial matcher must not be treated as a network path validation policy.
+Matching is case-sensitive and preserves the raw path. Whole-segment `:name`
+parameters capture one non-empty segment; terminal `*name` wildcards capture the
+remaining path. At the first differing segment, static segments take precedence
+over parameters, then wildcards. Branches that cannot match the complete path are
+skipped. The HTTP method is selected only after the best complete path is found.
 
-Unknown paths return 404. Known paths with an unregistered method return 405 and
-an alphabetically ordered `Allow` header. HEAD must be registered explicitly;
-it does not fall back to GET, and all HEAD responses omit the body. Automatic
-OPTIONS behavior will be considered with the router.
+Unknown paths return 404. A matched path without the requested method returns 405
+and its sorted `Allow` header. It does not fall back to a broader route's method.
+HEAD must be registered explicitly and omits the response body. Automatic HEAD
+fallback and OPTIONS behavior are not enabled.
+
+`ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw
+capture; `ctx.pathParameters()` returns an immutable map in template order. Values
+are materialized on access, without percent-decoding or normalization. Query strings
+are not part of `Request.path()`. See [routing rules](routing.md) for edge cases.
 
 ## Lifecycle and concurrency
 
-- `start()` freezes registration and enters `RUNNING`; repeated starts are harmless.
+- `start()` compiles and freezes registration, then enters `RUNNING`; repeated starts are harmless.
 - `handle(Request)` requires `RUNNING` and invokes the handler on the calling thread.
 - `close()` enters `CLOSED` permanently, releases registered handler references,
   and rejects new requests. It is safe to call repeatedly or before startup.

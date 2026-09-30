@@ -9,11 +9,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.TreeSet;
 
 final class DefaultApplication implements Application {
     private final Map<Route, Handler> registrations = new LinkedHashMap<>();
-    private Map<String, Map<String, Handler>> dispatch = Map.of();
+    private CompiledRouter router;
     private List<Route> frozenRoutes = List.of();
     private volatile State state = State.CONFIGURING;
 
@@ -39,12 +38,7 @@ final class DefaultApplication implements Application {
             return this;
         }
         requireState(State.CONFIGURING);
-        var paths = new LinkedHashMap<String, Map<String, Handler>>();
-        registrations.forEach((route, handler) -> paths
-                .computeIfAbsent(route.path(), ignored -> new LinkedHashMap<>())
-                .put(route.method(), handler));
-        paths.replaceAll((path, methods) -> Map.copyOf(methods));
-        dispatch = Map.copyOf(paths);
+        router = CompiledRouter.compile(registrations);
         frozenRoutes = List.copyOf(registrations.keySet());
         registrations.clear();
         state = State.RUNNING;
@@ -54,23 +48,23 @@ final class DefaultApplication implements Application {
     @Override
     public Response handle(Request request) throws Exception {
         Objects.requireNonNull(request, "request");
-        Map<String, Handler> methods;
+        CompiledRouter acceptedRouter;
         synchronized (this) {
             requireState(State.RUNNING);
             // Admission ends here. Never hold the lifecycle lock while invoking user code.
-            methods = dispatch.get(request.path());
+            acceptedRouter = router;
         }
+        var match = acceptedRouter.match(request);
         Response response;
-        if (methods == null) {
+        if (match == null) {
             response = Response.of(404, "Not Found");
         } else {
-            var handler = methods.get(request.method());
-            if (handler == null) {
+            if (!match.methodAllowed()) {
                 response = Response.of(405, "Method Not Allowed")
-                        .withHeader("Allow", String.join(", ", new TreeSet<>(methods.keySet())));
+                        .withHeader("Allow", match.allow());
             } else {
-                var context = new DefaultContext(request);
-                var result = handler.handle(context);
+                var context = new DefaultContext(request, match);
+                var result = match.handler().handle(context);
                 response = result instanceof Response explicit ? explicit : context.response(result);
             }
         }
@@ -87,7 +81,7 @@ final class DefaultApplication implements Application {
         }
         state = State.CLOSED;
         registrations.clear();
-        dispatch = Map.of();
+        router = null;
     }
 
     private void requireState(State expected) {

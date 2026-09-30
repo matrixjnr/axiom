@@ -1,7 +1,7 @@
 # Axiom
 
 Axiom is an early Java API framework targeting Java 21. The current implementation
-supports route registration and synchronous in-memory execution. Network listeners
+supports compiled routing with parameters and wildcards, plus synchronous in-memory execution. Network listeners
 and transport support are still under development.
 
 ```java
@@ -34,13 +34,14 @@ checks. Build and configuration caches are enabled. The example prints
 ## Modules
 
 - `axiom-core`: application contracts, HTTP request/response values, and bootstrap SPI
-- `axiom-server`: lifecycle, exact-path dispatch, and the default runtime provider
+- `axiom-server`: lifecycle, compiled route dispatch, and the default runtime provider
 - `axiom-http`: dependency entry point for the future HTTP transport
 - `axiom-json`: JSON adapter build scaffolding
 - `axiom-test`: in-memory test client
 - `axiom-bom`: aligned library versions
 - `examples/hello`: runnable in-memory example
-- `examples/rest-api`, `benchmarks/http`: build scaffolding
+- `examples/rest-api`: build scaffolding
+- `benchmarks/http`: JMH routing and dispatch benchmarks
 
 Core uses JDK service loading to discover the runtime. Applications depending on
 `axiom-http` receive core on the compile classpath and server on the runtime
@@ -51,5 +52,5 @@ will accompany release engineering. The `io.axiom` namespace is provisional unti
 ownership is validated. No performance claims have been established.
 
 See the [programming model](docs/programming-model.md),
-[build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
+[routing rules](docs/routing.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
 [security](SECURITY.md). Licensed under Apache-2.0.

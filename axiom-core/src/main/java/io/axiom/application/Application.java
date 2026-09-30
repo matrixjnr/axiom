@@ -23,11 +23,11 @@ public interface Application extends AutoCloseable {
     }
 
     /**
-     * Registers an exact method/path pair. Methods and paths are case-sensitive.
-     * Parameter and wildcard templates are not supported yet.
+     * Registers a method/path template. Methods and static segments are case-sensitive.
+     * Named parameters match one non-empty segment; named terminal wildcards match the remainder.
      *
      * @param method HTTP method token
-     * @param path absolute path without query or fragment
+     * @param path absolute path template without query or fragment
      * @param handler callback invoked for matching requests
      * @return the registered route identity
      * @throws IllegalArgumentException for invalid or duplicate routes
@@ -120,16 +120,19 @@ public interface Application extends AutoCloseable {
     List<Route> routes();
 
     /**
-     * Freezes registration and enables in-memory execution without opening a listener.
-     * Repeated calls while running are harmless.
+     * Compiles routes, freezes registration, and enables in-memory execution without a listener.
+     * Repeated calls while running are harmless. A compilation failure leaves registration
+     * intact and the application in the configuring state.
      * @return this application
+     * @throws IllegalArgumentException if routes have the same shape and method
      * @throws IllegalStateException if closed
      */
     Application start();
 
     /**
      * Executes a request synchronously on the calling thread with a fresh context.
-     * Returns 404 for an unknown path and 405 with Allow for a method mismatch.
+     * Selects the most specific complete path before the method (static, parameter, wildcard).
+     * Returns 404 for an unknown path and 405 with Allow for a method mismatch on that path.
      * Handler exceptions propagate unchanged; this method is not a network error boundary.
      * HEAD dispatches only explicitly registered HEAD routes and suppresses response bodies.
      *

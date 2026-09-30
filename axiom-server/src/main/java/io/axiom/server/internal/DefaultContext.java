@@ -3,13 +3,28 @@ package io.axiom.server.internal;
 import io.axiom.context.Context;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
+import io.axiom.routing.Route;
+import java.util.Map;
 
 final class DefaultContext implements Context {
     private final Request request;
+    private final CompiledRouter.Match match;
     private int status = 200;
     private boolean explicitStatus;
 
-    DefaultContext(Request request) { this.request = request; }
+    DefaultContext(Request request, CompiledRouter.Match match) {
+        this.request = request;
+        this.match = match;
+    }
+
+    @Override
+    public Route route() { return match.route(); }
+
+    @Override
+    public String path(String name) { return match.parameter(name); }
+
+    @Override
+    public Map<String, String> pathParameters() { return match.parameters(); }
 
     @Override
     public Request request() { return request; }
