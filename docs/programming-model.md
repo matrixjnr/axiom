@@ -10,7 +10,7 @@ The experimental provider SPI exists to keep the dependency from server to core.
 
 Use `axiom-http` in the repository's examples, or `axiom-test` for the test client.
 Both expose core contracts at compile time and include the server provider at
-runtime. There is no external transport or codec dependency yet.
+runtime. HTTP keeps Netty in its implementation dependencies; core uses only the JDK.
 
 ## Registration and matching
 
@@ -55,9 +55,10 @@ under the lifecycle lock, which is released before invoking application code.
 Handlers can run concurrently and each invocation receives a fresh context.
 Shared business objects must provide their own thread safety.
 
-Close does not wait for or cancel accepted requests. They may complete after
-`close()` returns. This is an in-memory lifecycle, not graceful network shutdown.
-There are no framework executors, listeners, deadlines, or admission limits yet.
+Close does not wait for accepted requests. In-memory calls may complete after
+`close()` returns. Owned HTTP listeners close connections and interrupt network
+handlers. Await each listener's `termination()` to join shutdown. See
+[HTTP ownership, execution and limits](http.md).
 
 ## Responses and failures
 
@@ -75,8 +76,8 @@ A handler returns an object or throws an exception:
 case-insensitive, with one value per name; repeated headers are not modeled yet.
 Final statuses range from 200 through 599; 204, 205, and 304 reject non-null bodies.
 
-Handler exceptions propagate unchanged to the caller. This makes failures visible
-in tests; a future network adapter must map errors into safe protocol responses.
+Handler exceptions propagate unchanged to in-memory callers. The HTTP transport
+maps exceptions and unsupported body objects to generic 500 responses.
 No JSON encoding, body parsing, middleware, or error mapping is implied by this API.
 
 ## Testing without ports

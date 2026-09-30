@@ -3,7 +3,10 @@ package io.axiom.application;
 import io.axiom.context.Handler;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
+import io.axiom.lifecycle.Server;
 import io.axiom.routing.Route;
+import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.util.List;
 
 /**
@@ -130,6 +133,26 @@ public interface Application extends AutoCloseable {
     Application start();
 
     /**
+     * Starts this application and binds a loopback HTTP listener.
+     * @param port port, or zero to allocate an available port
+     * @return application-owned listener
+     * @throws IOException if binding fails; the application remains running
+     */
+    default Server listen(int port) throws IOException {
+        return listen(new InetSocketAddress("127.0.0.1", port));
+    }
+
+    /**
+     * Starts this application and binds an HTTP listener using the installed transport provider.
+     * Multiple listeners may share an application. Closing the application closes all listeners.
+     * @param address bind address
+     * @return application-owned listener
+     * @throws IOException if binding fails; the application remains running
+     * @throws IllegalStateException if closed or no unique transport provider is installed
+     */
+    Server listen(InetSocketAddress address) throws IOException;
+
+    /**
      * Executes a request synchronously on the calling thread with a fresh context.
      * Selects the most specific complete path before the method (static, parameter, wildcard).
      * Returns 404 for an unknown path and 405 with Allow for a method mismatch on that path.
@@ -152,7 +175,8 @@ public interface Application extends AutoCloseable {
 
     /**
      * Permanently rejects new requests. Already accepted requests may finish.
-     * Idempotent; does not wait for, interrupt, or cancel handlers.
+     * Idempotent and nonblocking. Owned listeners close connections and interrupt network handlers.
+     * In-memory handlers are not interrupted. Await each listener's termination to join shutdown.
      */
     @Override
     void close();

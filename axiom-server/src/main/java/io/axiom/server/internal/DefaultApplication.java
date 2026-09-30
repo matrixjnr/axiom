@@ -4,17 +4,41 @@ import io.axiom.application.Application;
 import io.axiom.context.Handler;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
+import io.axiom.http.spi.HttpTransportProvider;
+import io.axiom.lifecycle.Server;
 import io.axiom.routing.Route;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.ServiceLoader;
 
 final class DefaultApplication implements Application {
     private final Map<Route, Handler> registrations = new LinkedHashMap<>();
     private CompiledRouter router;
     private List<Route> frozenRoutes = List.of();
     private volatile State state = State.CONFIGURING;
+    private final List<Server> listeners = new ArrayList<>();
+
+    @Override
+    public synchronized Server listen(InetSocketAddress address) throws IOException {
+        Objects.requireNonNull(address, "address");
+        if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+        var providers = ServiceLoader.load(HttpTransportProvider.class).iterator();
+        if (!providers.hasNext()) {
+            throw new IllegalStateException("No HTTP transport provider; add axiom-http");
+        }
+        var provider = providers.next();
+        if (providers.hasNext()) { throw new IllegalStateException("Multiple HTTP transport providers"); }
+        start();
+        var server = provider.bind(this, address);
+        listeners.removeIf(listener -> listener.termination().toCompletableFuture().isDone());
+        listeners.add(server);
+        return server;
+    }
 
     @Override
     public synchronized Route route(String method, String path, Handler handler) {
@@ -75,13 +99,19 @@ final class DefaultApplication implements Application {
     public State state() { return state; }
 
     @Override
-    public synchronized void close() {
-        if (state == State.CONFIGURING) {
-            frozenRoutes = List.copyOf(registrations.keySet());
+    public void close() {
+        List<Server> owned;
+        synchronized (this) {
+            if (state == State.CONFIGURING) {
+                frozenRoutes = List.copyOf(registrations.keySet());
+            }
+            state = State.CLOSED;
+            registrations.clear();
+            router = null;
+            owned = List.copyOf(listeners);
+            listeners.clear();
         }
-        state = State.CLOSED;
-        registrations.clear();
-        router = null;
+        owned.forEach(Server::close);
     }
 
     private void requireState(State expected) {

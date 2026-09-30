@@ -5,8 +5,9 @@ preview features. The wrapper pins Gradle 9.5.1 and verifies its distribution
 checksum. Convention plugins share compilation, JUnit Platform, sources/Javadoc
 archives, and reproducible archive settings.
 
-The version catalog contains only dependencies in use. Transport, JSON,
-and telemetry dependencies will be selected when their implementations land.
+The version catalog contains only dependencies in use. HTTP uses Netty 4.2 with
+its BOM to align implementation modules. JSON and telemetry dependencies will be
+selected when their implementations land.
 JPMS, signing, publication, consumer compatibility builds, dependency verification,
 and stress suites are later work. The BOM constrains all five libraries.
 
