@@ -102,8 +102,8 @@ class ApplicationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/users/:id", "/files/*path", "/users/{id}"})
-    void rejectsUnsupportedTemplates(String path) {
+    @ValueSource(strings = {"/users/:", "/files/*path/more", "/users/{id}"})
+    void rejectsMalformedTemplates(String path) {
         try (var app = Axiom.create()) {
             assertThatIllegalArgumentException().isThrownBy(() -> app.get(path, ctx -> "never"));
             assertThat(app.routes()).isEmpty();
