@@ -1,18 +1,16 @@
 # Axiom
 
 Axiom is an early Java API framework targeting Java 21. The current implementation
-supports compiled routing with parameters and wildcards, plus synchronous in-memory execution. Network listeners
-and transport support are still under development.
+supports compiled routing with parameters and wildcards, HTTP/1.1 listeners,
+and synchronous in-memory testing. The HTTP transport supports text and byte responses.
 
 ```java
 import io.axiom.Axiom;
-import io.axiom.http.Request;
 
 try (var app = Axiom.create()) {
     app.get("/", ctx -> "Hello, world!");
-    app.start();
-    var response = app.handle(Request.get("/"));
-    System.out.println(response.body());
+    var server = app.listen(8080);
+    server.termination().toCompletableFuture().join();
 }
 ```
 
@@ -28,18 +26,19 @@ Install JDK 21, then run:
 
 On Windows, use `./gradlew.bat`. The wrapper downloads Gradle 9.5.1 on first use.
 `check` includes unit tests, module dependency checks, and public API signature
-checks. Build and configuration caches are enabled. The example prints
-`Hello, world!` and exits; it does not open a TCP port.
+checks. Build and configuration caches are enabled. The example listens at
+`http://127.0.0.1:8080/` until stopped. For a finite network smoke test, run
+`./gradlew :examples:hello:run --args="--smoke"`.
 
 ## Modules
 
 - `axiom-core`: application contracts, HTTP request/response values, and bootstrap SPI
 - `axiom-server`: lifecycle, compiled route dispatch, and the default runtime provider
-- `axiom-http`: dependency entry point for the future HTTP transport
+- `axiom-http`: HTTP/1.1 transport with Netty kept behind the public API
 - `axiom-json`: JSON adapter build scaffolding
 - `axiom-test`: in-memory test client
 - `axiom-bom`: aligned library versions
-- `examples/hello`: runnable in-memory example
+- `examples/hello`: runnable HTTP server and network smoke example
 - `examples/rest-api`: build scaffolding
 - `benchmarks/http`: JMH routing and dispatch benchmarks
 
@@ -52,5 +51,5 @@ will accompany release engineering. The `io.axiom` namespace is provisional unti
 ownership is validated. No performance claims have been established.
 
 See the [programming model](docs/programming-model.md),
-[routing rules](docs/routing.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
+[routing rules](docs/routing.md), [HTTP behavior and limits](docs/http.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
 [security](SECURITY.md). Licensed under Apache-2.0.
