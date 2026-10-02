@@ -66,6 +66,35 @@ class ValidationEndToEndTest {
         }
     }
 
+    @Test
+    void mapsRuleViolationsWithNestedPathsWithoutEchoingInput() throws Exception {
+        record Batch(List<Signup> signups) {}
+        var signup = Rules.of(Signup.class)
+                .field("name", Signup::name, Rule.notBlank(), Rule.maxLength(10))
+                .field("email", Signup::email, Rule.notNull(), Rule.email());
+        var batch = Rules.of(Batch.class).eachNested("signups", Batch::signups, signup);
+        var app = Axiom.create();
+        app.post("/batches", ctx -> {
+            var lines = new String(ctx.request().body().bytes(), StandardCharsets.UTF_8).split("\n");
+            var signups = java.util.Arrays.stream(lines)
+                    .map(line -> Signup.parse(line.getBytes(StandardCharsets.UTF_8))).toList();
+            Validation.require(batch, new Batch(signups));
+            return ctx.noContent();
+        });
+        try (var client = TestClient.start(app)) {
+            assertThat(client.post("/batches", "text/plain", "ada|ada@example.org").status()).isEqualTo(204);
+            var response = client.post("/batches", "text/plain",
+                    "ada|ada@example.org\n|POISON@\nPOISON-name-too-long|x@example.org");
+            assertThat(response.status()).isEqualTo(422);
+            assertThat(response.headers()).containsEntry("Content-Type", "application/problem+json");
+            assertThat(fields(response)).containsExactly("signups[1].name", "signups[1].email", "signups[2].name");
+            assertThat(text(response)).contains("{\"field\":\"signups[1].name\",\"code\":\"not_blank\"}",
+                    "{\"field\":\"signups[1].email\",\"code\":\"email\"}",
+                    "{\"field\":\"signups[2].name\",\"code\":\"size\"}");
+            assertThat(text(response)).doesNotContain("POISON", "example.org", "message", "value");
+        }
+    }
+
     static String text(Response response) {
         var body = response.body();
         return body instanceof byte[] bytes ? new String(bytes, StandardCharsets.UTF_8) : String.valueOf(body);
