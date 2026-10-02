@@ -65,7 +65,8 @@ handlers. Await each listener's `termination()` to join shutdown. See
 `ctx.execution()` exposes the request ID and monotonic remaining budget.
 HTTP uses bounded virtual-thread execution with a configurable deadline;
 direct calls and the test client retain synchronous caller-thread execution.
-See [execution semantics](execution.md) for cancellation and timeout boundaries.
+See [execution semantics](execution.md) for cancellation and timeout boundaries,
+and [admission](admission.md) for aggregate and route limits with bounded queues.
 
 ## Responses and failures
 

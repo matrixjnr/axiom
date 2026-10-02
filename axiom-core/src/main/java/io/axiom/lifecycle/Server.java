@@ -1,5 +1,6 @@
 package io.axiom.lifecycle;
 
+import io.axiom.execution.AdmissionSnapshot;
 import java.net.InetSocketAddress;
 import java.util.concurrent.CompletionStage;
 
@@ -16,6 +17,12 @@ public interface Server extends AutoCloseable {
      * @return whether the listener is accepting connections
      */
     boolean isOpen();
+
+    /**
+     * Observes admission without running callbacks on transport threads.
+     * @return a consistent snapshot for this listener, also available after shutdown
+     */
+    AdmissionSnapshot admission();
 
     /**
      * Observes shutdown without granting ownership of its completion.

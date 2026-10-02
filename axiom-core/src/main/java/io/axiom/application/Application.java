@@ -1,6 +1,7 @@
 package io.axiom.application;
 
 import io.axiom.context.Handler;
+import io.axiom.execution.AdmissionPolicy;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
@@ -10,6 +11,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Registers routes before startup and owns their execution lifecycle.
@@ -147,6 +149,43 @@ public interface Application extends AutoCloseable {
      * @return request timeout
      */
     Duration requestTimeout();
+
+    /**
+     * Sets aggregate limits for each listener before startup. Defaults to reject(36).
+     * @param policy immutable listener limits; also the default policy for each route
+     * @return this application
+     */
+    Application admissionPolicy(AdmissionPolicy policy);
+
+    /**
+     * Returns the aggregate listener limits.
+     * @return configured default policy
+     */
+    AdmissionPolicy admissionPolicy();
+
+    /**
+     * Sets limits for one registered route before startup. Aggregate limits still apply.
+     * @param route registered route identity
+     * @param policy complete route policy
+     * @return this application
+     * @throws IllegalArgumentException if the route is not registered
+     */
+    Application admissionPolicy(Route route, AdmissionPolicy policy);
+
+    /**
+     * Returns a registered route's override, or the default policy.
+     * @param route registered route identity
+     * @return effective route policy
+     * @throws IllegalArgumentException if the route is not registered
+     */
+    AdmissionPolicy admissionPolicy(Route route);
+
+    /**
+     * Resolves a route identity without executing user code. Requires a running application.
+     * @param request request to match using the same precedence as handle
+     * @return matching method/template, or empty for 404/405
+     */
+    Optional<Route> resolve(Request request);
 
     /**
      * Starts this application and binds a loopback HTTP listener.

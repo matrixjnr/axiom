@@ -1,27 +1,29 @@
 package io.axiom.http.internal;
 
 import io.axiom.application.Application;
+import io.axiom.execution.AdmissionPolicy;
+import io.axiom.execution.AdmissionSnapshot;
 import io.axiom.lifecycle.Server;
 import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.MultiThreadIoEventLoopGroup;
+import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.nio.NioIoHandler;
-import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.timeout.IdleStateHandler;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 final class NettyServer implements Server {
     private final MultiThreadIoEventLoopGroup acceptors = new MultiThreadIoEventLoopGroup(
@@ -29,17 +31,21 @@ final class NettyServer implements Server {
     private final MultiThreadIoEventLoopGroup io = new MultiThreadIoEventLoopGroup(
             2, Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());
     private final DefaultChannelGroup channels = new DefaultChannelGroup(io.next(), true);
-    private final RequestDispatcher handlers = new RequestDispatcher(36);
-    private final CompletableFuture<Void> stopped = CompletableFuture.allOf(
-            handlers.termination().toCompletableFuture(),
-            completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
+    private final RequestDispatcher handlers;
+    private final CompletableFuture<Void> stopped;
     private final AtomicBoolean closing = new AtomicBoolean();
     private final AtomicInteger connections = new AtomicInteger();
     private Channel listener;
     private InetSocketAddress address;
 
+    private NettyServer(AdmissionPolicy policy) {
+        handlers = new RequestDispatcher(policy);
+        stopped = CompletableFuture.allOf(handlers.termination().toCompletableFuture(),
+                completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
+    }
+
     static NettyServer bind(Application application, InetSocketAddress address) throws IOException {
-        var server = new NettyServer();
+        var server = new NettyServer(application.admissionPolicy());
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
                     .channel(NioServerSocketChannel.class)
@@ -74,6 +80,7 @@ final class NettyServer implements Server {
         }
     }
 
+    @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }
     @Override public InetSocketAddress localAddress() { return address; }
     @Override public boolean isOpen() { return !closing.get() && listener.isOpen(); }
     @Override public CompletionStage<Void> termination() { return stopped.minimalCompletionStage(); }

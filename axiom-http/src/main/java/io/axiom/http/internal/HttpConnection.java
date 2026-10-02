@@ -4,8 +4,10 @@ import io.axiom.application.Application;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
-import io.axiom.server.internal.execution.RequestDispatcher;
 import io.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
+import io.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
+import io.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
+import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -22,15 +24,16 @@ import io.netty.handler.timeout.IdleStateEvent;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.RejectedExecutionException;
 
 /** All mutable connection state belongs to the channel's event loop. */
 final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static final System.Logger LOG = System.getLogger(HttpConnection.class.getName());
+    private static final Object UNMATCHED = new Object();
     private static final int MAX_RESPONSE = 1024 * 1024;
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
@@ -98,7 +101,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         var exchange = pending.removeFirst();
         if (exchange.execution().isExpired()) { send(ctx, exchange, error(504)); return; }
         try {
-            active = executor.submit(exchange.execution(), () -> {
+            var route = application.resolve(exchange.request());
+            var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
+            active = executor.submit(route.<Object>map(value -> value).orElse(UNMATCHED),
+                    policy, exchange.execution(), () -> {
                 try { return prepare(application.handle(exchange.request(), exchange.execution())); }
                 catch (Exception | Error failure) {
                     if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
@@ -117,7 +123,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                             abort(ctx);
                         } else {
                             send(ctx, exchange, failure == null ? response
-                                    : error(failure instanceof DeadlineExceededException ? 504 : 500));
+                                    : error(failure instanceof DeadlineExceededException ? 504
+                                            : failure instanceof QueueTimeoutException
+                                                    || failure instanceof DispatchRejectedException ? 503 : 500));
                         }
                     });
                 } catch (RejectedExecutionException stopped) { /* Channel shutdown owns cleanup. */ }

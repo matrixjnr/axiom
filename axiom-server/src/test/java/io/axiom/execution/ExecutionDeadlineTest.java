@@ -30,6 +30,32 @@ class ExecutionDeadlineTest {
         }
     }
 
+    @Test void requestDeadlineWinsOverQueueBudgetBeforePromotion() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var clock = new AtomicLong();
+        var queuedContext = ExecutionContext.create(Duration.ofHours(1), clock::get);
+        var dispatcher = new RequestDispatcher(new AdmissionPolicy(1, 1, Duration.ofDays(1)));
+        try {
+            dispatcher.submit(ExecutionContext.create(Duration.ofHours(1)), () -> {
+                entered.countDown();
+                release.await();
+                return null;
+            });
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            var queued = dispatcher.submit(queuedContext, () -> { throw new AssertionError("expired work must not run"); });
+            assertThat(dispatcher.snapshot().queued()).isEqualTo(1);
+            clock.set(Duration.ofHours(1).toNanos());
+            release.countDown();
+            assertThatThrownBy(() -> queued.result().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(RequestDispatcher.DeadlineExceededException.class);
+            assertThat(dispatcher.snapshot().queueTimeouts()).isZero();
+        } finally {
+            release.countDown();
+            dispatcher.close();
+            dispatcher.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
     @Test void expiredExplicitContextDoesNotInvokeSynchronousHandler() {
         var clock = new AtomicLong();
         var execution = ExecutionContext.create(Duration.ofSeconds(1), clock::get);

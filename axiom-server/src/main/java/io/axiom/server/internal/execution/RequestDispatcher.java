@@ -1,45 +1,72 @@
 package io.axiom.server.internal.execution;
 
+import io.axiom.execution.AdmissionPolicy;
+import io.axiom.execution.AdmissionSnapshot;
 import io.axiom.execution.ExecutionContext;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
-import java.util.HashSet;
-import java.util.Objects;
-import java.util.Set;
+import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 
-/** Protocol-neutral, listener-owned execution; internal to Axiom's runtime modules. */
+/** Protocol-neutral, listener-owned execution. All admission state is protected by this object's lock. */
 public final class RequestDispatcher implements AutoCloseable {
-    private final int capacity;
+    private static final Object DEFAULT_KEY = new Object();
+    private final AdmissionPolicy policy;
     private final ExecutorService workers;
     private final ScheduledExecutorService deadlines;
+    private final LongSupplier clock;
     private final Set<Task<?>> tasks = new HashSet<>();
+    private final ArrayDeque<Task<?>> queue = new ArrayDeque<>();
+    private final Map<Object, Bucket> buckets = new HashMap<>();
     private final CompletableFuture<Void> stopped = new CompletableFuture<>();
+    private int active;
+    private long accepted;
+    private long rejected;
+    private long queueTimeouts;
     private boolean closed;
 
     /**
-     * Creates virtual-thread execution with admission before thread creation and no waiting queue.
-     * @param capacity maximum submitted tasks, including cancelled tasks whose code has not exited
+     * Creates execution with immediate rejection when busy.
+     * @param capacity maximum reserved or running executions
      */
-    public RequestDispatcher(int capacity) {
-        this(capacity, Executors.newThreadPerTaskExecutor(
-                Thread.ofVirtual().name("axiom-handler-", 0).factory()), scheduler());
+    public RequestDispatcher(int capacity) { this(AdmissionPolicy.reject(capacity)); }
+
+    /**
+     * Creates bounded admission before virtual-thread creation.
+     * @param policy aggregate limits for this dispatcher
+     */
+    public RequestDispatcher(AdmissionPolicy policy) {
+        this(policy, Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("axiom-handler-", 0).factory()), scheduler(), System::nanoTime);
     }
 
     RequestDispatcher(int capacity, ExecutorService workers, ScheduledExecutorService deadlines) {
-        if (capacity < 1) { throw new IllegalArgumentException("Capacity must be positive"); }
-        this.capacity = capacity;
+        this(AdmissionPolicy.reject(capacity), workers, deadlines, System::nanoTime);
+    }
+
+    RequestDispatcher(AdmissionPolicy policy, ExecutorService workers,
+            ScheduledExecutorService deadlines, LongSupplier clock) {
+        this.policy = Objects.requireNonNull(policy, "policy");
         this.workers = workers;
         this.deadlines = deadlines;
+        this.clock = clock;
     }
 
     private static ScheduledExecutorService scheduler() {
@@ -51,45 +78,98 @@ public final class RequestDispatcher implements AutoCloseable {
     }
 
     /**
-     * Admits work, including response preparation, under a monotonic deadline.
-     * @param context request identity and remaining budget
-     * @param action framework-owned work; no transport types are needed here
+     * Submits work in the default admission bucket.
+     * @param context request identity and deadline
+     * @param action framework-owned work, including response preparation
      * @param <T> result type
-     * @return cancellation handle with a single observable outcome
-     * @throws RejectedExecutionException if closed or at capacity
+     * @return cancellation and outcome handle
      */
-    public synchronized <T> Task<T> submit(ExecutionContext context, Callable<T> action) {
+    public <T> Task<T> submit(ExecutionContext context, Callable<T> action) {
+        return submit(DEFAULT_KEY, policy, context, action);
+    }
+
+    /**
+     * Admits work against aggregate and endpoint limits, queuing only when both policies allow it.
+     * @param key stable endpoint identity, never a request-specific path
+     * @param endpointPolicy immutable policy for this endpoint
+     * @param context request identity and remaining deadline
+     * @param action framework-owned work, including response preparation
+     * @param <T> result type
+     * @return cancellation handle; queued work has no execution thread
+     * @throws RejectedExecutionException if closed or capacity is exhausted
+     */
+    public <T> Task<T> submit(Object key, AdmissionPolicy endpointPolicy,
+            ExecutionContext context, Callable<T> action) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(endpointPolicy, "endpointPolicy");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(action, "action");
-        if (closed || tasks.size() >= capacity) { throw new RejectedExecutionException("Request capacity unavailable"); }
-        var task = new Task<T>(context, action);
-        tasks.add(task);
-        try {
-            task.timer(deadlines.schedule(task::expire, context.remainingTime().toNanos(), TimeUnit.NANOSECONDS));
-            workers.execute(task::run);
-        } catch (RuntimeException | Error failure) {
-            task.finish(null, failure, true);
-            tasks.remove(task); // Submission failed, so no worker owns release.
-            throw failure;
+        var signals = new ArrayList<Runnable>();
+        Task<T> task;
+        Throwable submissionFailure = null;
+        synchronized (this) {
+            if (closed) { rejected++; throw new RejectedExecutionException("Dispatcher closed"); }
+            var bucket = buckets.get(key);
+            if (bucket != null && !bucket.policy.equals(endpointPolicy)) {
+                throw new IllegalArgumentException("Endpoint policy changed after admission");
+            }
+            if (bucket == null) { bucket = new Bucket(key, endpointPolicy); }
+            boolean room = active < policy.maxActive() && bucket.active < endpointPolicy.maxActive();
+            if (!room && (queue.size() >= policy.maxQueued() || bucket.queued >= endpointPolicy.maxQueued())) {
+                rejected++;
+                throw new RejectedExecutionException("Request capacity unavailable");
+            }
+            buckets.put(key, bucket);
+            task = new Task<>(context, action, bucket);
+            tasks.add(task);
+            if (room) {
+                submissionFailure = activate(task, signals);
+            } else {
+                task.waiting = true;
+                task.queuedAt = clock.getAsLong();
+                task.queueBudget = Math.min(policy.queueTimeout().toNanos(), endpointPolicy.queueTimeout().toNanos());
+                queue.addLast(task);
+                bucket.queued++;
+                try { schedule(task, Math.min(task.queueBudget, context.remainingTime().toNanos())); }
+                catch (RuntimeException | Error failure) {
+                    finish(task, null, failure instanceof RejectedExecutionException
+                    ? new DispatchRejectedException(failure) : failure, false, signals);
+                    submissionFailure = failure;
+                }
+            }
+            if (submissionFailure == null) { accepted++; }
         }
+        publish(signals);
+        if (submissionFailure instanceof RuntimeException failure) { throw failure; }
+        if (submissionFailure instanceof Error failure) { throw failure; }
         return task;
     }
 
     /**
-     * Observes full dispatcher termination, including handlers that ignore cancellation.
-     * @return completion after executor resources stop
+     * Observes a consistent admission snapshot without callbacks.
+     * @return counters scoped to this dispatcher
+     */
+    public synchronized AdmissionSnapshot snapshot() {
+        return new AdmissionSnapshot(active, queue.size(), accepted, rejected, queueTimeouts);
+    }
+
+    /**
+     * Observes complete resource termination, including handlers that ignore interruption.
+     * @return completion after executors stop
      */
     public CompletionStage<Void> termination() { return stopped.minimalCompletionStage(); }
 
-    /** Stops admission, cancels work and starts joining owned executors without blocking the caller. */
+    /** Stops admission, cancels active and queued work, and asynchronously joins owned executors. */
     @Override public void close() {
-        Set<Task<?>> owned;
+        var signals = new ArrayList<Runnable>();
         synchronized (this) {
             if (closed) { return; }
             closed = true;
-            owned = Set.copyOf(tasks);
+            for (var task : List.copyOf(tasks)) {
+                finish(task, null, new CancellationException("Dispatcher closed"), true, signals);
+            }
         }
-        owned.forEach(Task::cancel);
+        publish(signals);
         workers.shutdownNow();
         deadlines.shutdownNow();
         Thread.ofPlatform().daemon(true).name("axiom-execution-shutdown").start(() -> {
@@ -104,76 +184,184 @@ public final class RequestDispatcher implements AutoCloseable {
         });
     }
 
-    private synchronized void release(Task<?> task) { tasks.remove(task); }
+    // Called only under the dispatcher lock. Notifications are published after releasing it.
+    private Throwable activate(Task<?> task, List<Runnable> signals) {
+        if (task.waiting) { unqueue(task); }
+        task.reserved = true;
+        active++;
+        task.bucket.active++;
+        try {
+            schedule(task, task.context.remainingTime().toNanos());
+            workers.execute(task::run);
+            return null;
+        } catch (RuntimeException | Error failure) {
+            finish(task, null, failure instanceof RejectedExecutionException
+                    ? new DispatchRejectedException(failure) : failure, false, signals);
+            release(task);
+            return failure;
+        }
+    }
 
-    /** Runtime deadline expiry, distinct from a TimeoutException thrown by application code. */
+    private void schedule(Task<?> task, long delay) {
+        if (task.timer != null) { task.timer.cancel(false); }
+        long generation = ++task.timerGeneration;
+        task.timer = deadlines.schedule(() -> timeout(task, generation), delay, TimeUnit.NANOSECONDS);
+    }
+
+    private void timeout(Task<?> task, long generation) {
+        var signals = new ArrayList<Runnable>();
+        synchronized (this) {
+            if (task.finished || generation != task.timerGeneration) { return; }
+            Throwable failure = task.waiting && !task.context.isExpired()
+                    ? new QueueTimeoutException() : new DeadlineExceededException();
+            finish(task, null, failure, true, signals);
+        }
+        publish(signals);
+    }
+
+    private <T> void complete(Task<T> task, T value, Throwable failure, boolean interrupt) {
+        var signals = new ArrayList<Runnable>();
+        synchronized (this) { finish(task, value, failure, interrupt, signals); }
+        publish(signals);
+    }
+
+    private <T> void finish(Task<T> task, T value, Throwable failure, boolean interrupt, List<Runnable> signals) {
+        if (task.finished) { return; }
+        task.finished = true;
+        if (task.timer != null) { task.timer.cancel(false); }
+        if (failure instanceof QueueTimeoutException) { queueTimeouts++; }
+        if (task.waiting) {
+            unqueue(task);
+            tasks.remove(task);
+            prune(task.bucket);
+        }
+        if (interrupt && task.runner != null) { task.runner.interrupt(); }
+        signals.add(() -> {
+            if (failure == null) { task.result.complete(value); }
+            else { task.result.completeExceptionally(failure); }
+        });
+    }
+
+    private void unqueue(Task<?> task) {
+        queue.remove(task);
+        task.bucket.queued--;
+        task.waiting = false;
+    }
+
+    private void release(Task<?> task) {
+        if (!task.reserved) { return; }
+        task.reserved = false;
+        active--;
+        task.bucket.active--;
+        tasks.remove(task);
+        prune(task.bucket);
+    }
+
+    private void prune(Bucket bucket) {
+        if (bucket.active == 0 && bucket.queued == 0) { buckets.remove(bucket.key, bucket); }
+    }
+
+    private void drain(List<Runnable> signals) {
+        if (closed) { return; }
+        // Oldest eligible request wins; a blocked endpoint does not hold up unrelated work.
+        for (var task : List.copyOf(queue)) {
+            if (active >= policy.maxActive()) { break; }
+            if (task.context.isExpired()) {
+                finish(task, null, new DeadlineExceededException(), false, signals);
+            } else if (clock.getAsLong() - task.queuedAt >= task.queueBudget) {
+                finish(task, null, new QueueTimeoutException(), false, signals);
+            } else if (task.bucket.active < task.bucket.policy.maxActive()) {
+                activate(task, signals);
+            }
+        }
+    }
+
+    private static void publish(List<Runnable> signals) { signals.forEach(Runnable::run); }
+
+    private static final class Bucket {
+        private final Object key;
+        private final AdmissionPolicy policy;
+        private int active;
+        private int queued;
+        private Bucket(Object key, AdmissionPolicy policy) { this.key = key; this.policy = policy; }
+    }
+
+    /** Runtime deadline expiry, distinct from application-thrown timeout exceptions. */
     public static final class DeadlineExceededException extends TimeoutException {
         private static final long serialVersionUID = 1L;
         private DeadlineExceededException() { super("Request deadline exceeded"); }
     }
 
+    /** Executor or scheduler rejected framework-owned submission. */
+    public static final class DispatchRejectedException extends RejectedExecutionException {
+        private static final long serialVersionUID = 1L;
+        private DispatchRejectedException(Throwable cause) { super("Request submission rejected", cause); }
+    }
+
+    /** Bounded queue wait expired before execution started. */
+    public static final class QueueTimeoutException extends TimeoutException {
+        private static final long serialVersionUID = 1L;
+        private QueueTimeoutException() { super("Request queue wait exceeded"); }
+    }
+
     /**
-     * A request's outcome and cancellation handle. Completion does not imply its code has exited.
+     * A single request outcome and cancellation handle. Cancellation does not imply active code exited.
      * @param <T> result type
      */
     public final class Task<T> {
         private final ExecutionContext context;
         private final Callable<T> action;
+        private final Bucket bucket;
         private final CompletableFuture<T> result = new CompletableFuture<>();
         private ScheduledFuture<?> timer;
+        private long timerGeneration;
+        private long queuedAt;
+        private long queueBudget;
         private Thread runner;
+        private boolean waiting;
+        private boolean reserved;
         private boolean finished;
 
-        private Task(ExecutionContext context, Callable<T> action) {
+        private Task(ExecutionContext context, Callable<T> action, Bucket bucket) {
             this.context = context;
             this.action = action;
+            this.bucket = bucket;
         }
 
         /**
          * Observes the single request outcome.
-         * @return read-only observation of the request outcome
+         * @return read-only completion stage
          */
         public CompletionStage<T> result() { return result.minimalCompletionStage(); }
 
-        /** Cancels the outcome and interrupts execution, retaining capacity until the worker exits. */
-        public void cancel() { finish(null, new CancellationException("Request cancelled"), true); }
-
-        private void expire() { finish(null, new DeadlineExceededException(), true); }
-
-        private synchronized void timer(ScheduledFuture<?> value) {
-            timer = value;
-            if (finished) { value.cancel(false); }
-        }
-
-        private void finish(T value, Throwable failure, boolean interrupt) {
-            synchronized (this) {
-                if (finished) { return; }
-                finished = true;
-                if (timer != null) { timer.cancel(false); }
-                if (interrupt && runner != null) { runner.interrupt(); }
-            }
-            // No runtime lock is held while a completion callback runs.
-            if (failure == null) { result.complete(value); }
-            else { result.completeExceptionally(failure); }
-        }
+        /** Cancels queued work immediately; running work retains capacity until it exits. */
+        public void cancel() { complete(this, null, new CancellationException("Request cancelled"), true); }
 
         private void run() {
             try {
-                synchronized (this) {
+                synchronized (RequestDispatcher.this) {
                     if (finished) { return; }
                     runner = Thread.currentThread();
                 }
-                if (context.isExpired()) { expire(); return; }
+                if (context.isExpired()) {
+                    complete(this, null, new DeadlineExceededException(), true);
+                    return;
+                }
                 var value = action.call();
-                if (context.isExpired()) { expire(); }
-                else { finish(value, null, false); }
+                if (context.isExpired()) { complete(this, null, new DeadlineExceededException(), true); }
+                else { complete(this, value, null, false); }
             } catch (Throwable failure) {
-                if (context.isExpired()) { expire(); }
-                else { finish(null, failure, false); }
+                if (context.isExpired()) { complete(this, null, new DeadlineExceededException(), true); }
+                else { complete(this, null, failure, false); }
                 if (failure instanceof Error error) { throw error; }
             } finally {
-                synchronized (this) { runner = null; }
-                release(this);
+                var signals = new ArrayList<Runnable>();
+                synchronized (RequestDispatcher.this) {
+                    runner = null;
+                    release(this);
+                    drain(signals);
+                }
+                publish(signals);
             }
         }
     }

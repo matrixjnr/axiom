@@ -52,7 +52,7 @@ will accompany release engineering. The `io.axiom` namespace is provisional unti
 ownership is validated. No performance claims have been established.
 
 See the [programming model](docs/programming-model.md),
-[routing rules](docs/routing.md), [HTTP behavior and limits](docs/http.md), [execution and deadlines](docs/execution.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
+[routing rules](docs/routing.md), [HTTP behavior and limits](docs/http.md), [execution and deadlines](docs/execution.md), [admission](docs/admission.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
 [security](SECURITY.md). Licensed under Apache-2.0.
 
 ## Support Axiom

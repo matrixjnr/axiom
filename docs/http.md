@@ -44,10 +44,12 @@ Expect requests return 417; older HTTP versions return 505. Malformed requests
 return 400 when no earlier response is outstanding; otherwise the connection
 closes to avoid sending an error ahead of an earlier pipelined response.
 
-## Fixed resource limits
+## Resource limits
 
 Each listener owns one acceptor thread, two I/O threads, a deadline scheduler and
-a dispatcher that admits at most 36 virtual-thread tasks with no waiting queue.
+a dispatcher that defaults to 36 active virtual-thread tasks with no waiting queue.
+Aggregate and route limits are configurable through `app.admissionPolicy(...)`;
+see [admission and bounded queues](admission.md).
 User handlers never execute on I/O threads. Full execution capacity produces 503
 and closes that connection. Connections are
 limited to 128; additional connections close immediately. A connection holds at
@@ -65,4 +67,4 @@ The default execution deadline is ten seconds, configurable before startup throu
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
 Other limits remain fixed. TLS, HTTP/2, JSON codecs, request body/header/query APIs,
-configurable admission, observability and graceful draining remain future work.
+observability integrations and graceful draining remain future work.
