@@ -112,14 +112,17 @@ Decoding is strict:
 | Unknown property | `unknown_field` (field: path of the enclosing object, if any) |
 | Duplicate key | `duplicate_field` |
 | Content after the value | `trailing_content` |
-| Wrong type, string for a number, float for an integer, null or missing primitive | `type_mismatch` (field: property path) |
+| Wrong type, string for a number, float for an integer, null or missing primitive, a number too large for a `double` or `float` field (for example `1e400`, which would otherwise become infinity) | `type_mismatch` (field: property path) |
 | Record constructor rejects the values | `invalid_value` (field: property path) |
 | Syntax error, comments, single quotes | `malformed_json` |
 | Nesting deeper than 64, strings over 1 Mi characters, names over 1024, numbers over 256 digits, documents over 64 Mi characters | `limit_exceeded` |
 | Invalid UTF-8 | `invalid_encoding` |
 | `null` | `null_body` |
 
-Records are supported. Missing reference-type components become `null`; validate
+Records are supported. Numbers decoded into `Object`, `List` or `Map` targets
+become `BigDecimal` (decimals) or `Integer`/`Long`/`BigInteger`, never an infinite
+double. `NaN` and `Infinity` literals are not JSON and fail as `malformed_json`.
+Missing reference-type components become `null`; validate
 them in the record or the handler. Field paths use declared property names and
 indexes (`items[0].quantity`) and stop at the first map, because map keys are
 client input. Parser messages, input fragments and unknown property names are never

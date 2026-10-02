@@ -112,4 +112,27 @@ class JacksonBodyCodecTest {
             assertThat(failure.violations().toString()).doesNotContain("POISON", "jackson", "Exception");
         });
     }
+
+    record Measurement(double value, Double boxed, float ratio, Float boxedRatio) { }
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "{\"value\":1e400,\"boxed\":1,\"ratio\":1,\"boxedRatio\":1}   | value",
+            "{\"value\":-1e400,\"boxed\":1,\"ratio\":1,\"boxedRatio\":1}  | value",
+            "{\"value\":1,\"boxed\":1e400,\"ratio\":1,\"boxedRatio\":1}   | boxed",
+            "{\"value\":1,\"boxed\":1,\"ratio\":1e39,\"boxedRatio\":1}    | ratio",
+            "{\"value\":1,\"boxed\":1,\"ratio\":1,\"boxedRatio\":-1e39}   | boxedRatio"
+    })
+    void rejectsNumbersThatOverflowToInfinity(String json, String field) {
+        assertDecodeFailure(utf8(json), Measurement.class, "type_mismatch", field);
+    }
+
+    @Test void keepsFiniteFloatingPointAndExactUntypedNumbers() {
+        var measurement = codec.decode(utf8("{\"value\":1.5e300,\"boxed\":null,\"ratio\":0.25,\"boxedRatio\":3}"),
+                Measurement.class);
+        assertThat(measurement).isEqualTo(new Measurement(1.5e300, null, 0.25f, 3f));
+        assertThat(codec.decode(utf8("[1e400]"), List.class).getFirst())
+                .isEqualTo(new java.math.BigDecimal("1e400"));
+        assertDecodeFailure(utf8("{\"value\":NaN}"), Measurement.class, "malformed_json", null);
+    }
 }

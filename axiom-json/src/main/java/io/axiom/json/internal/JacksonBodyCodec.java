@@ -1,11 +1,15 @@
 package io.axiom.json.internal;
 
 import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.exc.StreamConstraintsException;
+import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.deser.std.NumberDeserializers;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,7 +75,47 @@ public final class JacksonBodyCodec implements BodyCodec {
                 .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
                 .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
                 .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+                // Untyped numbers keep their exact value instead of overflowing a double.
+                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .addModule(finiteFloatingPoint())
                 .build();
+    }
+
+    /**
+     * Rejects numbers that only fit a double or float as an infinity (for example {@code 1e400});
+     * the failure is a mismatch on that property, reported as {@code type_mismatch}.
+     */
+    private static SimpleModule finiteFloatingPoint() {
+        var module = new SimpleModule("axiom-finite-floating-point");
+        module.addDeserializer(Double.class, new FiniteDouble(Double.class, null));
+        module.addDeserializer(Double.TYPE, new FiniteDouble(Double.TYPE, 0.0));
+        module.addDeserializer(Float.class, new FiniteFloat(Float.class, null));
+        module.addDeserializer(Float.TYPE, new FiniteFloat(Float.TYPE, 0.0f));
+        return module;
+    }
+
+    private static final class FiniteDouble extends NumberDeserializers.DoubleDeserializer {
+        private static final long serialVersionUID = 1L;
+        FiniteDouble(Class<Double> type, Double empty) { super(type, empty); }
+        @Override public Double deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            var value = super.deserialize(parser, context);
+            if (value != null && !Double.isFinite(value)) {
+                throw context.weirdNumberException(value, handledType(), "out of range");
+            }
+            return value;
+        }
+    }
+
+    private static final class FiniteFloat extends NumberDeserializers.FloatDeserializer {
+        private static final long serialVersionUID = 1L;
+        FiniteFloat(Class<Float> type, Float empty) { super(type, empty); }
+        @Override public Float deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            var value = super.deserialize(parser, context);
+            if (value != null && !Float.isFinite(value)) {
+                throw context.weirdNumberException(value, handledType(), "out of range");
+            }
+            return value;
+        }
     }
 
     @Override public Set<String> mediaTypes() { return Set.of("application/json"); }
