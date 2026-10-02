@@ -31,10 +31,12 @@ streaming API. Larger bodies receive **413** and the handler is never invoked:
 - **In memory**: `app.handle(...)` and `TestClient` check the body length and answer
   the same 413 problem response.
 
-`Transfer-Encoding` must be exactly `chunked`. Another coding before `chunked`
-(for example `gzip, chunked`) receives **501**; a coding list that does not end in
-`chunked`, both Content-Length and Transfer-Encoding, or Transfer-Encoding on an
-HTTP/1.0 request receives **400**. Content-Length must be a single value of 1 to 18
+`Transfer-Encoding` must be a single field line whose value is exactly `chunked`.
+Another coding before `chunked` on that line (for example `gzip, chunked`) receives
+**501**; more than one Transfer-Encoding line (whatever the values), `chunked` listed
+twice, a coding list that does not end in `chunked`, both Content-Length and
+Transfer-Encoding, or Transfer-Encoding on an HTTP/1.0 request receives **400**. All of
+these close the connection, and nothing sent after the request is read as a request. Content-Length must be a single value of 1 to 18
 digits (surrounding whitespace is allowed, as for any field); signs, empty values,
 lists and other characters receive **400**. A request with neither Content-Length
 nor Transfer-Encoding has an empty body (RFC 9112 section 6.3), whatever its method;

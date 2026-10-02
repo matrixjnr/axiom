@@ -109,6 +109,43 @@ class HttpPipelineErrorTest {
         } finally { channel.finishAndReleaseAll(); }
     }
 
+    @ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Transfer-Encoding: chunked\r\nTransfer-Encoding: gzip",
+            "Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked",
+            "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked",
+            "Transfer-Encoding: chunked, chunked",
+            "Transfer-Encoding: chunked\r\nTransfer-Encoding: identity"})
+    void ambiguousTransferEncodingIsRejectedAndNothingAfterItRuns(String fields) throws Exception {
+        var channel = wireChannel();
+        try {
+            // The body framing is ambiguous, so the "body" bytes must never be read as a request.
+            channel.writeInbound(ascii("POST /after HTTP/1.1\r\nHost: a\r\n" + fields + "\r\n\r\n"
+                    + "3\r\nabc\r\n0\r\n\r\n" + AFTER));
+            var replies = repliesUntilClosed(channel);
+            assertThat(replies).extracting(Reply::status).containsExactly(400);
+            assertThat(replies.getFirst().headers()).containsEntry("connection", "close");
+            assertThat(after).isFalse();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Transfer-Encoding: chunked\r\nTransfer-Encoding: gzip",
+            "Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked",
+            "Transfer-Encoding: chunked, chunked"})
+    void ambiguousTransferEncodingBehindARunningRequestIsAnsweredAfterIt(String fields) throws Exception {
+        var channel = wireChannel();
+        try {
+            channel.writeInbound(ascii(SLOW + "POST /after HTTP/1.1\r\nHost: a\r\n" + fields + "\r\n\r\n"
+                    + "3\r\nabc\r\n0\r\n\r\n" + AFTER));
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            release.countDown();
+            assertThat(repliesUntilClosed(channel)).extracting(Reply::status).containsExactly(200, 400);
+            assertThat(after).isFalse();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
     @Test void requestBeyondThePipelineBoundIsAnswered503AfterTheEarlierOnes() throws Exception {
         var channel = wireChannel();
         try {

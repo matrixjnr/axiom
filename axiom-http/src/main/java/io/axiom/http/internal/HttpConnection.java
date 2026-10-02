@@ -201,8 +201,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             if (chunked && headers.contains(HttpHeaderNames.CONTENT_LENGTH)) { fail(ctx, 400); return false; }
             // Transfer codings do not exist in HTTP/1.0 (RFC 9112 6.1), so the framing is ambiguous.
             if (chunked && http10) { fail(ctx, 400); return false; }
-            if (chunked && !headers.get(HttpHeaderNames.TRANSFER_ENCODING).trim()
-                    .equalsIgnoreCase(HttpHeaderValues.CHUNKED.toString())) {
+            var codings = headers.getAll(HttpHeaderNames.TRANSFER_ENCODING);
+            // Repeated field lines are rejected outright rather than combined, so no intermediary
+            // can read the framing differently (the decoder already rejects lists that do not end in
+            // chunked or repeat it). A single list with another coding before chunked is 501.
+            if (codings.size() > 1) { fail(ctx, 400); return false; }
+            if (chunked && !codings.getFirst().trim().equalsIgnoreCase(HttpHeaderValues.CHUNKED.toString())) {
                 fail(ctx, 501); return false;
             }
             var declared = headers.getAll(HttpHeaderNames.CONTENT_LENGTH);
