@@ -50,6 +50,47 @@ class HttpBodyTest {
         assertThat(calls).hasValue(0);
     }
 
+    @Test void clientStillSendingAnOversizedBodyReadsThe413AndIsNotReset() throws Exception {
+        try (var fixture = echo(16)) {
+            fixture.app.start();
+            // A long linger keeps the test independent of how fast a loaded machine moves the upload.
+            var server = NettyServer.bind(fixture.app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                    NettyServer.SHUTDOWN_GRACE, Duration.ofSeconds(60));
+            fixture.servers.add(server);
+            var wire = new Wire(server);
+            // Below the discard cap, so the server never needs to cut the upload short.
+            int length = 8 * 1024 * 1024;
+            var piece = new byte[16 * 1024];
+            // The head and the start of the body arrive together, so body bytes are unread when the 413 is sent.
+            var head = ("POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: " + length + "\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII);
+            wire.socket.getOutputStream().write(java.util.Arrays.copyOf(head, head.length + piece.length));
+            // Keeps sending the declared body without waiting, as many clients do.
+            var failure = new java.util.concurrent.atomic.AtomicReference<IOException>();
+            var sender = Thread.ofVirtual().start(() -> {
+                try {
+                    for (int sent = piece.length; sent < length; sent += piece.length) {
+                        wire.socket.getOutputStream().write(piece);
+                    }
+                    wire.socket.shutdownOutput();
+                } catch (IOException reset) { failure.set(reset); }
+            });
+            try {
+                var reply = wire.read(false);
+                assertThat(reply.status()).isEqualTo(413);
+                assertThat(reply.headers()).containsEntry("connection", "close");
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+                sender.join();
+                // The server kept reading and discarding the body instead of resetting the connection.
+                assertThat(failure.get()).isNull();
+            } finally {
+                wire.close();
+                sender.join();
+                server.close();
+            }
+        }
+    }
+
     @Test void deliversChunkedBodiesUnderTheLimit() throws Exception {
         try (var fixture = echo(16); var wire = new Wire(fixture.listen())) {
             wire.write("POST /echo HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nContent-Type: text/plain\r\n\r\n"
@@ -153,12 +194,15 @@ class HttpBodyTest {
         int limit = 256 * 1024;
         try (var fixture = new Fixture()) {
             fixture.app.maxRequestBody(4 * 1024 * 1024);
+            // Each one-byte chunk is a tracked buffer under paranoid leak detection, so this takes
+            // seconds even unloaded; the default ten-second deadline made it fail with 408 under load.
+            fixture.app.requestTimeout(Duration.ofMinutes(2));
             fixture.app.post("/digest", ctx -> {
                 var digest = java.security.MessageDigest.getInstance("SHA-256");
                 return ctx.request().body().length() + ":" + java.util.HexFormat.of().formatHex(digest.digest(ctx.request().body().bytes()));
             });
             try (var wire = new Wire(fixture.listen())) {
-                wire.socket.setSoTimeout(30_000);
+                wire.socket.setSoTimeout(120_000);
                 var chunked = new StringBuilder(limit * 6 + 128)
                         .append("POST /digest HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n");
                 var expected = new byte[limit];
@@ -169,7 +213,9 @@ class HttpBodyTest {
                 long started = System.nanoTime();
                 wire.write(chunked.append("0\r\n\r\n").toString());
                 var reply = wire.read(false);
-                assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(20));
+                // Only a coarse guard against pathological per-chunk cost; copy counts are checked
+                // deterministically by HttpConnectionTest.tinyChunksAreCopiedOnArrivalWithoutNettyAccumulation.
+                assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(100));
                 assertThat(reply.text()).isEqualTo(limit + ":" + java.util.HexFormat.of().formatHex(
                         java.security.MessageDigest.getInstance("SHA-256").digest(expected)));
 

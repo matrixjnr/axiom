@@ -85,7 +85,7 @@ for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 
 | Status | When | Where |
 | --- | --- | --- |
-| 400 | Malformed request line or headers, invalid Host, rejected path, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked` | Listener |
+| 400 | Malformed request line or headers, invalid Host, rejected path, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked`, more than one Transfer-Encoding line | Listener |
 | 400 | Empty body or codec failure in `ctx.body` | Runtime |
 | 404 | No route matches the path | Runtime |
 | 405 | Route exists for other methods; `Allow` lists them | Runtime |
@@ -98,7 +98,7 @@ for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 | 431 | Header section larger than 8 KiB | Listener |
 | 500 | Unexpected handler exception, unencodable or oversized response | Listener (in memory: exception propagates) |
 | 501 | CONNECT, Upgrade, or a transfer coding other than `chunked` before it | Listener |
-| 503 | No execution capacity, queue wait expired, listener draining | Listener and `TestClient` |
+| 503 | No execution capacity, queue wait expired, listener draining, more than eight outstanding pipelined requests or their bodies over the connection's share | Listener and `TestClient` |
 | 504 | Request deadline expired while queued or running | Listener and `TestClient` |
 | 505 | HTTP version other than 1.0 or 1.1 | Listener |
 
@@ -107,7 +107,9 @@ Errors the listener generates itself (the rows marked Listener, including its 50
 may be unusable. Runtime errors (404, 405, 406, 415, 400 from decoding) and
 `AxiomException`s thrown by handlers, whatever their status, keep a keep-alive
 connection open. A listener never sends an error ahead of an
-earlier pipelined response; it closes the connection instead.
+earlier pipelined response: earlier requests complete and are answered in order, then
+the error is sent and the connection closes (see
+[errors on pipelined requests](http.md#errors-on-pipelined-requests)).
 
 ## Success responses
 

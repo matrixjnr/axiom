@@ -31,10 +31,12 @@ streaming API. Larger bodies receive **413** and the handler is never invoked:
 - **In memory**: `app.handle(...)` and `TestClient` check the body length and answer
   the same 413 problem response.
 
-`Transfer-Encoding` must be exactly `chunked`. Another coding before `chunked`
-(for example `gzip, chunked`) receives **501**; a coding list that does not end in
-`chunked`, both Content-Length and Transfer-Encoding, or Transfer-Encoding on an
-HTTP/1.0 request receives **400**. Content-Length must be a single value of 1 to 18
+`Transfer-Encoding` must be a single field line whose value is exactly `chunked`.
+Another coding before `chunked` on that line (for example `gzip, chunked`) receives
+**501**; more than one Transfer-Encoding line (whatever the values), `chunked` listed
+twice, a coding list that does not end in `chunked`, both Content-Length and
+Transfer-Encoding, or Transfer-Encoding on an HTTP/1.0 request receives **400**. All of
+these close the connection, and nothing sent after the request is read as a request. Content-Length must be a single value of 1 to 18
 digits (surrounding whitespace is allowed, as for any field); signs, empty values,
 lists and other characters receive **400**. A request with neither Content-Length
 nor Transfer-Encoding has an empty body (RFC 9112 section 6.3), whatever its method;
@@ -51,25 +53,31 @@ connection are:
 | Bodies of pipelined requests waiting behind it, plus the body being received | `2 × L` together |
 
 so at most `3 × L` per connection (3 MiB at the default). A declared Content-Length
-is reserved in full against the `2 × L` share when its head arrives; a chunked
-body is counted as it arrives, and while its array doubles the old and new arrays
-briefly coexist. Exceeding the `2 × L` share closes the connection. Handler-side
-memory is additional: `ctx.body(...)` passes the codec a read-only view of the
-running body, so the JSON codec reads it without a copy, but a codec that implements
-only the array method receives one copy (up to `L`); the decoded value lives until
-the handler drops it, and `Body.bytes()` copies on every call.
+is reserved in full against the `2 × L` share when its head arrives, although its
+array only grows as bytes arrive; a chunked body is counted as it arrives. While an
+array doubles, the old and new arrays briefly coexist. A request that would exceed the
+`2 × L` share is not executed: it is answered 503 after the earlier responses and the
+connection closes. Handler-side memory is additional: `ctx.body(...)` passes the
+codec a read-only view of the running body, so the JSON codec reads it without a
+copy, but a codec that implements only the array method receives one copy (up to
+`L`); the decoded value lives until the handler drops it, and `Body.bytes()` copies
+on every call.
 
 These bounds are **per connection, not global**. A listener accepts up to 128
 connections, so its worst case is about `128 × 3 × L` (384 MiB at the default),
 and each additional listener has its own 128 connections. There is no
 process-wide body budget; size `L`, the request timeout and the heap together.
 
-## Known limitations
+## Rejected bodies
 
-An error on a pipelined request closes the connection and cancels the earlier
-in-flight handler, and error responses close the socket without lingering, so a
-client still sending a body may see a reset instead of the 413; see
-[HTTP known limitations](http.md#known-limitations).
+A 413 (or another error) on a pipelined request is sent after the responses to
+earlier requests, which still run; see
+[errors on pipelined requests](http.md#errors-on-pipelined-requests). After the 413
+the listener discards the rest of the body (for up to two seconds and 16 MiB) instead
+of resetting the connection, so a client still sending reads the response; the same
+applies after any response that ends a connection; see
+[wire behavior](http.md#wire-behavior). Clients that send `Expect: 100-continue` and
+wait avoid sending the body at all.
 
 ## Timing
 
@@ -86,9 +94,12 @@ of a body.
 A request with `Expect: 100-continue` whose headers are otherwise acceptable and
 whose declared length is within the limit receives an interim `100 Continue`, then
 the body is read. If earlier pipelined responses are still outstanding, the interim
-response waits for them. A request whose declared length exceeds the limit gets
-413 instead and the connection closes; any other expectation gets **417**. HTTP/1.0
-requests never receive `100 Continue`.
+response waits until they have been written, so it never overtakes them; if the
+client sends the body without waiting, no interim response is sent. A request whose
+declared length exceeds the limit gets 413 instead and the connection closes; any
+other expectation gets **417**. Either rejection is sent without an interim response
+and, on a busy connection, after the earlier responses. HTTP/1.0 requests never
+receive `100 Continue`.
 
 ## Body ownership
 
@@ -97,9 +108,11 @@ requests never receive `100 Continue`.
 Bodies are safe to share with other threads and their `toString` never shows
 content. The listener copies each received network buffer into a private array as
 it arrives and releases the buffer at once, so no Netty buffer outlives its read.
-For a declared Content-Length the array has exactly that size and is allocated when
-the first body byte arrives; for a chunked body it starts at 8 KiB and doubles, capped
-at the limit, and is trimmed once at the end. The finished array is handed to the
+The array is allocated when the first body byte arrives, starts at 8 KiB (or the
+body size if that is smaller) and doubles as bytes arrive, so a client that declares a
+large Content-Length and then stalls holds only what it has sent. A declared body's
+array is capped at the declared length and ends exactly full; a chunked body's array
+is capped at the limit and trimmed once at the end. The finished array is handed to the
 `Body` without another copy. The body keeps the request's
 `Content-Type`; `mediaType()` and `charset()` parse it. Request headers are
 available through `ctx.header(name)` (one value per name; repeated fields are joined

@@ -48,48 +48,71 @@ class HttpConnectionTest {
         }
     }
 
-    @Test void pipelineOverflowClosesAndInterruptsActiveHandlerWithoutOutOfOrderResponse() throws Exception {
+    @Test void pipelineOverflowIsAnswered503AfterEarlierResponsesWithoutInterruptingTheHandler() throws Exception {
         var entered = new CountDownLatch(1);
-        var interrupted = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
         var executor = executor();
         try (var app = Axiom.create()) {
             app.get("/", ctx -> {
+                if (entered.getCount() == 0) { return "queued"; }
                 entered.countDown();
-                try { new CountDownLatch(1).await(); }
-                catch (InterruptedException expected) { interrupted.countDown(); Thread.currentThread().interrupt(); }
-                return "late";
+                try { release.await(); }
+                catch (InterruptedException cancelled) { interrupted.set(true); throw cancelled; }
+                return "first";
             });
             app.start();
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
                 request(channel);
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-                for (int i = 0; i < 8; i++) { request(channel); }
-                assertThat(channel.isActive()).isFalse();
-                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+                for (int i = 0; i < HttpConnection.MAX_PIPELINED; i++) { request(channel); }
+                assertThat(channel.isActive()).isTrue();
                 assertThat(channel.<Object>readOutbound()).isNull();
+                release.countDown();
+                for (int i = 0; i < HttpConnection.MAX_PIPELINED; i++) {
+                    FullHttpResponse response = awaitResponse(channel);
+                    try {
+                        assertThat(response.status().code()).isEqualTo(200);
+                        assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8))
+                                .isEqualTo(i == 0 ? "first" : "queued");
+                    } finally { response.release(); }
+                }
+                FullHttpResponse refused = awaitResponse(channel);
+                try {
+                    assertThat(refused.status().code()).isEqualTo(503);
+                    assertThat(refused.headers().get("Connection")).isEqualTo("close");
+                } finally { refused.release(); }
+                assertThat(channel.isActive()).isFalse();
+                assertThat(interrupted).isFalse();
             } finally { channel.finishAndReleaseAll(); }
         } finally {
+            release.countDown();
             executor.close();
             executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
-    @Test void malformedPipelineClosesInsteadOfOvertakingEarlierResponse() throws Exception {
+    @Test void malformedPipelinedRequestIsAnsweredAfterTheEarlierResponse() throws Exception {
         var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
         var executor = executor();
         try (var app = Axiom.create()) {
-            app.get("/", ctx -> { entered.countDown(); new CountDownLatch(1).await(); return "never"; });
+            app.get("/", ctx -> { entered.countDown(); release.await(); return "first"; });
             app.start();
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
                 request(channel);
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                // No Host header: rejected, but only after the earlier response.
                 channel.writeInbound(new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/"));
-                assertThat(channel.isActive()).isFalse();
+                assertThat(channel.isActive()).isTrue();
                 assertThat(channel.<Object>readOutbound()).isNull();
+                release.countDown();
+                assertResponses(channel, 200, 400);
             } finally { channel.finishAndReleaseAll(); }
         } finally {
+            release.countDown();
             executor.close();
             executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
@@ -227,12 +250,66 @@ class HttpConnectionTest {
         } finally { executor.close(); }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "GET / HTTP/1.1\r\nHost: a\r\n\r\nGET / HT",
+            "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabcGET / HT",
+            "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabcGET / HTTP/1.1\r\nHost: a\r\n",
+            "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\nG"})
+    void partialHeadInTheSameReadAsTheEndOfTheRequestBeforeItTimesOut(String bytes) throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.requestTimeout(Duration.ofMinutes(5));
+            app.get("/", ctx -> "ok");
+            app.post("/", ctx -> "ok");
+            app.start();
+            var channel = wireChannel(app, executor, Duration.ofSeconds(10));
+            try {
+                channel.writeInbound(ascii(bytes));
+                assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK");
+                channel.advanceTimeBy(9, TimeUnit.SECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                channel.advanceTimeBy(1, TimeUnit.SECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(outbound(channel)).startsWith("HTTP/1.1 408 Request Timeout");
+                assertThat(channel.isActive()).isFalse();
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void lineBreaksAfterABodyDoNotStartTheHeadTimeout() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.post("/", ctx -> "ok");
+            app.start();
+            var channel = wireChannel(app, executor, Duration.ofSeconds(10));
+            try {
+                // RFC 9112 section 2.2: empty lines before a request line are ignored.
+                channel.writeInbound(ascii("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabc\r\n"));
+                assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK");
+                channel.advanceTimeBy(1, TimeUnit.MINUTES);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                assertThat(channel.<Object>readOutbound()).isNull();
+                channel.writeInbound(ascii("\r\nPOST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n"));
+                assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK");
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     private static EmbeddedChannel wireChannel(io.axiom.application.Application app, RequestDispatcher executor,
             Duration headTimeout) {
         var channel = new EmbeddedChannel();
         channel.freezeTime();
-        channel.pipeline().addLast(new HttpConnection.RequestBytes(),
-                new io.netty.handler.codec.http.HttpServerCodec(),
+        channel.pipeline().addLast(new RequestDecoder(new io.netty.handler.codec.http.HttpDecoderConfig()),
+                new io.netty.handler.codec.http.HttpResponseEncoder(),
                 new HttpConnection(app, executor, headTimeout));
         return channel;
     }
@@ -476,6 +553,68 @@ class HttpConnectionTest {
         @Override public io.netty.buffer.CompositeByteBuf compositeDirectBuffer(int maxComponents) {
             allocations.incrementAndGet();
             return super.compositeDirectBuffer(maxComponents);
+        }
+    }
+
+    /** Heap bytes allocated by the calling thread, which runs every embedded channel task. */
+    private static long allocatedByThisThread() {
+        return ((com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean())
+                .getCurrentThreadAllocatedBytes();
+    }
+
+    @Test void stalledDeclaredBodyAllocatesOnlyWhatArrived() {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.maxRequestBody(1024 * 1024);
+            app.post("/", ctx -> { throw new AssertionError("incomplete body must not execute"); });
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            try {
+                var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/");
+                request.headers().set("Host", "localhost").set("Content-Length", String.valueOf(1024 * 1024));
+                var first = new io.netty.handler.codec.http.DefaultHttpContent(io.netty.buffer.Unpooled.wrappedBuffer(new byte[] {1}));
+                // Warm up the code path so class loading does not count.
+                channel.writeInbound(request);
+                long before = allocatedByThisThread();
+                channel.writeInbound(first);
+                long allocated = allocatedByThisThread() - before;
+                // A one-byte arrival must not reserve the declared megabyte in heap.
+                assertThat(allocated).isLessThan(64 * 1024);
+                assertThat(channel.isActive()).isTrue();
+            } finally { channel.finishAndReleaseAll(); }
+        } finally { executor.close(); }
+    }
+
+    @Test void declaredBodyArrivingInUnevenPiecesIsDeliveredIntact() throws Exception {
+        var executor = executor();
+        int length = 300_001;
+        var expected = new byte[length];
+        new java.util.Random(11).nextBytes(expected);
+        try (var app = Axiom.create()) {
+            app.maxRequestBody(length);
+            app.post("/", ctx -> java.util.Arrays.equals(ctx.request().body().bytes(), expected) ? "intact" : "corrupt");
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            try {
+                var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/");
+                request.headers().set("Host", "localhost").set("Content-Length", String.valueOf(length));
+                channel.writeInbound(request);
+                int offset = 0;
+                for (int size = 1; offset < length; size = size * 3 + 1) {
+                    int piece = Math.min(size, length - offset);
+                    var content = io.netty.buffer.Unpooled.copiedBuffer(expected, offset, piece);
+                    offset += piece;
+                    channel.writeInbound(offset == length ? new io.netty.handler.codec.http.DefaultLastHttpContent(content)
+                            : new io.netty.handler.codec.http.DefaultHttpContent(content));
+                }
+                FullHttpResponse response = awaitResponse(channel);
+                try {
+                    assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("intact");
+                } finally { response.release(); }
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
