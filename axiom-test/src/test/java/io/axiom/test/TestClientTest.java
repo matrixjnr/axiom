@@ -22,4 +22,40 @@ class TestClientTest {
         }
         assertThat(app.state()).isEqualTo(Application.State.CLOSED);
     }
+
+    @Test
+    void rejectsWithServiceUnavailableWhenAdmissionCapacityIsHeld() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var app = Axiom.create();
+        app.admissionPolicy(io.axiom.execution.AdmissionPolicy.reject(1));
+        app.get("/slow", ctx -> { entered.countDown(); release.await(); return "done"; });
+        try (var client = TestClient.start(app)) {
+            var first = client.submit(Request.get("/slow"));
+            assertThat(entered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(client.get("/slow").status()).isEqualTo(503);
+            release.countDown();
+            assertThat(first.get(5, java.util.concurrent.TimeUnit.SECONDS).body()).isEqualTo("done");
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    void answersGatewayTimeoutWhenTheDeadlineExpires() throws Exception {
+        var app = Axiom.create();
+        app.requestTimeout(java.time.Duration.ofMillis(50));
+        app.get("/hang", ctx -> { new java.util.concurrent.CountDownLatch(1).await(); return "never"; });
+        try (var client = TestClient.start(app)) {
+            assertThat(client.get("/hang").status()).isEqualTo(504);
+        }
+    }
+
+    @Test
+    void failsWhereTheTransportWouldAnswer500() throws Exception {
+        var app = Axiom.create();
+        app.get("/object", ctx -> java.util.List.of("not serializable"));
+        try (var client = TestClient.start(app)) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.get("/object"))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("cannot be serialized");
+        }
+    }
 }

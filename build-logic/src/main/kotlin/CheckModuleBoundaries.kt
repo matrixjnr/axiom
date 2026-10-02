@@ -19,13 +19,19 @@ abstract class CheckModuleBoundaries : DefaultTask() {
             "axiom-test" to setOf("axiom-core", "axiom-server", "axiom-http", "axiom-json")
         )
         val module = moduleName.get()
+        val moduleAllowed = allowed[module]
+            ?: throw GradleException(
+                "Module '$module' is not listed in CheckModuleBoundaries; add its allowed project dependencies")
         for (dependency in dependencies.get()) {
             val parts = dependency.split('|')
             val target = parts[1]
-            if (parts[0] == "project" && target !in allowed.getValue(module)) {
+            if (parts[0] == "project" && target !in allowed.keys) {
+                throw GradleException("Dependency on unlisted module: $module -> $target")
+            }
+            if (parts[0] == "project" && target !in moduleAllowed) {
                 throw GradleException("Forbidden module dependency: $module -> $target")
             }
-            if (parts[0] == "external" && module == "axiom-core") {
+            if (parts[0] == "external" && module == "axiom-core" && !parts[2].startsWith("test")) {
                 throw GradleException("Core must remain free of external production dependencies: $target")
             }
             if (parts[2] == "api" && parts[0] == "external") {

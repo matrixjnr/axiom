@@ -3,10 +3,10 @@ package io.axiom.server.internal.execution;
 import io.axiom.execution.AdmissionPolicy;
 import io.axiom.execution.AdmissionSnapshot;
 import io.axiom.execution.ExecutionContext;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,10 +33,12 @@ public final class RequestDispatcher implements AutoCloseable {
     private final ScheduledExecutorService deadlines;
     private final LongSupplier clock;
     private final Set<Task<?>> tasks = new HashSet<>();
-    private final ArrayDeque<Task<?>> queue = new ArrayDeque<>();
+    private final Set<Bucket> queuedBuckets = new LinkedHashSet<>();
     private final Map<Object, Bucket> buckets = new HashMap<>();
     private final CompletableFuture<Void> stopped = new CompletableFuture<>();
     private int active;
+    private int queued;
+    private long sequence;
     private long accepted;
     private long rejected;
     private long queueTimeouts;
@@ -111,11 +113,12 @@ public final class RequestDispatcher implements AutoCloseable {
             if (closed) { rejected++; throw new RejectedExecutionException("Dispatcher closed"); }
             var bucket = buckets.get(key);
             if (bucket != null && !bucket.policy.equals(endpointPolicy)) {
+                // A caller bug, not overload: reported as IllegalArgumentException and not counted as rejected.
                 throw new IllegalArgumentException("Endpoint policy changed after admission");
             }
             if (bucket == null) { bucket = new Bucket(key, endpointPolicy); }
             boolean room = active < policy.maxActive() && bucket.active < endpointPolicy.maxActive();
-            if (!room && (queue.size() >= policy.maxQueued() || bucket.queued >= endpointPolicy.maxQueued())) {
+            if (!room && (queued >= policy.maxQueued() || bucket.waiting.size() >= endpointPolicy.maxQueued())) {
                 rejected++;
                 throw new RejectedExecutionException("Request capacity unavailable");
             }
@@ -128,8 +131,10 @@ public final class RequestDispatcher implements AutoCloseable {
                 task.waiting = true;
                 task.queuedAt = clock.getAsLong();
                 task.queueBudget = Math.min(policy.queueTimeout().toNanos(), endpointPolicy.queueTimeout().toNanos());
-                queue.addLast(task);
-                bucket.queued++;
+                task.sequence = sequence++;
+                bucket.enqueue(task);
+                queued++;
+                queuedBuckets.add(bucket);
                 try { schedule(task, Math.min(task.queueBudget, context.remainingTime().toNanos())); }
                 catch (RuntimeException | Error failure) {
                     finish(task, null, failure instanceof RejectedExecutionException
@@ -138,6 +143,7 @@ public final class RequestDispatcher implements AutoCloseable {
                 }
             }
             if (submissionFailure == null) { accepted++; }
+            else if (submissionFailure instanceof RejectedExecutionException) { rejected++; }
         }
         publish(signals);
         if (submissionFailure instanceof RuntimeException failure) { throw failure; }
@@ -146,11 +152,14 @@ public final class RequestDispatcher implements AutoCloseable {
     }
 
     /**
-     * Observes a consistent admission snapshot without callbacks.
+     * Observes a consistent admission snapshot without callbacks. {@code rejected} counts closed or
+     * full-capacity rejections and executor or scheduler rejections during submission; a conflicting
+     * endpoint policy is a caller error ({@link IllegalArgumentException}) and is not counted.
+     * Promotion failures after acceptance fail that request but are not counted as rejections.
      * @return counters scoped to this dispatcher
      */
     public synchronized AdmissionSnapshot snapshot() {
-        return new AdmissionSnapshot(active, queue.size(), accepted, rejected, queueTimeouts);
+        return new AdmissionSnapshot(active, queued, accepted, rejected, queueTimeouts);
     }
 
     /**
@@ -243,8 +252,10 @@ public final class RequestDispatcher implements AutoCloseable {
     }
 
     private void unqueue(Task<?> task) {
-        queue.remove(task);
-        task.bucket.queued--;
+        var bucket = task.bucket;
+        bucket.waiting.remove(task);
+        queued--;
+        if (bucket.waiting.isEmpty()) { queuedBuckets.remove(bucket); }
         task.waiting = false;
     }
 
@@ -258,20 +269,27 @@ public final class RequestDispatcher implements AutoCloseable {
     }
 
     private void prune(Bucket bucket) {
-        if (bucket.active == 0 && bucket.queued == 0) { buckets.remove(bucket.key, bucket); }
+        if (bucket.active == 0 && bucket.waiting.isEmpty()) { buckets.remove(bucket.key, bucket); }
     }
 
     private void drain(List<Runnable> signals) {
-        if (closed) { return; }
-        // Oldest eligible request wins; a blocked endpoint does not hold up unrelated work.
-        for (var task : List.copyOf(queue)) {
-            if (active >= policy.maxActive()) { break; }
-            if (task.context.isExpired()) {
-                finish(task, null, new DeadlineExceededException(), false, signals);
-            } else if (clock.getAsLong() - task.queuedAt >= task.queueBudget) {
-                finish(task, null, new QueueTimeoutException(), false, signals);
-            } else if (task.bucket.active < task.bucket.policy.maxActive()) {
-                activate(task, signals);
+        // Oldest eligible request wins. Only the head of each endpoint FIFO is a candidate, and
+        // endpoints at their own limit are skipped, so cost is bounded by queued endpoints
+        // rather than queued requests, and a blocked endpoint does not hold up unrelated work.
+        while (!closed && active < policy.maxActive()) {
+            Task<?> head = null;
+            for (var bucket : queuedBuckets) {
+                if (bucket.active >= bucket.policy.maxActive()) { continue; }
+                var candidate = bucket.waiting.iterator().next();
+                if (head == null || candidate.sequence < head.sequence) { head = candidate; }
+            }
+            if (head == null) { return; }
+            if (head.context.isExpired()) {
+                finish(head, null, new DeadlineExceededException(), false, signals);
+            } else if (clock.getAsLong() - head.queuedAt >= head.queueBudget) {
+                finish(head, null, new QueueTimeoutException(), false, signals);
+            } else {
+                activate(head, signals);
             }
         }
     }
@@ -282,8 +300,9 @@ public final class RequestDispatcher implements AutoCloseable {
         private final Object key;
         private final AdmissionPolicy policy;
         private int active;
-        private int queued;
+        private final Set<Task<?>> waiting = new LinkedHashSet<>();
         private Bucket(Object key, AdmissionPolicy policy) { this.key = key; this.policy = policy; }
+        private void enqueue(Task<?> task) { waiting.add(task); }
     }
 
     /** Runtime deadline expiry, distinct from application-thrown timeout exceptions. */
@@ -315,6 +334,7 @@ public final class RequestDispatcher implements AutoCloseable {
         private final CompletableFuture<T> result = new CompletableFuture<>();
         private ScheduledFuture<?> timer;
         private long timerGeneration;
+        private long sequence;
         private long queuedAt;
         private long queueBudget;
         private Thread runner;

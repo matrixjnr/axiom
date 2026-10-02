@@ -13,8 +13,9 @@ val architectureTest = tasks.register<CheckModuleBoundaries>("architectureTest")
     description = "Checks production module dependency boundaries."
     moduleName.set(project.name)
     dependencies.set(provider {
-        listOf("api", "implementation", "compileOnly", "compileOnlyApi", "runtimeOnly").flatMap { name ->
-            configurations.getByName(name).dependencies.map { dependency ->
+        listOf("api", "implementation", "compileOnly", "compileOnlyApi", "runtimeOnly",
+            "annotationProcessor", "testImplementation", "testCompileOnly", "testRuntimeOnly", "testAnnotationProcessor").flatMap { name ->
+            (configurations.findByName(name)?.dependencies ?: emptyList<Dependency>()).map { dependency ->
                 if (dependency is ProjectDependency) {
                     "project|${dependency.path.substringAfterLast(':')}|$name"
                 } else {

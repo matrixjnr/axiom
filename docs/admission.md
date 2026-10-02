@@ -19,7 +19,7 @@ app.listen(8080);
 ```
 
 `AdmissionPolicy(maxActive, maxQueued, queueTimeout)` validates a positive active
-limit, a nonnegative waiting limit, and a positive wait of at most one day when
+limit, a waiting limit from zero to 100,000, and a positive wait of at most one day when
 queuing is enabled. `AdmissionPolicy.reject(36)` is the default: 36 active tasks
 and no dispatcher queue. Use `reject(n)` for immediate overload rejection.
 
@@ -32,7 +32,8 @@ smaller of the aggregate and route queue timeouts.
 
 **Limits apply independently to each listener**, including listeners sharing one
 application. They are not a budget shared across listeners, processes or hosts.
-Direct `handle` calls and `TestClient` remain synchronous and bypass admission.
+Direct `handle` calls remain synchronous and bypass admission. `TestClient` applies
+the policies through its own dispatcher.
 `app.resolve(request)` exposes the compiled route identity for adapters; it
 requires a running application and returns empty for 404/405. Those requests
 share a default bucket and still consume aggregate capacity when dispatched.
@@ -85,7 +86,7 @@ remote disconnect limitations.
 | `active` | Reserved or running tasks, including cancelled code still executing |
 | `queued` | Requests waiting for execution capacity |
 | `accepted` | Total successful submissions, including requests initially queued |
-| `rejected` | Total immediate rejections due to capacity or dispatcher closure |
+| `rejected` | Total immediate rejections due to capacity, dispatcher closure, or executor/scheduler refusal at submission. A conflicting endpoint policy is a caller error and is not counted |
 | `queueTimeouts` | Queue-wait expirations, excluding execution deadline expiry |
 
 Counters are scoped to one listener and remain readable after shutdown. Snapshots

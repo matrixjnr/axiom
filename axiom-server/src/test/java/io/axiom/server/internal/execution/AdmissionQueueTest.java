@@ -178,6 +178,53 @@ class AdmissionQueueTest {
         }
     }
 
+    @Test void globalQueueTimeoutIsTheTighterBudgetWhenItIsSmaller() {
+        var global = new AdmissionPolicy(1, 2, Duration.ofSeconds(1));
+        try (var f = new Fixture(global)) {
+            f.dispatcher.submit("a", global, context(), () -> null);
+            f.dispatcher.submit("b", policy(1, 2), context(), () -> null);
+            assertThat(f.timers.delays.get(1)).isEqualTo(Duration.ofSeconds(1).toNanos());
+        }
+    }
+
+    @Test void executorRejectionAtSubmissionIsCountedAsRejected() {
+        try (var f = new Fixture(policy(1, 1))) {
+            f.workers.failures = 1;
+            assertThatThrownBy(() -> f.dispatcher.submit(context(), () -> null))
+                    .isInstanceOf(RejectedExecutionException.class);
+            assertThat(f.dispatcher.snapshot().rejected()).isEqualTo(1);
+            assertThat(f.dispatcher.snapshot().accepted()).isZero();
+            assertThat(f.dispatcher.snapshot().active()).isZero();
+        }
+    }
+
+    @Test void conflictingEndpointPolicyIsACallerErrorNotARejection() {
+        try (var f = new Fixture(policy(2, 2))) {
+            f.dispatcher.submit("a", policy(1, 1), context(), () -> null);
+            assertThatThrownBy(() -> f.dispatcher.submit("a", policy(2, 1), context(), () -> null))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(f.dispatcher.snapshot().rejected()).isZero();
+        }
+    }
+
+    @Test void promotionDoesNotScanBlockedWorkAndKeepsArrivalOrderAcrossRoutes() {
+        try (var f = new Fixture(policy(2, 100))) {
+            var route = policy(1, 50);
+            var order = new ArrayList<String>();
+            f.dispatcher.submit("a", route, context(), () -> order.add("a0"));
+            f.dispatcher.submit("b", route, context(), () -> order.add("b0"));
+            for (int i = 1; i <= 20; i++) {
+                int n = i;
+                f.dispatcher.submit("a", route, context(), () -> order.add("a" + n));
+            }
+            f.dispatcher.submit("b", route, context(), () -> order.add("b1"));
+            f.workers.run(1); // b0 done: a is blocked, so b1 jumps the older a-work.
+            assertThat(f.dispatcher.snapshot().queued()).isEqualTo(20);
+            f.workers.run(1);
+            assertThat(order).containsExactly("b0", "b1");
+        }
+    }
+
     @Test void callbacksCanReadAdmissionFromAnotherThreadWithoutDeadlock() {
         try (var f = new Fixture(policy(1, 1))) {
             f.dispatcher.submit(context(), () -> null);

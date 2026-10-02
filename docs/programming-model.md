@@ -100,6 +100,12 @@ try (var client = TestClient.start(app)) {
 }
 ```
 
-`TestClient` uses the actual dispatcher and owns the supplied application's lifecycle:
-creating it starts the application, and closing it closes the application. It runs
-synchronously and propagates handler exceptions. It does not simulate wire encoding.
+`TestClient` owns the supplied application's lifecycle: creating it starts the
+application, and closing it closes the application. Requests go through a private
+dispatcher using the application's admission policies and request timeout, so
+overload (503) and deadline expiry (504) are testable; `submit(request)` returns a
+future for holding capacity from tests. Handler exceptions propagate rather than
+becoming 500 responses. Response bodies the transport cannot send (anything other
+than `String` or `byte[]`, or over the size limits) fail with `IllegalStateException`
+where a listener would answer 500. Sockets, HTTP parsing and connection behavior
+are not simulated.
