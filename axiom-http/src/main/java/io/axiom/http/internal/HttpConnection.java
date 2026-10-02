@@ -13,6 +13,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.DateFormatter;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpHeaderNames;
@@ -29,6 +30,7 @@ import java.time.Duration;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.ArrayDeque;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -246,6 +248,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 HttpUtil.setContentLength(message, response.body().length);
             }
             message.headers().set("X-Request-ID", exchange.execution().requestId());
+            message.headers().set(HttpHeaderNames.DATE, httpDate());
             boolean keepAlive = exchange.keepAlive() && !response.close() && !draining;
             HttpUtil.setKeepAlive(message, keepAlive);
             // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
@@ -261,6 +264,17 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             message.release();
             abort(ctx);
         }
+    }
+
+    /** IMF-fixdate for the current second, formatted at most once per second across connections. */
+    static String httpDate() {
+        long second = System.currentTimeMillis() / 1000;
+        var cached = date;
+        if (cached.second() != second) {
+            cached = new CachedDate(second, DateFormatter.format(new Date(second * 1000)));
+            date = cached;
+        }
+        return cached.value();
     }
 
     private static WireResponse error(int status) {
@@ -293,6 +307,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) { abort(ctx); }
 
+    private record CachedDate(long second, String value) { }
+    private static volatile CachedDate date = new CachedDate(Long.MIN_VALUE, "");
     private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) { }
     private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close) { }
 }

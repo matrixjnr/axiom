@@ -39,7 +39,8 @@ strings, byte arrays, and empty bodies. Unsupported body objects and handler
 exceptions produce a generic 500 and close the connection; exception details are
 not sent to clients. The in-memory API still propagates exceptions.
 
-The transport controls Content-Length, Transfer-Encoding and connection headers.
+The transport controls Content-Length, Transfer-Encoding, connection headers and
+`Date`, which every response carries as an IMF-fixdate with one-second precision.
 Hop-by-hop headers, including names nominated by Connection, are removed. HEAD
 requires an explicit route and sends no body or Content-Length because the current
 application API does not retain the representation length. Statuses 204 and 304

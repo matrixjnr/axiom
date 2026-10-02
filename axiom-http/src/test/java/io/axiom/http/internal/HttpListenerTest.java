@@ -121,6 +121,29 @@ class HttpListenerTest {
         }
     }
 
+    @Test void everyResponseCarriesAnHttpDate() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/", ctx -> "ok");
+            var server = fixture.listen();
+            var before = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+            try (var wire = new Wire(server)) {
+                assertDate(wire.get("/"), before);
+                assertDate(wire.get("/missing"), before);
+            }
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.1\r\n\r\n");
+                assertDate(wire.read(false), before);
+            }
+        }
+    }
+
+    private static void assertDate(Reply reply, java.time.Instant notBefore) {
+        var date = java.time.ZonedDateTime.parse(reply.headers().get("Date"),
+                java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+        assertThat(date).isBetween(notBefore, java.time.Instant.now());
+        assertThat(reply.headers().get("Date")).endsWith(" GMT");
+    }
+
     @Test void servesHttp10WithHttp11ResponsesAndClosesUnlessKeptAlive() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.get("/", ctx -> "old");
