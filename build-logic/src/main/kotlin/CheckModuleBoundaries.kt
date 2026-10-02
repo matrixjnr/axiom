@@ -17,7 +17,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
             "axiom-http" to setOf("axiom-core", "axiom-server"),
             "axiom-json" to setOf("axiom-core"),
             // The test client stays codec-neutral: tests send raw bodies and never need a serializer.
-            "axiom-test" to setOf("axiom-core", "axiom-server", "axiom-http")
+            "axiom-test" to setOf("axiom-core", "axiom-server", "axiom-http"),
+            "axiom-starter" to setOf("axiom-core", "axiom-server", "axiom-http", "axiom-json")
         )
         // Third-party production dependencies are confined to the module that adapts them.
         val externalGroups = mapOf(

@@ -1,6 +1,7 @@
 plugins {
     `java-library`
     id("axiom.java-test")
+    id("axiom.publish")
 }
 
 java {
