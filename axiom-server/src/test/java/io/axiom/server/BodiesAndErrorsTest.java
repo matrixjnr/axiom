@@ -131,13 +131,13 @@ class BodiesAndErrorsTest {
             app.get("/text", ctx -> "plain");
             app.start();
             for (var accept : new String[] {"*/*", "application/*", "application/json", "text/html, application/json;q=0.5",
-                    "APPLICATION/JSON"}) {
+                    "APPLICATION/JSON", "*/*;q=0.1, application/json", "garbage", "application/json;q=2"}) {
                 var accepted = app.handle(Request.get("/note").withHeaders(Map.of("Accept", accept)));
                 assertThat(accepted.status()).as(accept).isEqualTo(200);
             }
             assertThat(app.handle(Request.get("/note")).status()).isEqualTo(200);
-            for (var accept : new String[] {"text/html", "application/json;q=0", "application/xml, text/*", "garbage",
-                    "application/json;q=2"}) {
+            for (var accept : new String[] {"text/html", "application/json;q=0", "application/xml, text/*",
+                    "application/json;q=0, */*"}) {
                 assertProblem(app.handle(Request.get("/note").withHeaders(Map.of("Accept", accept))), 406, "not_acceptable");
             }
             // Responses without a codec are not negotiated.

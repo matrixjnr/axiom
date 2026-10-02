@@ -130,12 +130,27 @@ reported. `java.time` types and other modules are not registered yet.
 `ctx.json(value)` returns a response with `Content-Type: application/json`. The
 value is encoded when the response is prepared, after the handler returns, on the
 request's virtual thread. A `String` or `byte[]` passed to `json` is sent verbatim
-as already-encoded JSON. Any response whose Content-Type has an installed codec is
-checked against the request's `Accept` header first: when Accept is present and no
-range admits the media type (including ranges with `q=0` and malformed entries) the
-response is **406**; an absent Accept, `*/*` or `application/*` admits JSON. The
-handler has already run when a 406 is decided. Text and byte responses are not
-negotiated. A value the codec cannot encode, or `json` without a JSON codec
+as already-encoded JSON. Text and byte responses are not negotiated.
+
+### Accept negotiation (406)
+
+A response whose Content-Type has an installed codec is checked against the
+request's `Accept` header as RFC 9110 section 12.5.1 describes. Media ranges are
+parsed with their parameters (quoted strings included) and weights. For the
+response's media type, the **most specific** matching range decides:
+`application/json` with parameters, then `application/json`, then `application/*`,
+then `*/*`; among equally specific ranges the first listed wins. A weight of
+`q=0` excludes the type, so `application/json;q=0, */*` is **406** while
+`*/*;q=0.1, application/json` is accepted. JSON is always UTF-8, so a range with
+parameters matches only when every parameter is `charset=utf-8`. An absent, blank
+or malformed Accept header (for example an invalid weight such as `q=2`, or an
+unterminated quoted string) is treated as if it were not sent, never as an error.
+
+**The 406 is decided after the handler has run**, because the representation is
+only known once the handler returns. Side effects of the handler (a created
+record, a sent message) have already happened when the client receives 406.
+Handlers with side effects must not rely on negotiation to prevent them; check
+`ctx.header("Accept")` up front if that matters. A value the codec cannot encode, or `json` without a JSON codec
 installed, is a server error (500 over HTTP).
 
 ## Codecs

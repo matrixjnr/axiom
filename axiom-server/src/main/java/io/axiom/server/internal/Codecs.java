@@ -11,6 +11,8 @@ import java.util.regex.Pattern;
 final class Codecs {
     private static final Pattern MEDIA_TYPE =
             Pattern.compile("[!#$%&'*+.^_`|~0-9a-z-]+/[!#$%&'*+.^_`|~0-9a-z-]+");
+    private static final String TOKEN_CHARACTERS =
+            "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     private static final Pattern QUALITY = Pattern.compile("0(\\.[0-9]{0,3})?|1(\\.0{0,3})?");
     private final Map<String, BodyCodec> byMediaType;
 
@@ -55,31 +57,117 @@ final class Codecs {
     }
 
     /**
-     * Reports whether an Accept header admits a media type. Absent means anything is acceptable;
-     * ranges with {@code q=0} and malformed entries admit nothing.
+     * Reports whether an Accept header admits a media type, following RFC 9110 section 12.5.1.
+     * The most specific matching range decides (type/subtype with parameters, then
+     * type/subtype, then type/*, then *&#47;*); among equally specific ranges the first listed
+     * wins. Its weight must be above zero. The candidate representations carry no media type
+     * parameters other than an implied UTF-8 charset, so a range with parameters matches only
+     * when every parameter is {@code charset=utf-8}. An absent, blank or malformed header admits
+     * everything, as if it were not sent.
      */
     static boolean acceptable(String accept, String mediaType) {
-        if (accept == null) { return true; }
+        if (accept == null || accept.isBlank()) { return true; }
+        var ranges = parseAccept(accept);
+        if (ranges == null) { return true; }
         int slash = mediaType.indexOf('/');
-        for (var range : accept.split(",")) {
-            var parts = range.split(";");
-            var type = parts[0].trim().toLowerCase(Locale.ROOT);
-            if (!rejected(parts) && (type.equals("*/*") || type.equals(mediaType)
-                    || (type.endsWith("/*") && type.regionMatches(0, mediaType, 0, slash + 1) && type.length() == slash + 2))) {
-                return true;
-            }
+        var type = mediaType.substring(0, slash);
+        var subtype = mediaType.substring(slash + 1);
+        AcceptRange best = null;
+        for (var range : ranges) {
+            int specificity = range.specificity(type, subtype);
+            if (specificity >= 0 && (best == null || specificity > best.specificity(type, subtype))) { best = range; }
         }
-        return false;
+        return best != null && best.weight() > 0;
     }
 
-    private static boolean rejected(String[] parameters) {
-        for (int i = 1; i < parameters.length; i++) {
-            var parameter = parameters[i].trim();
-            if (parameter.length() >= 2 && parameter.substring(0, 2).equalsIgnoreCase("q=")) {
-                var weight = parameter.substring(2).trim();
-                return !QUALITY.matcher(weight).matches() || weight.replace("0", "").replace(".", "").isEmpty();
-            }
+    /** One parsed media range; {@code utf8Only} is false when it has parameters other than charset=utf-8. */
+    record AcceptRange(String type, String subtype, boolean hasParameters, boolean utf8Only, int weight) {
+        /** Returns -1 for no match, otherwise 0 (*&#47;*) to 3 (type/subtype with parameters). */
+        int specificity(String candidateType, String candidateSubtype) {
+            if (type.equals("*")) { return hasParameters ? -1 : 0; }
+            if (!type.equals(candidateType)) { return -1; }
+            if (subtype.equals("*")) { return hasParameters ? -1 : 1; }
+            if (!subtype.equals(candidateSubtype)) { return -1; }
+            if (!hasParameters) { return 2; }
+            return utf8Only ? 3 : -1;
         }
-        return false;
+    }
+
+    /** Parses an Accept field value; returns null when any element is malformed. Weights are in thousandths. */
+    static java.util.List<AcceptRange> parseAccept(String value) {
+        var ranges = new java.util.ArrayList<AcceptRange>();
+        int i = 0;
+        int length = value.length();
+        while (i <= length) {
+            i = skipWhitespace(value, i);
+            if (i < length && value.charAt(i) == ',') { i++; continue; } // Empty list elements are allowed.
+            if (i >= length) { break; }
+            int typeEnd = token(value, i);
+            if (typeEnd == i || typeEnd >= length || value.charAt(typeEnd) != '/') { return null; }
+            int subtypeEnd = token(value, typeEnd + 1);
+            if (subtypeEnd == typeEnd + 1) { return null; }
+            var type = value.substring(i, typeEnd).toLowerCase(Locale.ROOT);
+            var subtype = value.substring(typeEnd + 1, subtypeEnd).toLowerCase(Locale.ROOT);
+            if (type.equals("*") && !subtype.equals("*")) { return null; }
+            i = subtypeEnd;
+            boolean hasParameters = false;
+            boolean utf8Only = true;
+            int weight = 1000;
+            boolean weighted = false;
+            while (true) {
+                i = skipWhitespace(value, i);
+                if (i >= length || value.charAt(i) == ',') { break; }
+                if (value.charAt(i) != ';') { return null; }
+                i = skipWhitespace(value, i + 1);
+                int nameEnd = token(value, i);
+                if (nameEnd == i || nameEnd >= length || value.charAt(nameEnd) != '=') { return null; }
+                var name = value.substring(i, nameEnd).toLowerCase(Locale.ROOT);
+                i = nameEnd + 1;
+                String parameter;
+                if (i < length && value.charAt(i) == '"') {
+                    var quoted = new StringBuilder();
+                    i++;
+                    while (true) {
+                        if (i >= length) { return null; }
+                        char c = value.charAt(i++);
+                        if (c == '"') { break; }
+                        if (c == '\\') {
+                            if (i >= length) { return null; }
+                            c = value.charAt(i++);
+                        }
+                        if (c < 0x20 && c != '\t' || c == 0x7f) { return null; }
+                        quoted.append(c);
+                    }
+                    parameter = quoted.toString();
+                } else {
+                    int end = token(value, i);
+                    if (end == i) { return null; }
+                    parameter = value.substring(i, end);
+                    i = end;
+                }
+                if (weighted) { continue; } // Accept extensions after the weight are ignored.
+                if (name.equals("q")) {
+                    if (!QUALITY.matcher(parameter).matches()) { return null; }
+                    weight = (int) Math.round(Double.parseDouble(parameter) * 1000);
+                    weighted = true;
+                } else {
+                    hasParameters = true;
+                    utf8Only &= name.equals("charset") && parameter.equalsIgnoreCase("utf-8");
+                }
+            }
+            ranges.add(new AcceptRange(type, subtype, hasParameters, utf8Only, weight));
+            if (ranges.size() > 64) { return null; } // Bounds work per request; treated as absent.
+        }
+        return ranges;
+    }
+
+    private static int skipWhitespace(String value, int i) {
+        while (i < value.length() && (value.charAt(i) == ' ' || value.charAt(i) == '\t')) { i++; }
+        return i;
+    }
+
+    private static int token(String value, int i) {
+        while (i < value.length() && TOKEN_CHARACTERS.indexOf(value.charAt(i)) >= 0) { i++; }
+        return i;
     }
 }
