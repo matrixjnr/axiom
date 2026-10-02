@@ -65,10 +65,10 @@ or cancelled. A handler that ignores interruption continues occupying capacity;
 its late value is discarded. A timeout cannot roll back application side effects
 or stop tasks the application launches independently.
 
-Closing a connection cancels its active execution. Reads remain paused while a
-response is outstanding, so a remote disconnect may only be observed when reads
-resume or the inactivity timer closes the channel. Closing a listener stops
-admission, cancels all its executions and timers, and closes connections.
+Closing a connection cancels its active execution. Reads continue while a
+handler runs, so a remote disconnect cancels it promptly. Closing a listener stops
+admission and fails waiting requests with 503, lets active executions finish
+within a grace period, then cancels what remains and closes connections.
 `Server.termination()` completes after its executors and transport stop. Close is
 idempotent and nonblocking, including inside a handler; termination may wait
 indefinitely for code that refuses interruption.

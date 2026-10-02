@@ -275,6 +275,43 @@ class HttpListenerTest {
         }
     }
 
+    @Test void closeAnswersQueuedRequestsWithoutPromotingThem() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.admissionPolicy(new io.axiom.execution.AdmissionPolicy(1, 1, java.time.Duration.ofSeconds(30)));
+            fixture.app.get("/", ctx -> {
+                calls.incrementAndGet();
+                entered.countDown();
+                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                return "finished";
+            });
+            var server = fixture.listen();
+            try (var running = new Wire(server); var waiting = new Wire(server)) {
+                running.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                waiting.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (server.admission().queued() == 0) {
+                    assertThat(System.nanoTime()).isLessThan(deadline);
+                    Thread.onSpinWait();
+                }
+                server.close();
+                var rejected = waiting.read(false);
+                assertThat(rejected.status()).isEqualTo(503);
+                assertThat(rejected.headers()).containsEntry("connection", "close");
+                assertThat(waiting.socket.getInputStream().read()).isEqualTo(-1);
+                release.countDown();
+                var response = running.read(false);
+                assertThat(response.status()).isEqualTo(200);
+                assertThat(response.headers()).containsEntry("connection", "close");
+                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                assertThat(calls).hasValue(1);
+            } finally { release.countDown(); }
+        }
+    }
+
     @Test void closeInterruptsHandlersThatOutliveTheGracePeriod() throws Exception {
         var entered = new CountDownLatch(1);
         var interrupted = new CountDownLatch(1);

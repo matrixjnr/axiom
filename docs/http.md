@@ -14,9 +14,11 @@ Closing the application permanently rejects requests and closes all its listener
 Both close operations are idempotent and nonblocking, including from a handler.
 
 Listener shutdown is graceful. It stops accepting connections at once and closes
-idle keep-alive connections and connections still receiving a request. A
-connection with a running handler keeps it running; its response is sent with
-`Connection: close` and queued pipelined requests on it are dropped unanswered.
+idle keep-alive connections and connections still receiving a request. It also
+stops admission: requests waiting for execution capacity are answered 503 and
+their connections close without invoking the handler. A connection with a
+running handler keeps it running; its response is sent with `Connection: close`
+and queued pipelined requests on it are dropped unanswered.
 After a fixed five-second grace period, remaining connections close and their
 handlers are interrupted; then execution and I/O threads stop. Await
 `server.termination()` to join resource shutdown. Handlers must cooperate with

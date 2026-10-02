@@ -111,12 +111,15 @@ final class NettyServer implements Server {
     @Override public CompletionStage<Void> termination() { return stopped.minimalCompletionStage(); }
 
     /**
-     * Stops accepting, lets in-flight exchanges finish and closes their connections after the
-     * response; idle connections close at once. After the grace period, remaining connections
-     * are closed and their handlers interrupted. Then execution and event loops stop.
+     * Stops accepting and admitting; requests still waiting for capacity receive 503. Running
+     * exchanges finish and their connections close after the response; idle connections close at
+     * once. After the grace period, remaining connections are closed and their handlers
+     * interrupted. Then execution and event loops stop.
      */
     @Override public void close() {
         if (!closing.compareAndSet(false, true)) { return; }
+        // Requests waiting for admission are answered 503 rather than promoted during the drain.
+        handlers.stopAdmission();
         if (listener == null) { stop(); return; }
         listener.close().addListener(ignored -> {
             var drained = channels.newCloseFuture();
