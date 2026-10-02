@@ -42,6 +42,7 @@ JSON notes API on the same port.
 - `axiom-http`: HTTP/1.1 transport with Netty kept behind the public API
 - `axiom-json`: strict JSON codec built on Jackson, added on the runtime classpath
 - `axiom-test`: in-memory test client, sending raw request bodies
+- `axiom-starter`: published as `io.axiom:axiom`, the single dependency for applications
 - `axiom-bom`: aligned library versions
 - `examples/hello`: runnable HTTP server and network smoke example
 - `examples/rest-api`: small JSON API with validation and error responses, and its tests
@@ -52,12 +53,59 @@ Core uses JDK service loading to discover the runtime. Applications depending on
 classpath. Core has no dependency on server or external libraries; Netty and
 Jackson stay inside `axiom-http` and `axiom-json`.
 
-No artifacts are published yet. Maven publication and consumer compatibility tests
-will accompany release engineering. The `io.axiom` namespace is provisional until
-ownership is validated. No performance claims have been established.
+## Install (not yet published)
+
+No artifacts are published yet; the snippets below show the intended coordinates and
+will not resolve until a first release. The `io.axiom` namespace is provisional until
+ownership is validated. `io.axiom:axiom` is a starter that brings the core API at
+compile time and the HTTP server and JSON codec at run time. Publication and release
+steps are in [releasing](docs/releasing.md). No performance claims have been established.
+
+Gradle (Kotlin DSL):
+
+```kotlin
+dependencies {
+    implementation(platform("io.axiom:axiom-bom:VERSION"))
+    implementation("io.axiom:axiom")
+}
+```
+
+Gradle (Groovy DSL):
+
+```groovy
+dependencies {
+    implementation platform('io.axiom:axiom-bom:VERSION')
+    implementation 'io.axiom:axiom'
+}
+```
+
+Maven:
+
+```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>io.axiom</groupId>
+      <artifactId>axiom-bom</artifactId>
+      <version>VERSION</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+<dependencies>
+  <dependency>
+    <groupId>io.axiom</groupId>
+    <artifactId>axiom</artifactId>
+  </dependency>
+</dependencies>
+```
+
+Consumer builds against locally published artifacts are exercised by
+`./gradlew compatibilityTest`.
 
 See the [programming model](docs/programming-model.md),
-[routing rules](docs/routing.md), [request bodies and JSON](docs/bodies.md), [errors](docs/errors.md), [HTTP behavior and limits](docs/http.md), [execution and deadlines](docs/execution.md), [admission](docs/admission.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
+[routing rules](docs/routing.md), [request bodies and JSON](docs/bodies.md), [errors](docs/errors.md), [HTTP behavior and limits](docs/http.md), [execution and deadlines](docs/execution.md), [admission](docs/admission.md), [build decisions](docs/build.md), [releasing](docs/releasing.md), [contributing](CONTRIBUTING.md), and
 [security](SECURITY.md). Licensed under Apache-2.0.
 
 ## Support Axiom
