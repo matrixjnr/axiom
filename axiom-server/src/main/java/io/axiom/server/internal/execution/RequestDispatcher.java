@@ -338,31 +338,42 @@ public final class RequestDispatcher implements AutoCloseable {
         public void cancel() { complete(this, null, new CancellationException("Request cancelled"), true); }
 
         private void run() {
+            T value = null;
+            Throwable failure = null;
+            Error fatal = null;
             try {
                 synchronized (RequestDispatcher.this) {
                     if (finished) { return; }
                     runner = Thread.currentThread();
                 }
                 if (context.isExpired()) {
-                    complete(this, null, new DeadlineExceededException(), true);
-                    return;
+                    failure = new DeadlineExceededException();
+                } else {
+                    value = action.call();
+                    if (context.isExpired()) { value = null; failure = new DeadlineExceededException(); }
                 }
-                var value = action.call();
-                if (context.isExpired()) { complete(this, null, new DeadlineExceededException(), true); }
-                else { complete(this, value, null, false); }
-            } catch (Throwable failure) {
-                if (context.isExpired()) { complete(this, null, new DeadlineExceededException(), true); }
-                else { complete(this, null, failure, false); }
-                if (failure instanceof Error error) { throw error; }
+            } catch (Throwable thrown) {
+                failure = context.isExpired() ? new DeadlineExceededException() : thrown;
+                if (thrown instanceof Error error) { fatal = error; }
             } finally {
-                var signals = new ArrayList<Runnable>();
-                synchronized (RequestDispatcher.this) {
-                    runner = null;
-                    release(this);
-                    drain(signals);
-                }
-                publish(signals);
+                exit(value, failure);
             }
+            if (fatal != null) { throw fatal; }
+        }
+
+        /**
+         * Runner-thread exit: outcome, permit release and drain happen in one critical section,
+         * so a completion callback that submits the next request never sees this slot still held.
+         */
+        private void exit(T value, Throwable failure) {
+            var signals = new ArrayList<Runnable>();
+            synchronized (RequestDispatcher.this) {
+                finish(this, value, failure, false, signals);
+                runner = null;
+                release(this);
+                drain(signals);
+            }
+            publish(signals);
         }
     }
 }

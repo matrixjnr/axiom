@@ -47,6 +47,22 @@ class AdmissionQueueTest {
         }
     }
 
+    @Test void releasesCapacityBeforeCompletionCallbacksRun() {
+        try (var f = new Fixture(io.axiom.execution.AdmissionPolicy.reject(1))) {
+            var followUp = new java.util.concurrent.atomic.AtomicReference<Object>();
+            var first = f.dispatcher.submit(context(), () -> "first");
+            first.result().thenAccept(v -> {
+                try { followUp.set(f.dispatcher.submit(context(), () -> "second")); }
+                catch (RuntimeException rejected) { followUp.set(rejected); }
+            });
+            f.workers.run(0);
+            assertThat(followUp.get()).isInstanceOf(RequestDispatcher.Task.class);
+            f.workers.run(0);
+            assertThat(f.dispatcher.snapshot().rejected()).isZero();
+            assertThat(f.dispatcher.snapshot().active()).isZero();
+        }
+    }
+
     @Test void skipsBlockedRoutesWithoutViolatingTheirLimits() {
         try (var f = new Fixture(policy(2, 4))) {
             var route = policy(1, 2);
