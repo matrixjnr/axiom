@@ -5,5 +5,5 @@ dependencies {
     implementation(libs.netty.http)
     implementation(libs.netty.handler)
     api(project(":axiom-core"))
-    runtimeOnly(project(":axiom-server"))
+    implementation(project(":axiom-server"))
 }

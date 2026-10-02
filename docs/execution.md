@@ -1,0 +1,84 @@
+# Request execution and deadlines
+
+HTTP handlers and response preparation run on one Java 21 virtual thread per
+admitted request. Blocking a handler does not occupy a Netty I/O thread. The
+protocol-neutral dispatcher lives in `axiom-server`; `axiom-http` uses it as an
+implementation dependency. Core remains independent of both modules.
+
+## Request metadata
+
+```java
+var app = Axiom.create();
+app.requestTimeout(Duration.ofSeconds(3));
+app.get("/status", ctx -> {
+    var execution = ctx.execution();
+    return "Request " + execution.requestId()
+            + " has " + execution.remainingTime().toMillis() + " ms remaining";
+});
+app.listen(8080);
+```
+
+Every invocation has immutable `ExecutionContext` metadata: a generated UUID and
+a monotonic deadline. It can be shared with application tasks, while the mutable
+handler `Context` remains confined to the handler. No thread-local propagation is
+provided. Pass the metadata explicitly to work that needs the remaining budget.
+
+HTTP responses carry the same identity in `X-Request-ID`, including framework
+failures. Incoming IDs and application-supplied response IDs do not replace the
+framework identity. IDs are correlation values, not authentication credentials.
+Handler exception logs include the identity; no exception details enter the body.
+
+## Deadline boundary
+
+The default budget is ten seconds. Configure `app.requestTimeout(Duration)` before
+startup; positive budgets up to one day are supported and configuration freezes
+with the routes. All listeners share this configuration. Route overrides are not
+implemented yet.
+
+For HTTP, the budget starts when validated request headers are adapted, before
+waiting behind earlier pipelined requests. It covers dispatch, application code,
+and response preparation. An expired queued request is never invoked. A timer
+interrupts active execution and produces a single 504 Gateway Timeout when the
+connection is still writable. Timeout closes the connection and drops later
+pipelined requests. Results returned after cancellation or timeout are discarded.
+Application-thrown timeout exceptions remain application failures (500).
+
+Completion and timeout compete for one terminal outcome. Completion checks the
+monotonic deadline even if the timer thread is delayed. The budget ends when the
+prepared response wins completion; it does not bound subsequent socket writes.
+The existing 30-second network inactivity timeout also applies and can close a
+connection earlier than a longer configured execution budget. Header receipt,
+body upload and slow response delivery do not have absolute deadlines yet.
+
+## Capacity and cancellation
+
+Each listener admits at most 36 execution tasks before creating virtual threads.
+There is no dispatcher waiting queue. Excess requests receive 503 and close their
+connection. This preserves the previous total execution capacity while replacing
+four platform workers plus 32 waiting tasks with up to 36 active virtual threads.
+The existing connection and pipeline bounds still apply. Per-route limits,
+configurable capacity, queue policies and CPU execution classes are future work.
+
+Cancellation interrupts the owned virtual thread. **Capacity is released only
+when that thread exits the request action**, even if its outcome is already 504
+or cancelled. A handler that ignores interruption continues occupying capacity;
+its late value is discarded. A timeout cannot roll back application side effects
+or stop tasks the application launches independently.
+
+Closing a connection cancels its active execution. Reads remain paused while a
+response is outstanding, so a remote disconnect may only be observed when reads
+resume or the inactivity timer closes the channel. Closing a listener stops
+admission, cancels all its executions and timers, and closes connections.
+`Server.termination()` completes after its executors and transport stop. Close is
+idempotent and nonblocking, including inside a handler; termination may wait
+indefinitely for code that refuses interruption.
+
+## Synchronous execution
+
+`app.handle(request)` and `TestClient` still execute on the calling thread and
+propagate handler exceptions. Each direct invocation gets fresh metadata using
+the configured budget. The adapter overload `handle(request, execution)` accepts
+explicit metadata and rejects an already expired context with `TimeoutException`.
+These synchronous paths do not schedule cancellation or interrupt caller-owned
+threads. Their metadata lets application code check its remaining budget, but
+they do not simulate the HTTP dispatcher's timing or wire behavior.

@@ -46,9 +46,10 @@ closes to avoid sending an error ahead of an earlier pipelined response.
 
 ## Fixed resource limits
 
-Each listener owns one acceptor thread, two I/O threads and a bounded pool of four
-handler threads with 32 queued tasks. User handlers never execute on I/O threads.
-A full handler queue produces 503 and closes that connection. Connections are
+Each listener owns one acceptor thread, two I/O threads, a deadline scheduler and
+a dispatcher that admits at most 36 virtual-thread tasks with no waiting queue.
+User handlers never execute on I/O threads. Full execution capacity produces 503
+and closes that connection. Connections are
 limited to 128; additional connections close immediately. A connection holds at
 most eight outstanding requests. Pipeline overflow closes the connection.
 
@@ -59,6 +60,9 @@ headers to 8 KiB; larger responses produce 500. Application allocations before
 returning a response are outside these limits. Connections close after 30 seconds
 without network read/write activity, including during a stalled handler.
 
-Limits are fixed defaults for this initial transport. TLS, HTTP/2, JSON codecs,
-request body/header/query APIs, configurable admission, virtual-thread execution,
-request deadlines, observability and graceful draining remain future work.
+The default execution deadline is ten seconds, configurable before startup through
+`app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.
+See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
+
+Other limits remain fixed. TLS, HTTP/2, JSON codecs, request body/header/query APIs,
+configurable admission, observability and graceful draining remain future work.

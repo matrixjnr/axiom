@@ -1,12 +1,14 @@
 package io.axiom.application;
 
 import io.axiom.context.Handler;
+import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.lifecycle.Server;
 import io.axiom.routing.Route;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -133,6 +135,20 @@ public interface Application extends AutoCloseable {
     Application start();
 
     /**
+     * Sets the request execution budget before startup. The default is ten seconds.
+     * @param timeout positive duration, at most one day
+     * @return this application
+     * @throws IllegalStateException after configuration has ended
+     */
+    Application requestTimeout(Duration timeout);
+
+    /**
+     * Returns the configured execution budget.
+     * @return request timeout
+     */
+    Duration requestTimeout();
+
+    /**
      * Starts this application and binds a loopback HTTP listener.
      * @param port port, or zero to allocate an available port
      * @return application-owned listener
@@ -165,6 +181,17 @@ public interface Application extends AutoCloseable {
      * @throws IllegalStateException unless running
      */
     Response handle(Request request) throws Exception;
+
+    /**
+     * Executes on the calling thread with explicit request identity and deadline metadata.
+     * Adapters own scheduling and cancellation. An expired context fails before invocation;
+     * synchronous calls do not interrupt the caller or enforce a timeout after invocation.
+     * @param request request to execute
+     * @param execution execution metadata owned by the caller
+     * @return mapped response
+     * @throws Exception if the handler fails or the context is already expired
+     */
+    Response handle(Request request, ExecutionContext execution) throws Exception;
 
     /**
      * Returns the current lifecycle state.
