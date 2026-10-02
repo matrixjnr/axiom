@@ -21,7 +21,15 @@ abstract class CheckModuleBoundaries : DefaultTask() {
             "axiom-starter" to setOf("axiom-core", "axiom-server", "axiom-http", "axiom-json"),
             // Black-box tests of the real codec over TestClient and a listener. Test-only: it has
             // no production code, and no module may depend on it.
-            "integration-tests" to setOf("axiom-core", "axiom-http", "axiom-json", "axiom-test")
+            "integration-tests" to setOf("axiom-core", "axiom-http", "axiom-json", "axiom-test"),
+            "axiom-validation" to setOf("axiom-core"),
+            "axiom-validation-jakarta" to setOf("axiom-core", "axiom-validation")
+        )
+        // Project dependencies a module may use in test configurations only, for end-to-end tests
+        // through the test client. Unlike integration-tests, these modules also have production code.
+        val testScopeOnly = mapOf(
+            "axiom-validation" to setOf("axiom-test"),
+            "axiom-validation-jakarta" to setOf("axiom-test")
         )
         val testOnlyModules = setOf("integration-tests")
         // Third-party production dependencies are confined to the module that adapts them.
@@ -45,7 +53,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
             if (parts[0] == "project" && target in testOnlyModules) {
                 throw GradleException("No module may depend on test-only module: $module -> $target")
             }
-            if (parts[0] == "project" && target !in moduleAllowed) {
+            if (parts[0] == "project" && target !in moduleAllowed
+                && !(parts[2].startsWith("test") && target in testScopeOnly[module].orEmpty())) {
                 throw GradleException("Forbidden module dependency: $module -> $target")
             }
             if (parts[0] == "external" && module == "axiom-core" && !parts[2].startsWith("test")) {
