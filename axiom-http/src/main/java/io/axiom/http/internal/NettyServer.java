@@ -16,7 +16,7 @@ import io.netty.channel.nio.NioIoHandler;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpDecoderConfig;
-import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpResponseEncoder;
 import io.netty.handler.timeout.IdleStateHandler;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -101,8 +101,8 @@ final class NettyServer implements Server {
                 .setMaxHeaderSize(8192).setMaxChunkSize(8192)
                 .setValidateHeaders(true).setAllowDuplicateContentLengths(false)
                 .setStrictLineParsing(true).setUseRfc9112TransferEncoding(true);
-        channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new HttpConnection.RequestBytes(),
-                new HttpServerCodec(config), new HttpConnection(application, handlers));
+        channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new RequestDecoder(config),
+                new HttpResponseEncoder(), new HttpConnection(application, handlers));
     }
 
     @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }

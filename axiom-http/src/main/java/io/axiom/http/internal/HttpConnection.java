@@ -13,7 +13,6 @@ import io.axiom.server.internal.Problems;
 import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.DateFormatter;
@@ -98,20 +97,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     /**
-     * Placed before the HTTP codec; signals raw request bytes so a request's read deadline starts at
-     * its first byte rather than when its headers are complete.
+     * Starts the head deadline once a request head has started arriving, including when its first
+     * bytes came in the same read as the end of the previous request.
      */
-    static final class RequestBytes extends ChannelInboundHandlerAdapter {
-        static final Object EVENT = new Object();
-        @Override public void channelRead(ChannelHandlerContext ctx, Object message) {
-            if (message instanceof ByteBuf buffer && buffer.isReadable()) { ctx.fireUserEventTriggered(EVENT); }
-            ctx.fireChannelRead(message);
-        }
-    }
-
-    private void requestBytes(ChannelHandlerContext ctx) {
+    private void inputDecoded(ChannelHandlerContext ctx) {
         // Body bytes are bounded by the request deadline, not the head timeout.
         if (closing || headTimer != null || receiving != null) { return; }
+        var decoder = ctx.pipeline().get(RequestDecoder.class);
+        if (decoder == null || !decoder.headStarted()) { return; }
         headTimer = ctx.executor().schedule(() -> {
             headTimer = null;
             if (!closing) { fail(ctx, 408); }
@@ -457,7 +450,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
         // A running handler is bounded by its own deadline, so inactivity is ignored only while it
         // executes; idle connections and stalled response writes still close.
-        if (event == RequestBytes.EVENT) { requestBytes(ctx); }
+        if (event == RequestDecoder.DECODED) { inputDecoded(ctx); }
         else if (event instanceof IdleStateEvent) { if (active == null) { abort(ctx); } }
         else { super.userEventTriggered(ctx, event); }
     }

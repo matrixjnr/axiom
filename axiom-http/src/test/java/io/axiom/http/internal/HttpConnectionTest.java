@@ -227,12 +227,66 @@ class HttpConnectionTest {
         } finally { executor.close(); }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "GET / HTTP/1.1\r\nHost: a\r\n\r\nGET / HT",
+            "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabcGET / HT",
+            "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabcGET / HTTP/1.1\r\nHost: a\r\n",
+            "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\nG"})
+    void partialHeadInTheSameReadAsTheEndOfTheRequestBeforeItTimesOut(String bytes) throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.requestTimeout(Duration.ofMinutes(5));
+            app.get("/", ctx -> "ok");
+            app.post("/", ctx -> "ok");
+            app.start();
+            var channel = wireChannel(app, executor, Duration.ofSeconds(10));
+            try {
+                channel.writeInbound(ascii(bytes));
+                assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK");
+                channel.advanceTimeBy(9, TimeUnit.SECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                channel.advanceTimeBy(1, TimeUnit.SECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(outbound(channel)).startsWith("HTTP/1.1 408 Request Timeout");
+                assertThat(channel.isActive()).isFalse();
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void lineBreaksAfterABodyDoNotStartTheHeadTimeout() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.post("/", ctx -> "ok");
+            app.start();
+            var channel = wireChannel(app, executor, Duration.ofSeconds(10));
+            try {
+                // RFC 9112 section 2.2: empty lines before a request line are ignored.
+                channel.writeInbound(ascii("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabc\r\n"));
+                assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK");
+                channel.advanceTimeBy(1, TimeUnit.MINUTES);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                assertThat(channel.<Object>readOutbound()).isNull();
+                channel.writeInbound(ascii("\r\nPOST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n"));
+                assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK");
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     private static EmbeddedChannel wireChannel(io.axiom.application.Application app, RequestDispatcher executor,
             Duration headTimeout) {
         var channel = new EmbeddedChannel();
         channel.freezeTime();
-        channel.pipeline().addLast(new HttpConnection.RequestBytes(),
-                new io.netty.handler.codec.http.HttpServerCodec(),
+        channel.pipeline().addLast(new RequestDecoder(new io.netty.handler.codec.http.HttpDecoderConfig()),
+                new io.netty.handler.codec.http.HttpResponseEncoder(),
                 new HttpConnection(app, executor, headTimeout));
         return channel;
     }

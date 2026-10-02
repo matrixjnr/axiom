@@ -104,7 +104,10 @@ admission or a running handler is not interrupted by inactivity; its queue wait
 and execution deadline bound it instead.
 A request head must arrive within ten seconds of its first byte; otherwise the
 listener answers 408 Request Timeout and closes (or just closes when an earlier
-pipelined response is outstanding). Trickling bytes does not extend the bound.
+pipelined response is outstanding). Trickling bytes does not extend the bound. The
+bound also starts when the head's first bytes arrive together with the end of the
+previous request or its body; empty lines before a request line, which are ignored,
+do not start it.
 A request body must arrive before the request deadline, which starts when the head
 is parsed; otherwise the listener answers 408 and closes. A connection receiving
 body bytes is not idle, but one that stops sending mid-body for 30 seconds is.
