@@ -156,6 +156,7 @@ would answer with 400 throws `IllegalArgumentException` instead. The body limit 
 produce the same problem responses as a listener. Other handler exceptions
 propagate rather than becoming 500 responses. Response bodies the transport cannot
 send (anything other than `String` or `byte[]` after encoding, or over the size
-limits) fail with `IllegalStateException` where a listener would answer 500.
+limits) fail with `IllegalStateException` where a listener would answer 500; the
+client and the listener read these rules from one shared definition.
 Sockets, HTTP parsing and connection behavior (414, 431, Expect, pipelining)
 are not simulated.

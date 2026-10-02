@@ -6,6 +6,7 @@ import io.axiom.http.Body;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.server.internal.Problems;
+import io.axiom.server.internal.ResponseSerialization;
 import io.axiom.server.internal.execution.RequestDispatcher;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -36,8 +37,6 @@ import java.util.concurrent.RejectedExecutionException;
  */
 public final class TestClient implements AutoCloseable {
     private static final Object UNMATCHED = new Object();
-    private static final int MAX_RESPONSE = 1024 * 1024;
-    private static final int MAX_HEADERS = 8192;
     private final Application application;
     private final RequestDispatcher dispatcher;
 
@@ -208,24 +207,10 @@ public final class TestClient implements AutoCloseable {
         }).toCompletableFuture();
     }
 
-    /** Mirrors the listener's response preparation, which answers 500 for these cases. */
+    /** Applies the listener's serialization rules; where it would answer 500, the call fails. */
     private static void checkSerializable(Response response) {
-        var body = response.body();
-        if (body != null && !(body instanceof byte[]) && !(body instanceof String)) {
-            throw new IllegalStateException("Response body of type " + body.getClass().getName()
-                    + " cannot be serialized by the transport (only String and byte[]); the listener would return 500");
-        }
-        if (body instanceof String text && text.length() > MAX_RESPONSE
-                || body instanceof byte[] bytes && bytes.length > MAX_RESPONSE) {
-            throw new IllegalStateException("Response body exceeds " + MAX_RESPONSE + " bytes; the listener would return 500");
-        }
-        int size = 0;
-        for (Map.Entry<String, String> header : response.headers().entrySet()) {
-            size += header.getKey().length() + header.getValue().length() + 4;
-            if (size > MAX_HEADERS || header.getValue().chars().anyMatch(c -> c > 255)) {
-                throw new IllegalStateException("Response headers are too large or not Latin-1; the listener would return 500");
-            }
-        }
+        var rejection = ResponseSerialization.rejection(response);
+        if (rejection != null) { throw new IllegalStateException(rejection + "; the listener would return 500"); }
     }
 
     /** Cancels outstanding requests and closes the application. */

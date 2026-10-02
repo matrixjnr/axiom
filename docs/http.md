@@ -147,8 +147,9 @@ responses and the connection closes), so `3 × L` with
 global: 128 connections allow about `384 × L` per listener; see
 [request bodies](bodies.md#memory-per-connection). Body bytes are copied out of
 network buffers as they arrive, so no Netty buffer is retained across reads.
-Response bodies are limited to 1 MiB after encoding and response
-headers to 8 KiB; larger responses produce 500. Application allocations before
+Response bodies are limited to 1 MiB of encoded bytes (a `String` counts its UTF-8
+bytes) and response headers to 8 KiB, counted as name, value and four characters
+per field; header values must be Latin-1. Other responses produce 500. Application allocations before
 returning a response are outside these limits. Connections close after 30 seconds
 without network read/write activity, including idle keep-alive connections and a
 response write stalled by a client that stopped reading. A request waiting for
