@@ -95,6 +95,28 @@ class HttpConnectionTest {
         }
     }
 
+    @Test void responseBodiesUseTheChannelAllocator() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> "body");
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            var allocator = new io.netty.buffer.UnpooledByteBufAllocator(false);
+            channel.config().setAllocator(allocator);
+            try {
+                request(channel);
+                FullHttpResponse response = awaitResponse(channel);
+                try {
+                    assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("body");
+                    assertThat(response.content().alloc()).isSameAs(allocator);
+                } finally { response.release(); }
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     @Test void idleConnectionsClose() {
         var executor = executor();
         try (var app = Axiom.create()) {

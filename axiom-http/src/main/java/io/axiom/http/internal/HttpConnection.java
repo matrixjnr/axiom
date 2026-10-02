@@ -24,6 +24,7 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.util.ReferenceCounted;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -233,10 +234,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     private void send(ChannelHandlerContext ctx, Exchange exchange, WireResponse response) {
         boolean head = exchange.request().method().equals("HEAD");
-        var message = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
-                HttpResponseStatus.valueOf(response.status()),
-                Unpooled.wrappedBuffer(head ? new byte[0] : response.body()));
+        // Exactly one owner releases the body: this method until the write takes the message.
+        ReferenceCounted owned = null;
         try {
+            var bytes = head ? new byte[0] : response.body();
+            var content = bytes.length == 0 ? Unpooled.EMPTY_BUFFER : ctx.alloc().buffer(bytes.length);
+            owned = content;
+            content.writeBytes(bytes);
+            var message = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
+                    HttpResponseStatus.valueOf(response.status()), content);
+            owned = message;
             var omitted = new HashSet<>(HOP_HEADERS);
             for (var token : response.headers().getOrDefault("Connection", "").split(",")) {
                 omitted.add(token.trim().toLowerCase(Locale.ROOT));
@@ -254,6 +261,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
             if (keepAlive && exchange.http10()) { message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive"); }
             if (!keepAlive) { closing = true; pending.clear(); }
+            owned = null;
             ctx.writeAndFlush(message).addListener(future -> {
                 active = null;
                 if (!future.isSuccess() || !keepAlive || draining) { ctx.close(); return; }
@@ -261,7 +269,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 dispatch(ctx);
             });
         } catch (RuntimeException failure) {
-            message.release();
+            if (owned != null) { owned.release(); }
             abort(ctx);
         }
     }
