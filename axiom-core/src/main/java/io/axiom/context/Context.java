@@ -10,6 +10,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Request-scoped view and response settings for one handler invocation.
@@ -49,6 +50,51 @@ public interface Context {
      */
     default String path() {
         return request().path();
+    }
+
+    /**
+     * Returns a request header value, matching the name case-insensitively. Header values are
+     * untrusted client input.
+     *
+     * @param name header name
+     * @return value, if present
+     */
+    default Optional<String> header(String name) {
+        return request().header(name);
+    }
+
+    /**
+     * Decodes the request body with the installed codec for its Content-Type.
+     * <p>
+     * Checks run in this order: an empty or missing body fails with
+     * {@link io.axiom.error.DecodeException} ({@code empty_body}, 400); a missing or malformed
+     * Content-Type fails with {@link io.axiom.error.UnsupportedMediaTypeException}
+     * ({@code missing_content_type}, 415); a {@code charset} parameter other than UTF-8 fails with
+     * code {@code unsupported_charset} (415); a media type without an installed codec fails with
+     * {@code unsupported_media_type} (415); content the codec cannot decode into the type fails
+     * with a {@code DecodeException} (400). These exceptions become error responses when they
+     * leave the handler. The body has already passed the application's size limit.
+     *
+     * @param type target type, for example a record
+     * @param <T> target type
+     * @return decoded value, never null
+     */
+    <T> T body(Class<T> type);
+
+    /**
+     * Maps a value to a JSON response using the current status (200 by default). The value is
+     * encoded by the installed {@code application/json} codec when the response is prepared,
+     * after the handler returns. A {@code String} or {@code byte[]} value is sent verbatim as
+     * already-encoded JSON. Without a JSON codec installed the response cannot be sent and the
+     * listener answers 500.
+     *
+     * @param value non-null value to encode
+     * @return response with {@code Content-Type: application/json}
+     * @throws IllegalStateException if the status set on this context cannot carry a body
+     */
+    default Response json(Object value) {
+        return response(java.util.Objects.requireNonNull(value, "value"))
+                .withHeader("Content-Type", "application/json");
     }
 
     /**

@@ -1,6 +1,8 @@
 package io.axiom.server.internal;
 
 import io.axiom.context.Context;
+import io.axiom.error.DecodeException;
+import io.axiom.error.UnsupportedMediaTypeException;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
@@ -33,6 +35,15 @@ final class DefaultContext implements Context {
     public Request request() { return request; }
 
     @Override public ExecutionContext execution() { return execution; }
+
+    @Override
+    public <T> T body(Class<T> type) {
+        java.util.Objects.requireNonNull(type, "type");
+        var body = request.body();
+        if (body.isEmpty()) { throw new DecodeException("empty_body"); }
+        if (body.mediaType().isEmpty()) { throw new UnsupportedMediaTypeException("missing_content_type"); }
+        throw new UnsupportedMediaTypeException();
+    }
 
     @Override
     public Context status(int status) {
