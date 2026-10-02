@@ -18,7 +18,8 @@ idle keep-alive connections and connections still receiving a request. It also
 stops admission: requests waiting for execution capacity are answered 503 and
 their connections close without invoking the handler. A connection with a
 running handler keeps it running; its response is sent with `Connection: close`
-and queued pipelined requests on it are dropped unanswered.
+and queued pipelined requests on it are dropped unanswered. The connection then
+lingers briefly (see [wire behavior](#wire-behavior)) before it closes.
 After a fixed five-second grace period, remaining connections close and their
 handlers are interrupted; then execution and I/O threads stop. Await
 `server.termination()` to join resource shutdown. Handlers must cooperate with
@@ -62,18 +63,22 @@ section 431; an
 `Expect` other than `100-continue` 417; other HTTP versions 505; malformed requests
 400. These close the connection.
 
-Closing right after an error could destroy the response: if the client is still
-sending (for example the rest of a rejected body), unread input makes the operating
-system reset the connection, and a client may then report the reset instead of the
-response. After every error response the listener generates itself (the "Listener"
-rows in [errors](errors.md#framework-statuses), including its 500, 503 and 504) it
-therefore shuts down its output, so the client reads the response and end of stream,
-and keeps reading and discarding input without buffering it. The connection closes
-when the client closes its side, after two seconds, after 16 MiB of discarded input,
-or on inactivity, whichever comes first. A lingering connection still counts against
-the connection limit and can delay listener shutdown by up to those two seconds.
-Responses that close for other reasons (`Connection: close`, HTTP/1.0, shutdown)
-close at once.
+Closing right after a response could destroy it: if the client is still sending
+(the rest of a rejected body, or further pipelined requests), unread input makes the
+operating system reset the connection, which can discard response bytes not yet
+delivered, and a client may report the reset instead of the response. So whenever
+the listener ends a connection after a response, for any reason (a listener error,
+`Connection: close` from the client or the handler, HTTP/1.0 without keep-alive, or
+listener shutdown), it shuts down its output, so the client reads the whole response
+and end of stream, and keeps reading and discarding input without buffering it. The
+connection closes when the client closes its side, after two seconds, after 16 MiB of
+discarded input, or on inactivity, whichever comes first. The listener does not try
+to guess that a client has finished sending: a client that reads the response but
+keeps its socket open holds the connection for the full two seconds. A lingering
+connection still counts against the connection limit and can delay listener
+shutdown by up to those two seconds. Connections closed without a response (an idle
+connection at shutdown, a connection still receiving a request at shutdown,
+inactivity, a transport failure or a disconnect) close at once.
 
 ### Errors on pipelined requests
 

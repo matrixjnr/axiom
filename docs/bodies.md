@@ -71,8 +71,9 @@ process-wide body budget; size `L`, the request timeout and the heap together.
 A 413 (or another error) on a pipelined request is sent after the responses to
 earlier requests, which still run; see
 [errors on pipelined requests](http.md#errors-on-pipelined-requests). After the 413
-the listener discards the rest of the body for a bounded time instead of resetting
-the connection, so a client still sending reads the response; see
+the listener discards the rest of the body (for up to two seconds and 16 MiB) instead
+of resetting the connection, so a client still sending reads the response; the same
+applies after any response that ends a connection; see
 [wire behavior](http.md#wire-behavior). Clients that send `Expect: 100-continue` and
 wait avoid sending the body at all.
 

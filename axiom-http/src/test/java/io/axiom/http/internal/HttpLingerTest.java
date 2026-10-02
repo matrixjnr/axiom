@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 class HttpLingerTest {
     private final RequestDispatcher executor = new RequestDispatcher(4);
     private final Application app = Axiom.create();
+    private HttpConnection connection;
 
     @AfterEach void stop() throws Exception {
         app.close();
@@ -48,8 +49,8 @@ class HttpLingerTest {
         app.start();
         var channel = new Socket();
         channel.freezeTime();
-        channel.pipeline().addLast(new RequestDecoder(NettyServer.decoderConfig()), new HttpResponseEncoder(),
-                new HttpConnection(app, executor));
+        connection = new HttpConnection(app, executor);
+        channel.pipeline().addLast(new RequestDecoder(NettyServer.decoderConfig()), new HttpResponseEncoder(), connection);
         return channel;
     }
 
@@ -131,20 +132,125 @@ class HttpLingerTest {
         }
     }
 
-    @Test void responsesThatAreNotListenerErrorsCloseWithoutLingering() throws Exception {
-        app.get("/", ctx -> "bye");
+    @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n",
+            "GET / HTTP/1.0\r\n\r\nGET / HTTP/1.0\r\n\r\n",
+            "GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n",
+            "GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGARBAGE\r\n\r\n"})
+    void everyCloseAfterAResponseLingers(String requests) {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        app.get("/", ctx -> { calls.incrementAndGet(); return "hi"; });
+        app.get("/bye", ctx -> { calls.incrementAndGet(); return io.axiom.http.Response.of(200, "bye").withHeader("Connection", "close"); });
         var channel = socket();
         try {
-            channel.writeInbound(ascii("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n"));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (channel.isActive()) {
-                assertThat(System.nanoTime()).isLessThan(deadline);
-                channel.runPendingTasks();
-                Thread.onSpinWait();
-            }
-            assertThat(outbound(channel)).startsWith("HTTP/1.1 200 OK").endsWith("bye");
+            channel.writeInbound(ascii(requests));
+            var text = awaitOutputShutdown(channel);
+            assertThat(text).startsWith("HTTP/1.1 200 OK").containsOnlyOnce("HTTP/1.1 ").contains("connection: close");
+            assertThat(calls).hasValue(1);
+            // The client may still be sending; its input is discarded while the connection lingers.
+            var more = ascii("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+            channel.writeInbound(more);
+            assertThat(more.refCnt()).isZero();
+            assertThat(calls).hasValue(1);
+            assertThat(channel.isActive()).isTrue();
+            channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isFalse();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test void drainLingersAfterTheRunningResponse() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        app.get("/slow", ctx -> { entered.countDown(); release.await(); return "slow"; });
+        var channel = socket();
+        try {
+            channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\nGET /slow HTTP/1.1\r\nHost: a\r\n\r\n"));
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            connection.drain();
+            release.countDown();
+            assertThat(awaitOutputShutdown(channel)).startsWith("HTTP/1.1 200 OK").containsOnlyOnce("HTTP/1.1 ")
+                    .contains("connection: close");
+            assertThat(channel.isActive()).isTrue();
+            channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isFalse();
+        } finally {
+            release.countDown();
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test void drainClosesAnIdleConnectionAtOnce() {
+        var channel = socket();
+        try {
+            connection.drain();
+            assertThat(channel.isActive()).isFalse();
             assertThat(channel.outputShutdown).isFalse();
         } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test void largeResponseBeforeACloseReachesASlowReaderInFullWhileItKeepsSending() throws Exception {
+        var body = new byte[1024 * 1024];
+        new java.util.Random(3).nextBytes(body);
+        app.get("/big", ctx -> body);
+        app.start();
+        // A long linger keeps the test independent of machine load.
+        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                NettyServer.SHUTDOWN_GRACE, java.time.Duration.ofSeconds(60));
+        var client = new java.net.Socket();
+        Thread sender = null;
+        try {
+            // A small receive window makes the client a slow reader: most of the response is still
+            // in the server's send buffer when the server is done writing it.
+            client.setReceiveBufferSize(4096);
+            client.connect(server.localAddress(), 5000);
+            client.setSoTimeout(30_000);
+            var out = client.getOutputStream();
+            out.write(("GET /big HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n"
+                    + "POST /big HTTP/1.1\r\nHost: a\r\nContent-Length: 4194304\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            // The client keeps sending pipelined input, which the server never reads as a request.
+            sender = Thread.ofVirtual().start(() -> {
+                var piece = new byte[16 * 1024];
+                try {
+                    for (int sent = 0; sent < 4 * 1024 * 1024; sent += piece.length) { out.write(piece); }
+                } catch (java.io.IOException closed) { /* Only the response matters. */ }
+            });
+            // The client reads nothing until it has sent everything: a server that closed early has
+            // reset the connection by then, destroying the response it had not delivered yet.
+            sender.join();
+            var in = client.getInputStream();
+            var headers = new StringBuilder();
+            while (!headers.toString().endsWith("\r\n\r\n")) {
+                int next = in.read();
+                assertThat(next).as("end of stream inside the head").isNotEqualTo(-1);
+                headers.append((char) next);
+            }
+            assertThat(headers.toString()).startsWith("HTTP/1.1 200 OK").contains("content-length: " + body.length)
+                    .contains("connection: close");
+            assertThat(in.readNBytes(body.length)).isEqualTo(body);
+            assertThat(in.read()).isEqualTo(-1);
+        } finally {
+            client.close();
+            if (sender != null) { sender.join(); }
+            server.close();
+            server.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    /** Runs tasks posted by handler threads until the connection shuts down its output. */
+    private static String awaitOutputShutdown(Socket channel) {
+        var text = new StringBuilder();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!channel.outputShutdown) {
+            assertThat(channel.isActive()).as("closed without lingering").isTrue();
+            assertThat(System.nanoTime()).isLessThan(deadline);
+            channel.runPendingTasks();
+            text.append(outbound(channel));
+            Thread.onSpinWait();
+        }
+        return text.append(outbound(channel)).toString();
     }
 
     private static ByteBuf ascii(String text) { return Unpooled.copiedBuffer(text, StandardCharsets.US_ASCII); }

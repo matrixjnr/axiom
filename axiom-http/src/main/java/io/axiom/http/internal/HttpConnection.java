@@ -68,9 +68,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     static final int MAX_DISCARDED_INPUT = 16 * 1024 * 1024;
     /**
-     * After a listener error response the output is shut down and input is read and discarded for
-     * at most this long before the connection closes, so a client still sending (for example the
-     * rest of a rejected body) reads the response instead of a reset.
+     * After the last response on a connection the output is shut down and input is read and
+     * discarded for at most this long before the connection closes, so a client still sending (for
+     * example the rest of a rejected body, or pipelined requests) reads the whole response instead
+     * of a reset.
      */
     static final Duration LINGER_TIMEOUT = Duration.ofSeconds(2);
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
@@ -394,7 +395,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         }
         boolean close = java.util.Arrays.stream(response.headers().getOrDefault("Connection", "").split(","))
                 .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
-        return new WireResponse(response.status(), response.headers(), bytes, close, false);
+        return new WireResponse(response.status(), response.headers(), bytes, close);
     }
 
     private void send(ChannelHandlerContext ctx, Exchange exchange, WireResponse response) {
@@ -430,10 +431,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             ctx.writeAndFlush(message).addListener(future -> {
                 active = null;
                 if (!future.isSuccess()) { ctx.close(); return; }
-                if (!keepAlive || draining) {
-                    if (response.error()) { linger(ctx); } else { ctx.close(); }
-                    return;
-                }
+                if (!keepAlive || draining) { linger(ctx); return; }
                 busy = false;
                 dispatch(ctx);
                 sendContinue(ctx);
@@ -461,7 +459,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     private static WireResponse error(int status, Exchange exchange) {
         return new WireResponse(status, Map.of("Content-Type", Problems.MEDIA_TYPE),
-                Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true, true);
+                Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true);
     }
 
     /**
@@ -482,11 +480,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     /**
-     * Half-closes after a listener error response: the client reads the response and end of stream,
-     * and input it is still sending is discarded rather than left unread, which would make the
-     * operating system reset the connection and could destroy the response. The connection closes
-     * when the client closes its side, after the linger timeout ({@link #LINGER_TIMEOUT}), after {@link #MAX_DISCARDED_INPUT}
-     * bytes, or on inactivity, whichever comes first.
+     * Half-closes after the last response, whatever ended the connection (an error, {@code Connection:
+     * close}, HTTP/1.0, a drain): the client reads the response and end of stream, and input it is
+     * still sending is discarded rather than left unread, which would make the operating system reset
+     * the connection and could destroy response bytes not yet delivered. The connection closes when
+     * the client closes its side, after the linger timeout ({@link #LINGER_TIMEOUT}), after
+     * {@link #MAX_DISCARDED_INPUT} bytes, or on inactivity, whichever comes first.
      */
     private void linger(ChannelHandlerContext ctx) {
         var decoder = ctx.pipeline().get(RequestDecoder.class);
@@ -540,6 +539,5 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private record CachedDate(long second, String value) { }
     private static volatile CachedDate date = new CachedDate(Long.MIN_VALUE, "");
     private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) { }
-    /** {@code error} marks a listener error response, after which the connection lingers. */
-    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean error) { }
+    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close) { }
 }
