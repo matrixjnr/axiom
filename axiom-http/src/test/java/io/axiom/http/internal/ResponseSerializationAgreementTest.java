@@ -10,8 +10,9 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 /**
- * Checks that the listener answers 500 for exactly the boundary responses the shared
- * serialization rules refuse, so the test client and the transport cannot drift apart.
+ * Checks over a socket that the listener applies the shared serialization rules: it answers 500
+ * for exactly the boundary responses they refuse, as the test client does, so wiring the
+ * transport to anything other than those rules fails here.
  */
 class ResponseSerializationAgreementTest {
     private static final int MIB = 1024 * 1024;

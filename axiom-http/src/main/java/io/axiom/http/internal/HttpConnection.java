@@ -10,6 +10,7 @@ import io.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededExce
 import io.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
 import io.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
 import io.axiom.server.internal.Problems;
+import io.axiom.server.internal.ResponseSerialization;
 import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -32,7 +33,6 @@ import io.netty.handler.codec.http.TooLongHttpLineException;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCounted;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -53,7 +53,6 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static final Object UNMATCHED = new Object();
     /** Bound from a request's first byte until its head is complete; a slower client receives 408. */
     static final Duration REQUEST_HEAD_TIMEOUT = Duration.ofSeconds(10);
-    private static final int MAX_RESPONSE = 1024 * 1024;
     private static final java.util.regex.Pattern CONTENT_LENGTH = java.util.regex.Pattern.compile("[0-9]{1,18}");
     /**
      * Outstanding requests per connection, including the active one. A further request is not
@@ -383,20 +382,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         return failure;
     }
 
+    /** Applies the shared serialization rules; a response they refuse becomes a framework 500. */
     private static WireResponse prepare(Response response, Exchange exchange) {
-        var body = response.body();
-        byte[] bytes;
-        if (body == null) { bytes = new byte[0]; }
-        else if (body instanceof byte[] value) { bytes = value; }
-        else if (body instanceof String value && value.length() <= MAX_RESPONSE) {
-            bytes = value.getBytes(StandardCharsets.UTF_8);
-        } else { return error(500, exchange); }
-        if (bytes.length > MAX_RESPONSE) { return error(500, exchange); }
-        int headerSize = 0;
-        for (var header : response.headers().entrySet()) {
-            headerSize += header.getKey().length() + header.getValue().length() + 4;
-            if (headerSize > 8192 || header.getValue().chars().anyMatch(c -> c > 255)) { return error(500, exchange); }
-        }
+        var bytes = ResponseSerialization.bodyBytes(response.body());
+        if (bytes == null || !ResponseSerialization.headersSendable(response.headers())) { return error(500, exchange); }
         boolean close = java.util.Arrays.stream(response.headers().getOrDefault("Connection", "").split(","))
                 .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
         return new WireResponse(response.status(), response.headers(), bytes, close);
