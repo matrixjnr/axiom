@@ -64,6 +64,49 @@ class JacksonBodyCodecTest {
                 code, field);
     }
 
+    record Holder(Object any, Map<String, Integer> counts, List<Item> items, Item item) { }
+
+    /**
+     * Duplicate keys and trailing content keep their own codes wherever they occur; a fallback to
+     * {@code malformed_json}, {@code type_mismatch} or {@code invalid_value} fails here.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "root record             | {\"any\":1,\"any\":2}                                       | duplicate_field",
+            "untyped value           | {\"any\":{\"a\":1,\"a\":2}}                               | duplicate_field",
+            "map                     | {\"counts\":{\"POISON\":1,\"POISON\":2}}                  | duplicate_field",
+            "record in list          | {\"items\":[{\"name\":\"a\",\"name\":\"b\",\"quantity\":1}]} | duplicate_field",
+            "nested record           | {\"item\":{\"quantity\":1,\"quantity\":2,\"name\":\"a\"}} | duplicate_field",
+            "after other properties  | {\"counts\":{},\"items\":[],\"counts\":{}}                | duplicate_field",
+            "second root object      | {\"any\":1} {\"any\":2}                                     | trailing_content",
+            "second root array       | {\"any\":1}[]                                                 | trailing_content",
+            "second root scalar      | {\"any\":1} 7                                                 | trailing_content",
+            "second root string      | {\"any\":1}\"POISON\"                                       | trailing_content",
+    })
+    void keepsSpecificCodesForDuplicatesAndTrailingContent(String name, String json, String code) {
+        assertDecodeFailure(utf8(json), Holder.class, code, null);
+    }
+
+    @Test void reportsTrailingContentAfterScalarAndArrayRoots() {
+        assertDecodeFailure(utf8("1 2"), Integer.class, "trailing_content", null);
+        assertDecodeFailure(utf8("\"a\" \"b\""), String.class, "trailing_content", null);
+        assertDecodeFailure(utf8("[1] [2]"), List.class, "trailing_content", null);
+        assertDecodeFailure(utf8("{\"a\":{\"b\":1,\"b\":1}}"), Map.class, "duplicate_field", null);
+        assertDecodeFailure(utf8("[{\"b\":1,\"c\":[],\"b\":1}]"), Object.class, "duplicate_field", null);
+    }
+
+    @Test void reportsNestedSyntaxErrorsAsMalformed() {
+        assertDecodeFailure(utf8("{\"item\":{\"name\":POISON}}"), Holder.class, "malformed_json", null);
+        assertDecodeFailure(utf8("{\"items\":[{\"name\":\"a\",]}"), Holder.class, "malformed_json", null);
+        assertDecodeFailure(utf8("{\"item\":{\"name\":\"a\",\"quantity\":1}"), Holder.class, "malformed_json", null);
+    }
+
+    @Test void reportsIntegerOverflowAsTypeMismatch() {
+        assertDecodeFailure(utf8("{\"name\":\"a\",\"quantity\":99999999999}"), Item.class, "type_mismatch", "quantity");
+        assertDecodeFailure(utf8("{\"item\":{\"name\":\"a\",\"quantity\":99999999999}}"), Holder.class,
+                "type_mismatch", "item.quantity");
+    }
+
     @Test void mapKeysAreNeverReportedAsFields() {
         var json = "{\"id\":\"o\",\"items\":[],\"extras\":{\"POISON<key>\":{\"name\":\"x\",\"quantity\":\"bad\"}}}";
         assertDecodeFailure(utf8(json), Order.class, "type_mismatch", "extras");

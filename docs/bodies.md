@@ -134,11 +134,11 @@ Decoding is strict:
 | Input | Code |
 | --- | --- |
 | Unknown property | `unknown_field` (field: path of the enclosing object, if any) |
-| Duplicate key | `duplicate_field` |
+| Duplicate key in any object, at any depth | `duplicate_field` |
 | Content after the value | `trailing_content` |
-| Wrong type, string for a number, float for an integer, null or missing primitive, a number too large for a `double` or `float` field (for example `1e400`, which would otherwise become infinity) | `type_mismatch` (field: property path) |
+| Wrong type, string for a number, an integer too large for its field, float for an integer, null or missing primitive, a number too large for a `double` or `float` field (for example `1e400`, which would otherwise become infinity) | `type_mismatch` (field: property path) |
 | Record constructor rejects the values | `invalid_value` (field: property path) |
-| Syntax error, comments, single quotes | `malformed_json` |
+| Syntax error at any depth, comments, single quotes | `malformed_json` |
 | Nesting deeper than 64, strings over 1 Mi characters, names over 1024, numbers over 256 digits, documents over 64 Mi characters | `limit_exceeded` |
 | Invalid UTF-8 | `invalid_encoding` |
 | `null` | `null_body` |
@@ -150,7 +150,14 @@ Missing reference-type components become `null`; validate
 them in the record or the handler. Field paths use declared property names and
 indexes (`items[0].quantity`) and stop at the first map, because map keys are
 client input. Parser messages, input fragments and unknown property names are never
-reported. `java.time` types and other modules are not registered yet.
+reported.
+
+Codes are chosen from exception types and document structure, never from Jackson's
+message text. Trailing content is found by reading one more token after the value.
+When a syntax, encoding or duplicate-key failure surfaces (possibly wrapped by the
+data binder), the codec reads the rejected document's tokens again with its own
+duplicate tracking and reports the first token-level problem; this second pass runs
+only for rejected bodies and is bounded by the same limits. `java.time` types and other modules are not registered yet.
 
 ## Encoding
 

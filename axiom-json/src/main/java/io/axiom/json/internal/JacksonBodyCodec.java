@@ -6,26 +6,30 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.exc.StreamConstraintsException;
+import com.fasterxml.jackson.core.exc.StreamReadException;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.deser.std.NumberDeserializers;
-import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.deser.std.NumberDeserializers;
 import com.fasterxml.jackson.databind.exc.InvalidDefinitionException;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import com.fasterxml.jackson.databind.exc.ValueInstantiationException;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import io.axiom.codec.spi.BodyCodec;
 import io.axiom.error.DecodeException;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,6 +58,7 @@ public final class JacksonBodyCodec implements BodyCodec {
     static final long MAX_DOCUMENT_LENGTH = 64L * 1024 * 1024;
 
     private final ObjectMapper mapper;
+    private final JsonFactory scanFactory;
 
     /** Creates the codec; called by the service loader. */
     public JacksonBodyCodec() {
@@ -68,11 +73,14 @@ public final class JacksonBodyCodec implements BodyCodec {
                 .streamReadConstraints(constraints)
                 .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .build();
+        // Same limits; duplicates are tracked by scan() itself so they are told apart by structure.
+        scanFactory = JsonFactory.builder()
+                .streamReadConstraints(constraints)
+                .disable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                .build();
         mapper = JsonMapper.builder(factory)
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
-                .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
                 .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
                 .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
                 // Untyped numbers keep their exact value instead of overflowing a double.
@@ -121,61 +129,98 @@ public final class JacksonBodyCodec implements BodyCodec {
     @Override public Set<String> mediaTypes() { return Set.of("application/json"); }
 
     @Override public <T> T decode(byte[] content, Class<T> type) {
-        var decoder = StandardCharsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT);
-        // RFC 8259 lets parsers ignore a UTF-8 byte order mark; other encodings are not detected.
-        int start = content.length >= 3 && (content[0] & 0xff) == 0xef && (content[1] & 0xff) == 0xbb
-                && (content[2] & 0xff) == 0xbf ? 3 : 0;
-        var input = new ByteArrayInputStream(content, start, content.length - start);
-        try (var parser = mapper.createParser(new InputStreamReader(input, decoder))) {
+        try (var parser = mapper.createParser(reader(content))) {
             if (parser.nextToken() == null) { throw new DecodeException("empty_body"); }
             T value = mapper.readValue(parser, type);
-            // Checked explicitly so trailing content gets its own code; the mapper also rejects it.
+            // The mapper does not check for trailing tokens; reading one here gives it its own code.
             if (parser.nextToken() != null) { throw new DecodeException("trailing_content"); }
             return value;
-        } catch (CharacterCodingException malformed) {
-            throw new DecodeException("invalid_encoding");
-        } catch (StreamConstraintsException limit) {
-            throw new DecodeException("limit_exceeded");
         } catch (InvalidDefinitionException unsupported) {
             // The target type cannot be deserialized: an application defect, not a client error.
             throw new IllegalStateException("JSON codec cannot decode type " + type.getName(), unsupported);
-        } catch (UnrecognizedPropertyException unknown) {
-            var path = unknown.getPath();
-            throw decodeFailure("unknown_field", path.subList(0, Math.max(0, path.size() - 1)));
-        } catch (ValueInstantiationException invalid) {
-            throw decodeFailure("invalid_value", invalid.getPath());
-        } catch (MismatchedInputException mismatch) {
-            if (limitExceeded(mismatch)) { throw new DecodeException("limit_exceeded"); }
-            if (isTrailing(mismatch)) { throw new DecodeException("trailing_content"); }
-            throw decodeFailure("type_mismatch", mismatch.getPath());
-        } catch (JsonMappingException mapping) {
-            if (limitExceeded(mapping)) { throw new DecodeException("limit_exceeded"); }
-            throw decodeFailure("invalid_value", mapping.getPath());
-        } catch (JsonProcessingException malformed) {
-            throw new DecodeException(isDuplicate(malformed) ? "duplicate_field" : "malformed_json");
-        } catch (IOException unreadable) {
-            throw new DecodeException("malformed_json");
+        } catch (IOException failure) {
+            throw classify(failure, content);
         }
     }
 
-    /** Databind may wrap a constraint violation found while deserializing a value. */
-    private static boolean limitExceeded(Throwable failure) {
+    /**
+     * Reads the content as strict UTF-8. RFC 8259 lets parsers ignore a UTF-8 byte order mark;
+     * other encodings are not detected.
+     */
+    private static Reader reader(byte[] content) {
+        var decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        int start = content.length >= 3 && (content[0] & 0xff) == 0xef && (content[1] & 0xff) == 0xbb
+                && (content[2] & 0xff) == 0xbf ? 3 : 0;
+        return new InputStreamReader(new ByteArrayInputStream(content, start, content.length - start), decoder);
+    }
+
+    /**
+     * Maps a failure to a safe code by exception type and structure, never by message text.
+     * Token-level failures (syntax, encoding, duplicate keys) can surface directly or wrapped by
+     * databind with a misleading type; for those the content is scanned again, which reports the
+     * first token-level problem precisely. Failures that the scan does not reproduce, such as an
+     * integer too large for its field, are value mismatches.
+     */
+    private DecodeException classify(IOException failure, byte[] content) {
+        if (causedBy(failure, StreamConstraintsException.class)) { return new DecodeException("limit_exceeded"); }
+        if (causedBy(failure, StreamReadException.class) || causedBy(failure, CharacterCodingException.class)) {
+            var tokenFailure = scan(content);
+            if (tokenFailure != null) { return tokenFailure; }
+        }
+        if (failure instanceof UnrecognizedPropertyException unknown) {
+            var path = unknown.getPath();
+            return decodeFailure("unknown_field", path.subList(0, Math.max(0, path.size() - 1)));
+        }
+        if (failure instanceof ValueInstantiationException invalid) {
+            return decodeFailure("invalid_value", invalid.getPath());
+        }
+        if (failure instanceof MismatchedInputException mismatch) {
+            return decodeFailure("type_mismatch", mismatch.getPath());
+        }
+        if (failure instanceof JsonMappingException mapping) {
+            // A token-level cause the scan did not reproduce is a value that does not fit its type.
+            return decodeFailure(causedBy(mapping, StreamReadException.class) ? "type_mismatch" : "invalid_value",
+                    mapping.getPath());
+        }
+        if (failure instanceof StreamReadException) { return new DecodeException("type_mismatch"); }
+        return new DecodeException("malformed_json");
+    }
+
+    /**
+     * Reads every token of the content, with duplicate keys detected here rather than by the
+     * parser, and returns the first token-level failure, or null when the token stream is valid.
+     */
+    private DecodeException scan(byte[] content) {
+        var names = new ArrayDeque<Set<String>>();
+        try (var parser = scanFactory.createParser(reader(content))) {
+            for (var token = parser.nextToken(); token != null; token = parser.nextToken()) {
+                switch (token) {
+                    case START_OBJECT -> names.push(new HashSet<>());
+                    case START_ARRAY -> names.push(Set.of());
+                    case END_OBJECT, END_ARRAY -> names.pop();
+                    case FIELD_NAME -> {
+                        if (!names.peek().add(parser.currentName())) { return new DecodeException("duplicate_field"); }
+                    }
+                    default -> { }
+                }
+            }
+            return null;
+        } catch (CharacterCodingException malformed) {
+            return new DecodeException("invalid_encoding");
+        } catch (StreamConstraintsException limit) {
+            return new DecodeException("limit_exceeded");
+        } catch (IOException malformed) {
+            return new DecodeException("malformed_json");
+        }
+    }
+
+    private static boolean causedBy(Throwable failure, Class<? extends Throwable> type) {
         for (var cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof StreamConstraintsException) { return true; }
+            if (type.isInstance(cause)) { return true; }
         }
         return false;
-    }
-
-    private static boolean isTrailing(MismatchedInputException mismatch) {
-        var message = mismatch.getOriginalMessage();
-        return message != null && message.startsWith("Trailing token");
-    }
-
-    private static boolean isDuplicate(JsonProcessingException failure) {
-        var message = failure.getOriginalMessage();
-        return message != null && message.startsWith("Duplicate field");
     }
 
     /**
