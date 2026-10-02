@@ -3,11 +3,13 @@ package io.axiom.http.internal;
 import io.axiom.application.Application;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Body;
+import io.axiom.http.HttpStatus;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
 import io.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
 import io.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
+import io.axiom.server.internal.Problems;
 import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
@@ -26,6 +28,8 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.handler.codec.http.TooLongHttpHeaderException;
+import io.netty.handler.codec.http.TooLongHttpLineException;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCounted;
 import java.net.URI;
@@ -36,6 +40,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.ArrayDeque;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -49,6 +54,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** Bound from a request's first byte until its head is complete; a slower client receives 408. */
     static final Duration REQUEST_HEAD_TIMEOUT = Duration.ofSeconds(10);
     private static final int MAX_RESPONSE = 1024 * 1024;
+    /** Methods whose requests must declare Content-Length or chunked framing (411 otherwise). */
+    private static final Set<String> BODY_METHODS = Set.of("POST", "PUT", "PATCH");
     /** Outstanding requests per connection, including the active one; more closes the connection. */
     static final int MAX_PIPELINED = 8;
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
@@ -133,7 +140,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override protected void channelRead0(ChannelHandlerContext ctx, HttpObject message) {
         if (closing) { return; }
-        if (!message.decoderResult().isSuccess()) { fail(ctx, 400); return; }
+        if (!message.decoderResult().isSuccess()) { fail(ctx, decoderFailureStatus(message.decoderResult().cause())); return; }
         if (message instanceof HttpRequest request) {
             if (receiving != null) { fail(ctx, 400); return; }
             headComplete();
@@ -163,8 +170,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                     .equalsIgnoreCase(HttpHeaderValues.CHUNKED.toString())) {
                 fail(ctx, 501); return false;
             }
-            length = chunked ? -1 : HttpUtil.getContentLength(request, 0L);
+            length = chunked ? -1 : HttpUtil.getContentLength(request, -1L);
         } catch (NumberFormatException invalid) { fail(ctx, 400); return false; }
+        // A body-bearing method must declare how its body is framed, even when it is empty.
+        if (length < 0 && !chunked && BODY_METHODS.contains(request.method().name())) { fail(ctx, 411); return false; }
         bodyLimit = application.maxRequestBody();
         // Rejected before any body byte is read; the connection closes after the response.
         if (length > bodyLimit) { fail(ctx, 413); return false; }
@@ -253,7 +262,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         busy = true;
         var exchange = pending.removeFirst();
         queuedBodyBytes -= exchange.request().body().length();
-        if (exchange.execution().isExpired()) { send(ctx, exchange, error(504)); return; }
+        if (exchange.execution().isExpired()) { send(ctx, exchange, error(504, exchange)); return; }
         try {
             // A closed application or dispatcher cannot run the request; answer instead of
             // leaving the connection busy. This also runs from a write listener, where an
@@ -263,7 +272,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
             active = executor.submit(route.<Object>map(value -> value).orElse(UNMATCHED),
                     policy, exchange.execution(), () -> {
-                try { return prepare(application.handle(exchange.request(), exchange.execution())); }
+                try { return prepare(application.handle(exchange.request(), exchange.execution()), exchange); }
                 catch (Exception | Error failure) {
                     if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
                         LOG.log(System.Logger.Level.ERROR,
@@ -284,7 +293,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                             send(ctx, exchange, failure == null ? response
                                     : error(failure instanceof DeadlineExceededException ? 504
                                             : failure instanceof QueueTimeoutException
-                                                    || failure instanceof DispatchRejectedException ? 503 : 500));
+                                                    || failure instanceof DispatchRejectedException ? 503 : 500, exchange));
                         }
                     });
                 } catch (RejectedExecutionException stopped) { /* Channel shutdown owns cleanup. */ }
@@ -295,7 +304,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                         "HTTP request " + exchange.execution().requestId() + " could not be dispatched", unavailable);
             }
             if (active != null) { active.cancel(); active = null; }
-            send(ctx, exchange, error(503));
+            send(ctx, exchange, error(503, exchange));
         }
     }
 
@@ -306,19 +315,19 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         return failure;
     }
 
-    private static WireResponse prepare(Response response) {
+    private static WireResponse prepare(Response response, Exchange exchange) {
         var body = response.body();
         byte[] bytes;
         if (body == null) { bytes = new byte[0]; }
         else if (body instanceof byte[] value) { bytes = value; }
         else if (body instanceof String value && value.length() <= MAX_RESPONSE) {
             bytes = value.getBytes(StandardCharsets.UTF_8);
-        } else { return error(500); }
-        if (bytes.length > MAX_RESPONSE) { return error(500); }
+        } else { return error(500, exchange); }
+        if (bytes.length > MAX_RESPONSE) { return error(500, exchange); }
         int headerSize = 0;
         for (var header : response.headers().entrySet()) {
             headerSize += header.getKey().length() + header.getValue().length() + 4;
-            if (headerSize > 8192 || header.getValue().chars().anyMatch(c -> c > 255)) { return error(500); }
+            if (headerSize > 8192 || header.getValue().chars().anyMatch(c -> c > 255)) { return error(500, exchange); }
         }
         boolean close = java.util.Arrays.stream(response.headers().getOrDefault("Connection", "").split(","))
                 .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
@@ -379,15 +388,27 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         return cached.value();
     }
 
-    private static WireResponse error(int status) {
-        return new WireResponse(status, Map.of("Content-Type", "text/plain; charset=utf-8"),
-                HttpResponseStatus.valueOf(status).reasonPhrase().getBytes(StandardCharsets.UTF_8), true);
+    /**
+     * A framework error: a problem+json body with only status, default code and request ID, and
+     * a connection close because the request's framing or the connection state may be unusable.
+     */
+    private static WireResponse error(int status, Exchange exchange) {
+        return new WireResponse(status, Map.of("Content-Type", Problems.MEDIA_TYPE),
+                Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true);
     }
 
     private void fail(ChannelHandlerContext ctx, int status) {
         // Never send an error ahead of an earlier pipelined response.
         if (busy || !pending.isEmpty()) { abort(ctx); return; }
-        send(ctx, new Exchange(Request.get("/"), false, false, ExecutionContext.create(application.requestTimeout())), error(status));
+        var exchange = new Exchange(Request.get("/"), false, false, ExecutionContext.create(application.requestTimeout()));
+        send(ctx, exchange, error(status, exchange));
+    }
+
+    /** Maps a decoder failure: an overlong request line is 414, an overlong header section 431. */
+    private static int decoderFailureStatus(Throwable cause) {
+        if (cause instanceof TooLongHttpLineException) { return 414; }
+        if (cause instanceof TooLongHttpHeaderException) { return 431; }
+        return 400;
     }
 
     private void abort(ChannelHandlerContext ctx) { closing = true; releaseBody(); ctx.close(); }

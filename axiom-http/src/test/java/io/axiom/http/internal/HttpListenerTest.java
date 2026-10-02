@@ -31,7 +31,7 @@ class HttpListenerTest {
                 assertThat(wire.get("/bytes").body()).containsExactly(0, 1, (byte) -1);
                 assertThat(wire.get("/empty").status()).isEqualTo(204);
                 assertThat(wire.get("/missing").status()).isEqualTo(404);
-                wire.write("POST /users/x HTTP/1.1\r\nHost: localhost\r\n\r\n");
+                wire.write("POST /users/x HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
                 var mismatch = wire.read(false);
                 assertThat(mismatch.status()).isEqualTo(405);
                 assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD");
@@ -80,7 +80,8 @@ class HttpListenerTest {
             try (var wire = new Wire(fixture.listen())) {
                 var response = wire.get("/");
                 assertThat(response.status()).isEqualTo(500);
-                assertThat(response.text()).isEqualTo("Internal Server Error");
+                HttpStatusMappingTest.assertProblem(response, 500, "internal_server_error");
+                assertThat(response.text()).doesNotContain("secret", "Exception", "java.", "overloaded");
                 assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
             }
         }
@@ -178,7 +179,7 @@ class HttpListenerTest {
                     "GET / HTTP/2.0\r\nHost: a\r\n\r\n", 505,
                     "CONNECT localhost:443 HTTP/1.1\r\nHost: localhost\r\n\r\n", 501,
                     "POST / HTTP/1.1\r\nHost: a\r\nExpect: 200-ok\r\nContent-Length: 1\r\n\r\n", 417,
-                    "GET / HTTP/1.1\r\nHost: a\r\nX-Large: " + "x".repeat(9000) + "\r\n\r\n", 400
+                    "GET / HTTP/1.1\r\nHost: a\r\nX-Large: " + "x".repeat(9000) + "\r\n\r\n", 431
             ).entrySet()) {
                 try (var wire = new Wire(server)) {
                     wire.write(entry.getKey());
@@ -428,7 +429,7 @@ class HttpListenerTest {
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 var response = wire.read(false);
                 assertThat(response.status()).isEqualTo(504);
-                assertThat(response.text()).isEqualTo("Gateway Timeout");
+                HttpStatusMappingTest.assertProblem(response, 504, "gateway_timeout");
                 assertThat(response.headers()).containsKey("X-Request-ID");
                 assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
                 assertThat(returned.await(5, TimeUnit.SECONDS)).isTrue();
