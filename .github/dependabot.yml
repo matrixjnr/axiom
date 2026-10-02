@@ -1,0 +1,32 @@
+version: 2
+# Update pull requests only propose changes; nothing merges without review. A dependency
+# update must also update gradle/verification-metadata.xml in the same commit (see
+# docs/releasing.md); Dependabot cannot regenerate it, so push that to the PR branch.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ['*']
+    labels: [dependencies]
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      # Transport and codec updates change runtime behavior: one PR per family, reviewed
+      # with the update policy in docs/releasing.md.
+      netty:
+        patterns: ['io.netty*']
+      jackson:
+        patterns: ['com.fasterxml.jackson*', 'tools.jackson*']
+      validation:
+        patterns: ['jakarta.validation*', 'org.hibernate.validator*']
+      test-tools:
+        patterns: ['org.junit*', 'org.assertj*']

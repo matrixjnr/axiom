@@ -67,7 +67,9 @@ Javadoc omits its generation timestamp, so repeated builds produce identical jar
 API package. Its tests exercise the codec directly.
 
 Deferred: pinning GitHub Actions to full commit SHAs (workflow actions use major
-version tags; see docs/releasing.md).
+version tags; an owner action, see docs/releasing.md). Dependabot
+(`.github/dependabot.yml`) proposes weekly updates for Actions and Gradle dependencies,
+grouped by family (Netty, Jackson, validation, test tools).
 
 ## Starter artifact
 

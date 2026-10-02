@@ -38,7 +38,11 @@ automatically; add it to `axiom-bom` as well.
    `actions/setup-java@v4`, `gradle/actions/setup-gradle@v4`,
    `actions/upload-artifact@v4`). Full SHAs could not be verified from the build
    environment and were not guessed. Resolve each tag to its commit in the upstream
-   repository, replace the tag, and keep the tag in a trailing comment.
+   repository, replace the tag, and keep the tag in a trailing comment. This is an
+   owner action: it needs network access to GitHub that the automated build
+   environment does not have, so the tag pins remain until the owner does it.
+   `.github/dependabot.yml` already proposes weekly action updates; Dependabot
+   preserves the `# vX` comment style and keeps SHA pins current once they exist.
 7. Protect tags (`v*`) and limit who can push them; configure a protected environment
    with required reviewers for the publishing job when it exists.
 8. Check that empty sources and Javadoc jars of the starter are accepted by Central.
@@ -88,6 +92,34 @@ the workflow artifacts and the release. Until then the dependency list in
 plugin version change, regenerate it with the command in `docs/build.md`, review the
 diff, and commit it together with the version change. Checksums are
 trust-on-first-use; consider enabling signature verification later.
+
+## Netty and Jackson update policy
+
+Netty (transport) and Jackson (codec) updates change runtime behavior, so they are
+reviewed more closely than other dependency updates.
+
+- Cadence: Dependabot proposes one grouped PR per family each week
+  (`.github/dependabot.yml`). Take patch releases of the current minor line at least
+  monthly and before every release; take a new minor line deliberately, in its own PR.
+  A major version (for example Jackson 3) is a design decision, not a routine update.
+- Security fixes: watch the GitHub security advisories of both projects. A fix for a
+  vulnerability that is reachable through Axiom (HTTP parsing, compression, TLS, JSON
+  parsing) is taken as soon as possible, outside the cadence, with a note in
+  `CHANGELOG.md`. Record the triage result (affected, not affected, why) in the PR.
+- Changelog review: read the release notes between the old and new version for changed
+  defaults, deprecations, security fixes and behavior changes in the parts Axiom uses
+  (HTTP/1.1 codec, buffer handling and leak detection; databind, streaming and
+  `java.time`/`Optional` modules). Summarize anything relevant in the PR.
+- Verification: run `./gradlew clean check --rerun-tasks --no-build-cache` (this includes
+  the `integration-tests` module that runs the JSON contract against the real codec and
+  listener), then `./gradlew compatibilityTest`, and rerun the JMH benchmarks in
+  `benchmarks/` as described in `docs/benchmarks.md`. Compare against the previous
+  version and state the result in the PR; a regression is a reason to hold the update.
+- Metadata: the version change and the regenerated `gradle/verification-metadata.xml`
+  land in the same commit (see Dependency verification). Dependabot cannot regenerate
+  the file, so push the regeneration to the update PR's branch before merging.
+- Keep the Netty family on one BOM version and the Jackson family on one BOM version;
+  never bump a single artifact.
 
 ## Workflows
 
