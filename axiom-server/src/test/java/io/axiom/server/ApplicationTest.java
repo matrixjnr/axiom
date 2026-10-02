@@ -82,7 +82,7 @@ class ApplicationTest {
             assertThat(app.handle(Request.get("/unknown")).status()).isEqualTo(404);
             var mismatch = app.handle(new Request("DELETE", "/users"));
             assertThat(mismatch.status()).isEqualTo(405);
-            assertThat(mismatch.headers()).containsEntry("allow", "GET, POST");
+            assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD, POST");
             assertThat(app.handle(new Request("get", "/users")).status()).isEqualTo(405);
         }
     }
@@ -140,17 +140,24 @@ class ApplicationTest {
     }
 
     @Test
-    void suppressesHeadBodiesIncludingErrorsWithoutImplicitGetFallback() throws Exception {
+    void headFallsBackToGetAndSuppressesBodiesIncludingErrors() throws Exception {
         try (var app = Axiom.create()) {
             app.head("/", ctx -> "metadata");
-            app.get("/get-only", ctx -> { throw new AssertionError("GET must not execute for HEAD"); });
+            app.get("/get-only", ctx -> ctx.status(201).text("body for " + ctx.method()));
+            app.post("/post-only", ctx -> "post");
             app.start();
             var response = app.handle(new Request("HEAD", "/"));
             assertThat(response.status()).isEqualTo(200);
             assertThat(response.body()).isNull();
             assertThat(response.headers()).containsKey("content-type");
-            assertThat(app.handle(new Request("HEAD", "/get-only")).status()).isEqualTo(405);
-            assertThat(app.handle(new Request("HEAD", "/get-only")).body()).isNull();
+            var fallback = app.handle(new Request("HEAD", "/get-only"));
+            assertThat(fallback.status()).isEqualTo(201);
+            assertThat(fallback.body()).isNull();
+            assertThat(fallback.headers()).containsEntry("content-type", "text/plain; charset=utf-8");
+            var mismatch = app.handle(new Request("HEAD", "/post-only"));
+            assertThat(mismatch.status()).isEqualTo(405);
+            assertThat(mismatch.headers()).containsEntry("allow", "POST");
+            assertThat(mismatch.body()).isNull();
             assertThat(app.handle(new Request("HEAD", "/missing")).body()).isNull();
         }
     }

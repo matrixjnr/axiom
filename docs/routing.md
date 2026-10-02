@@ -33,14 +33,23 @@ with `/a/static/dead` and `/a/:id/end`, `/a/static/end` matches the parameter ro
 With `/a/*rest` and `/:first/static`, `/a/static` matches `/a/*rest` because the
 literal `a` at the first segment has higher precedence.
 
-After choosing the path, the router selects its registered HTTP method. With
-`POST /users/new` and `GET /users/:id`, `GET /users/new` returns **405**, with
-`Allow: POST`. It never executes the parameter route. This keeps method handling
-from bypassing a more specific resource. Methods remain case-sensitive.
+The method takes part in selection. The router visits complete path matches in
+the precedence order above and executes the first one registered for the request
+method. A more specific template without that method does not hide a less specific
+one that has it: with `GET /users/me` and `POST /users/:id`, `POST /users/me` runs
+the parameter route with `id = "me"`, and `GET /users/me` runs the static route.
+Methods remain case-sensitive.
 
-The `Allow` header contains only methods registered on the selected path shape,
-sorted alphabetically. An unknown path returns 404. HEAD routes are explicit,
-and HEAD responses suppress bodies for successful matches and routing errors.
+When no complete match is registered for the method, the response is **405**. Its
+`Allow` header is the union of the methods registered on every template that
+matches the complete path, sorted alphabetically. An unknown path returns 404.
+
+HEAD is served by an explicit HEAD route or, failing that, by the GET route on the
+same template, checked template by template in precedence order. With
+`GET /items/static` and `HEAD /items/:id`, `HEAD /items/static` runs the static GET
+route. `ctx.method()` still reports `HEAD`, `resolve` returns the GET route (whose
+admission policy applies), and `Allow` lists `HEAD` wherever `GET` is registered.
+HEAD responses suppress bodies for successful matches and routing errors.
 
 ## Conflicts and startup
 
@@ -108,9 +117,9 @@ compilation and lookup avoid recursive calls, including for deeply nested paths.
 Backtracking can visit multiple branches; no constant-time or strict linear-time
 bound is claimed for adversarial overlapping templates.
 
-Tests cover raw and rejected paths, conflicts, method mismatches, HEAD, deep paths,
+Tests cover raw and rejected paths, conflicts, method fallback and mismatches, HEAD, deep paths,
 10,000 routes, and concurrent captures. An independent exhaustive template scanner
-checks 480 method/path combinations to catch differences in matching and precedence,
+checks 640 method/path combinations (including HEAD) to catch differences in matching and precedence,
 and confirms that the generated paths with empty segments are rejected.
 
 The [JMH harness](../benchmarks/http/README.md) exercises the public in-memory

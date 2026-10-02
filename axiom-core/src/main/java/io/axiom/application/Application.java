@@ -209,10 +209,13 @@ public interface Application extends AutoCloseable {
 
     /**
      * Executes a request synchronously on the calling thread with a fresh context.
-     * Selects the most specific complete path before the method (static, parameter, wildcard).
-     * Returns 404 for an unknown path and 405 with Allow for a method mismatch on that path.
+     * Selects the most specific complete path match (static, parameter, wildcard at the first
+     * differing segment) that is registered for the request method; a more specific template
+     * without that method does not hide a less specific one with it. HEAD uses an explicit
+     * HEAD route, or else the GET route of the same template, and suppresses response bodies.
+     * Returns 404 for an unknown path, and 405 when no matching template has the method, with
+     * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
      * Handler exceptions propagate unchanged; this method is not a network error boundary.
-     * HEAD dispatches only explicitly registered HEAD routes and suppresses response bodies.
      *
      * @param request request to execute
      * @return mapped handler result

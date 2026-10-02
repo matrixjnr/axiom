@@ -33,12 +33,14 @@ backslashes or NUL are rejected with `InvalidRequestPathException` (400 over HTT
 parameters capture one non-empty segment; terminal `*name` wildcards capture the
 remaining path. At the first differing segment, static segments take precedence
 over parameters, then wildcards. Branches that cannot match the complete path are
-skipped. The HTTP method is selected only after the best complete path is found.
+skipped, and so are complete matches not registered for the request method: with
+`GET /users/me` and `POST /users/:id`, `POST /users/me` runs the parameter route.
 
-Unknown paths return 404. A matched path without the requested method returns 405
-and its sorted `Allow` header. It does not fall back to a broader route's method.
-HEAD must be registered explicitly and omits the response body. Automatic HEAD
-fallback and OPTIONS behavior are not enabled.
+Unknown paths return 404. When no matching template has the requested method, the
+response is 405 with a sorted `Allow` header listing every method registered on a
+matching template. HEAD uses an explicit HEAD route or else the GET route on the
+same template, and omits the response body; `Allow` includes HEAD wherever GET is
+registered. Automatic OPTIONS behavior is not enabled.
 
 `ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw
 capture; `ctx.pathParameters()` returns an immutable map in template order. Values
