@@ -36,10 +36,13 @@ class ResponseSerializationAgreementTest {
             for (var path : cases.keySet()) {
                 var prepared = fixture.app.handle(Request.get(path));
                 boolean refused = ResponseSerialization.rejection(prepared) != null;
-                try (var wire = new Wire(server)) {
-                    wire.write("GET " + path + " HTTP/1.1\r\nHost: a\r\n\r\n");
-                    int status = wire.read(false).status();
-                    assertThat(status == 500).as(path + " answered " + status).isEqualTo(refused);
+                // HEAD is refused exactly where GET is, although it sends no body bytes.
+                for (var method : new String[] {"GET", "HEAD"}) {
+                    try (var wire = new Wire(server)) {
+                        wire.write(method + " " + path + " HTTP/1.1\r\nHost: a\r\n\r\n");
+                        int status = wire.read(method.equals("HEAD")).status();
+                        assertThat(status == 500).as(method + " " + path + " answered " + status).isEqualTo(refused);
+                    }
                 }
             }
         }

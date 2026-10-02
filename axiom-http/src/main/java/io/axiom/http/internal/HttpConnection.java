@@ -412,6 +412,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             });
             if (!head && response.status() != 204 && response.status() != 304) {
                 HttpUtil.setContentLength(message, response.body().length);
+            } else if (head) {
+                // No body bytes follow; the length is the GET representation's, when known.
+                var length = headLength(response);
+                if (length != null) { message.headers().set(HttpHeaderNames.CONTENT_LENGTH, length); }
             }
             message.headers().set("X-Request-ID", exchange.execution().requestId());
             message.headers().set(HttpHeaderNames.DATE, httpDate());
@@ -433,6 +437,18 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             if (owned != null) { owned.release(); }
             abort(ctx);
         }
+    }
+
+    /**
+     * The length a successful HEAD response advertises: the representation length the application
+     * computed (see {@code Application.handle}), for 2xx other than 204 and 205. Errors, bodiless
+     * statuses and anything that is not a plain decimal length send none.
+     */
+    private static String headLength(WireResponse response) {
+        int status = response.status();
+        if (status < 200 || status > 299 || status == 204 || status == 205) { return null; }
+        var value = response.headers().get("Content-Length");
+        return value != null && CONTENT_LENGTH.matcher(value).matches() ? value : null;
     }
 
     /** IMF-fixdate for the current second, formatted at most once per second across connections. */

@@ -30,7 +30,8 @@ Every framework and application error response uses an
 `type`, `title`, `detail` and `instance` are omitted; RFC 9457 treats a missing
 `type` as `about:blank`. The in-memory `app.handle`, `TestClient` and the HTTP
 listener produce identical bodies for the same failure. HEAD responses keep the
-status and headers without the body.
+status and headers without the body and, unlike successful HEAD responses, carry no
+`Content-Length`.
 
 ## Throwing errors
 

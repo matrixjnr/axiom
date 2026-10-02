@@ -50,7 +50,10 @@ same template, checked template by template in precedence order. With
 `GET /items/static` and `HEAD /items/:id`, `HEAD /items/static` runs the static GET
 route. `ctx.method()` still reports `HEAD`, `resolve` returns the GET route (whose
 admission policy applies), and `Allow` lists `HEAD` wherever `GET` is registered.
-HEAD responses suppress bodies for successful matches and routing errors.
+HEAD responses suppress bodies for successful matches and routing errors. A
+successful HEAD response (2xx other than 204 and 205) keeps the representation length
+instead: `app.handle` and `TestClient` return it with `Content-Length` set to the
+body's encoded length, and the listener sends that header with no body bytes.
 
 ## Conflicts and startup
 

@@ -42,6 +42,14 @@ class ResponseSerializationTest {
                 .isFalse();
     }
 
+    @Test void contentLengthIsNotCounted() {
+        // The transport owns Content-Length; a HEAD response carries one beside headers at the limit.
+        var headers = new java.util.TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        headers.put("A", "v".repeat(8192 - 5));
+        headers.put("content-length", "1048576");
+        assertThat(ResponseSerialization.headersSendable(headers)).isTrue();
+    }
+
     @Test void headerValuesMustBeLatin1() {
         assertThat(ResponseSerialization.headersSendable(Map.of("A", "ÿ"))).isTrue();
         assertThat(ResponseSerialization.headersSendable(Map.of("A", "Ā"))).isFalse();

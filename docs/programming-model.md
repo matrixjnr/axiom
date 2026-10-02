@@ -40,7 +40,8 @@ skipped, and so are complete matches not registered for the request method: with
 Unknown paths return 404. When no matching template has the requested method, the
 response is 405 with a sorted `Allow` header listing every method registered on a
 matching template. HEAD uses an explicit HEAD route or else the GET route on the
-same template, and omits the response body; `Allow` includes HEAD wherever GET is
+same template, and omits the response body (a successful one keeps its length in
+`Content-Length`); `Allow` includes HEAD wherever GET is
 registered. Automatic OPTIONS behavior is not enabled.
 
 `ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw

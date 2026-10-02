@@ -23,7 +23,8 @@ import java.util.Map;
  *     character above 255</td></tr>
  * </table>
  * Hop-by-hop headers, {@code Content-Length}, {@code Date} and {@code X-Request-ID} are added or
- * removed by the transport afterwards and are not part of these rules.
+ * removed by the transport afterwards and are not part of these rules; a {@code Content-Length}
+ * entry (for example the one a HEAD response carries) is not counted.
  */
 public final class ResponseSerialization {
     /** Largest response body, in bytes after encoding. */
@@ -53,7 +54,7 @@ public final class ResponseSerialization {
     }
 
     /**
-     * Checks the header size and character rules.
+     * Checks the header size and character rules, ignoring {@code Content-Length}.
      *
      * @param headers prepared response headers
      * @return whether the transport can write them
@@ -61,6 +62,7 @@ public final class ResponseSerialization {
     public static boolean headersSendable(Map<String, String> headers) {
         int size = 0;
         for (var header : headers.entrySet()) {
+            if (header.getKey().equalsIgnoreCase("Content-Length")) { continue; }
             size += header.getKey().length() + header.getValue().length() + HEADER_OVERHEAD;
             if (size > MAX_HEADER_BYTES || header.getValue().chars().anyMatch(c -> c > 255)) { return false; }
         }

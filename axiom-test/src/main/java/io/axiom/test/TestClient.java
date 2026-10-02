@@ -29,7 +29,7 @@ import java.util.concurrent.RejectedExecutionException;
  * propagate to the test instead of becoming a 500 response. After codec encoding, response bodies
  * must be {@code null}, {@code String} or {@code byte[]} and within the transport size limits;
  * anything else fails the call with {@link IllegalStateException}, where the listener would answer
- * 500. Bodies are sent as raw bytes; this module installs no codec, so decoding uses whatever codec
+ * 500; HEAD follows the same rules and returns the {@code Content-Length} a listener sends. Bodies are sent as raw bytes; this module installs no codec, so decoding uses whatever codec
  * the test's runtime classpath provides. Request targets may carry a query and are split and
  * validated by {@link Request#fromTarget(String, String)}, as the listener does; a target the
  * listener would answer with 400 throws {@link IllegalArgumentException} instead. Transport rules such as 414, 431, Expect handling,

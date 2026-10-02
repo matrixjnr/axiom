@@ -2,6 +2,7 @@ package io.axiom.http.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.axiom.http.Response;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -32,8 +33,8 @@ class HttpHeadTest {
             assertThat(head.headers()).containsEntry("Content-Type", get.headers().get("Content-Type"));
             assertThat(head.headers()).containsKey("X-Request-ID").containsKey("Date");
             assertThat(head.headers().get("Connection")).isNotEqualToIgnoringCase("close");
-            // A HEAD response must never advertise a length different from the GET representation.
-            assertThat(head.headers().get("Content-Length")).isIn(null, get.headers().get("Content-Length"));
+            // The length the GET representation would have, without its bytes.
+            assertThat(head.headers()).containsEntry("Content-Length", get.headers().get("Content-Length"));
             assertThat(calls).hasValue(2);
 
             // Keep-alive: the connection carries the next request, and no HEAD body bytes precede it.
@@ -73,10 +74,66 @@ class HttpHeadTest {
                     + "GET /items/2 HTTP/1.1\r\nHost: a\r\n\r\n"
                     + "HEAD /items/3 HTTP/1.1\r\nHost: a\r\n\r\n"
                     + "GET /items/4 HTTP/1.1\r\nHost: a\r\n\r\n");
-            assertThat(wire.read(true).status()).isEqualTo(200);
+            var first = wire.read(true);
+            assertThat(first.status()).isEqualTo(200);
+            assertThat(first.headers()).containsEntry("Content-Length", "6");
             assertThat(wire.read(false).text()).isEqualTo("item 2");
-            assertThat(wire.read(true).status()).isEqualTo(200);
+            assertThat(wire.read(true).headers()).containsEntry("Content-Length", "6");
             assertThat(wire.read(false).text()).isEqualTo("item 4");
+        }
+    }
+
+    @Test void headAdvertisesTheEncodedLengthOfTheGetRepresentation() throws Exception {
+        try (var fixture = new Fixture()) {
+            // Two UTF-8 bytes per character: the length is counted in encoded bytes.
+            fixture.app.get("/text", ctx -> "é".repeat(5));
+            fixture.app.get("/bytes", ctx -> new byte[300]);
+            fixture.app.get("/empty", ctx -> ctx.status(200).response(null));
+            // An application-supplied length is replaced by the real one, as for GET.
+            fixture.app.get("/claimed", ctx -> Response.of(200, "abc").withHeader("Content-Length", "999"));
+            fixture.app.head("/explicit", ctx -> "head route");
+            fixture.app.get("/no-content", ctx -> null);
+            fixture.app.get("/reset", ctx -> Response.of(205, null));
+            fixture.app.get("/created", ctx -> ctx.status(201).text("made"));
+            try (var wire = new Wire(fixture.listen())) {
+                for (var path : new String[] {"/text", "/bytes", "/empty", "/claimed", "/explicit", "/created"}) {
+                    var get = path.equals("/explicit") ? null : wire.get(path);
+                    wire.write("HEAD " + path + " HTTP/1.1\r\nHost: a\r\n\r\n");
+                    var head = wire.read(true);
+                    var expected = get == null ? "10" : String.valueOf(get.body().length);
+                    assertThat(head.headers()).as(path).containsEntry("Content-Length", expected);
+                }
+                // Bodiless statuses keep their framing: no length on 204, and 205 keeps zero as for GET.
+                wire.write("HEAD /no-content HTTP/1.1\r\nHost: a\r\n\r\n");
+                var noContent = wire.read(true);
+                assertThat(noContent.status()).isEqualTo(204);
+                assertThat(noContent.headers()).doesNotContainKey("Content-Length");
+                wire.write("HEAD /reset HTTP/1.1\r\nHost: a\r\n\r\n");
+                var reset = wire.read(true);
+                assertThat(reset.status()).isEqualTo(205);
+                assertThat(reset.headers()).containsEntry("Content-Length", "0");
+                // Errors keep their own framing: no length advertised for the problem body.
+                wire.write("HEAD /missing HTTP/1.1\r\nHost: a\r\n\r\n");
+                var missing = wire.read(true);
+                assertThat(missing.status()).isEqualTo(404);
+                assertThat(missing.headers()).doesNotContainKey("Content-Length");
+                // The connection is still usable: nothing was written after the HEAD responses.
+                assertThat(wire.get("/text").text()).isEqualTo("é".repeat(5));
+            }
+        }
+    }
+
+    @Test void headOfARepresentationTheTransportCannotSendIs500LikeGet() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/huge", ctx -> new byte[1024 * 1024 + 1]);
+            var server = fixture.listen();
+            try (var wire = new Wire(server)) {
+                assertThat(wire.get("/huge").status()).isEqualTo(500);
+            }
+            try (var wire = new Wire(server)) {
+                wire.write("HEAD /huge HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(true).status()).isEqualTo(500);
+            }
         }
     }
 }
