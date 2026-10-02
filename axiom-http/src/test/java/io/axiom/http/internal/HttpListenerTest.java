@@ -64,6 +64,30 @@ class HttpListenerTest {
         }
     }
 
+    @Test void resetContentIsFramedAsEmptyAndInterimResponsesCarryNoLength() throws Exception {
+        try (var fixture = new Fixture()) {
+            // Response already refuses content on 205; the framing must still keep the connection usable.
+            fixture.app.get("/reset", ctx -> Response.of(205, null));
+            fixture.app.get("/next", ctx -> "next");
+            fixture.app.post("/upload", ctx -> "uploaded");
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("GET /reset HTTP/1.1\r\nHost: a\r\n\r\nGET /next HTTP/1.1\r\nHost: a\r\n\r\n");
+                var reset = wire.read(false);
+                assertThat(reset.status()).isEqualTo(205);
+                // RFC 9112 section 6.3: 205 is not bodiless by definition, so it needs explicit zero framing.
+                assertThat(reset.headers()).containsEntry("content-length", "0");
+                assertThat(reset.body()).isEmpty();
+                assertThat(wire.read(false).text()).isEqualTo("next");
+                wire.write("POST /upload HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\nContent-Length: 1\r\n\r\n");
+                assertThat(wire.line()).isEqualTo("HTTP/1.1 100 Continue");
+                // No header fields at all, so no Content-Length, on the interim response.
+                assertThat(wire.line()).isEmpty();
+                wire.write("x");
+                assertThat(wire.read(false).text()).isEqualTo("uploaded");
+            }
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"exception", "object", "oversize", "header", "application-timeout", "application-cancel", "application-reject"})
     void mapsFailuresToSafeFinalResponse(String failure) throws Exception {

@@ -52,7 +52,9 @@ The transport controls Content-Length, Transfer-Encoding, connection headers and
 Hop-by-hop headers, including names nominated by Connection, are removed. HEAD
 uses an explicit HEAD route or falls back to GET, and sends no body or Content-Length because the current
 application API does not retain the representation length. Statuses 204 and 304
-omit Content-Length; 205 uses zero. Keep-alive and pipelining are supported, with
+omit Content-Length; 205 uses zero, because RFC 9112 section 6.3 does not treat it as
+bodiless and the client needs explicit framing to read the next response. The
+interim `100 Continue` carries no header fields. Keep-alive and pipelining are supported, with
 one active handler per connection and responses in request order.
 
 Every error response, whether produced by the listener or the application, is an
