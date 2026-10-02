@@ -1,0 +1,18 @@
+plugins { id 'java' }
+
+def axiomVersion = providers.gradleProperty('axiomVersion').get()
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+sourceSets { main { java { srcDir '../shared' } } }
+
+dependencies {
+    // Explicit version, no BOM: the starter alone is enough.
+    implementation "io.axiom:axiom:${axiomVersion}"
+}
+
+tasks.register('smoke', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'consumer.Smoke'
+}
+
+tasks.register('compatibilityCheck') { dependsOn 'smoke' }
