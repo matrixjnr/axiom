@@ -55,6 +55,20 @@ successful HEAD response (2xx other than 204 and 205) keeps the representation l
 instead: `app.handle` and `TestClient` return it with `Content-Length` set to the
 body's encoded length, and the listener sends that header with no body bytes.
 
+## Methods
+
+A method is an RFC 9110 token: one or more ASCII letters, digits and the characters
+``!#$%&'*+-.^_`|~``.
+`app.route(method, path, handler)` throws `IllegalArgumentException` ("Invalid HTTP
+method") for anything else, including an empty method, spaces, separators such as
+`(`, `/` or `:`, control characters and non-ASCII letters. `new Request(...)` applies
+the same rule, so a listener answers a request line whose method is not a token with
+400 and closes the connection without routing it, and `TestClient` callers get the
+`IllegalArgumentException` when they build the request.
+
+Methods are matched exactly. Nothing is upper-cased: `get` is a method distinct from
+`GET`, may be registered on its own, and a `get` request never runs a `GET` route.
+
 ## Conflicts and startup
 
 Identical method/template pairs fail at registration. So do distinct templates

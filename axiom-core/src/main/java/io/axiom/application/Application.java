@@ -31,15 +31,18 @@ public interface Application extends AutoCloseable {
 
     /**
      * Registers a method/path template. Methods and static segments are case-sensitive.
+     * The method must be an RFC 9110 token (one or more of {@code A-Z a-z 0-9} and
+     * {@code !#$%&'*+-.^_`|~}); {@code get} and {@code GET} are different methods.
      * Named parameters match one non-empty segment; named terminal wildcards match the remainder.
      * Templates that differ only in capture names have the same shape and match the same paths;
      * registering a second one for the same method fails here.
      *
-     * @param method HTTP method token
+     * @param method case-sensitive HTTP method token
      * @param path absolute path template without query or fragment
      * @param handler callback invoked for matching requests
      * @return the registered route identity
-     * @throws IllegalArgumentException for invalid, duplicate, or same-shape routes for one method
+     * @throws IllegalArgumentException for a method that is not a token, an invalid template, or a
+     *         duplicate or same-shape route for one method
      * @throws IllegalStateException if configuration has ended
      */
     Route route(String method, String path, Handler handler);

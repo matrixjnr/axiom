@@ -36,7 +36,8 @@ The listener accepts HTTP/1.1 origin-form requests with exactly one valid Host,
 and HTTP/1.0 requests, whose Host is optional but validated when present.
 Responses always use HTTP/1.1. An HTTP/1.0 connection closes after each response
 unless the request sends `Connection: keep-alive`, which the response echoes.
-Paths that `Request` rejects (empty or dot segments, backslashes, malformed or
+A method that is not an RFC 9110 token receives 400; methods are case-sensitive (see
+[methods](routing.md#methods)). Paths that `Request` rejects (empty or dot segments, backslashes, malformed or
 encoded separators; see [routing rules](routing.md)) receive 400. Accepted raw paths
 retain their encoding. Query strings are excluded from routing, retained on the
 request and validated as described in [routing rules](routing.md#query-parameters);

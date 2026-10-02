@@ -89,7 +89,7 @@ for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 
 | Status | When | Where |
 | --- | --- | --- |
-| 400 | Malformed request line or headers, invalid Host, rejected path or query, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked`, more than one Transfer-Encoding line | Listener |
+| 400 | Malformed request line or headers, a method that is not a token, invalid Host, rejected path or query, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked`, more than one Transfer-Encoding line | Listener |
 | 400 | Empty body or codec failure in `ctx.body` | Runtime |
 | 400 | Path capture that `ctx.pathDecoded` cannot decode safely (malformed UTF-8, or a decoded separator, backslash, NUL or dot segment); code `invalid_path_encoding` | Runtime |
 | 404 | No route matches the path | Runtime |
