@@ -1,6 +1,8 @@
 package io.axiom.http;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -10,6 +12,12 @@ import java.util.regex.Pattern;
  * A response value before wire encoding. Header maps and byte arrays are defensively
  * copied; arbitrary body objects remain owned by the caller and are not deep-copied.
  * Header names are case-insensitive. One value per header is supported at this stage.
+ * <p>
+ * Bodies may be {@code null}, a {@link String}, a {@code byte[]}, or any other object.
+ * Other objects are retained for a future codec layer without serialization; the HTTP
+ * transport currently answers them with 500. Two responses are equal when their statuses,
+ * headers (names compared case-insensitively), and bodies are equal, comparing byte arrays
+ * by content and other bodies with {@link Object#equals(Object)}.
  */
 public final class Response {
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
@@ -99,6 +107,46 @@ public final class Response {
         copy.putAll(headers);
         copy.put(name, value);
         return new Response(status, body, copy);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof Response that && status == that.status && headers.equals(that.headers)
+                && (body instanceof byte[] bytes && that.body instanceof byte[] thatBytes
+                        ? Arrays.equals(bytes, thatBytes) : Objects.equals(body, that.body));
+    }
+
+    @Override
+    public int hashCode() {
+        int headerHash = 0;
+        for (var header : headers.entrySet()) {
+            // Header names compare case-insensitively, so they must hash that way too.
+            headerHash += header.getKey().toLowerCase(Locale.ROOT).hashCode() ^ header.getValue().hashCode();
+        }
+        int bodyHash = body instanceof byte[] bytes ? Arrays.hashCode(bytes) : Objects.hashCode(body);
+        return 31 * (31 * status + headerHash) + bodyHash;
+    }
+
+    /**
+     * Describes the response for diagnostics. Text bodies longer than 80 characters are
+     * truncated, byte arrays are shown by length, and other bodies by their class name.
+     *
+     * @return a diagnostic description
+     */
+    @Override
+    public String toString() {
+        String description;
+        if (body == null) {
+            description = "null";
+        } else if (body instanceof String text) {
+            description = text.length() <= 80 ? '"' + text + '"'
+                    : '"' + text.substring(0, 80) + "\"... (" + text.length() + " chars)";
+        } else if (body instanceof byte[] bytes) {
+            description = "byte[" + bytes.length + "]";
+        } else {
+            description = body.getClass().getName();
+        }
+        return "Response[status=" + status + ", headers=" + headers + ", body=" + description + "]";
     }
 
     /**

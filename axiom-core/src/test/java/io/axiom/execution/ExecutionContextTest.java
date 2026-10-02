@@ -37,7 +37,16 @@ class ExecutionContextTest {
         assertThatThrownBy(() -> ExecutionContext.create(null)).isInstanceOf(NullPointerException.class);
         var first = ExecutionContext.create(Duration.ofDays(1));
         var second = ExecutionContext.create(Duration.ofDays(1));
-        assertThat(java.util.UUID.fromString(first.requestId())).isNotNull();
         assertThat(first.requestId()).isNotEqualTo(second.requestId());
+    }
+
+    @Test void requestIdsShareARandomProcessPrefixAndIncreaseASequence() {
+        var first = ExecutionContext.create(Duration.ofSeconds(1)).requestId();
+        var second = ExecutionContext.create(Duration.ofSeconds(1)).requestId();
+        assertThat(first).matches("[A-Za-z0-9_-]{16}-[0-9a-f]+");
+        assertThat(second).matches("[A-Za-z0-9_-]{16}-[0-9a-f]+");
+        var prefix = first.substring(0, 17);
+        assertThat(second).startsWith(prefix);
+        assertThat(Long.parseLong(second.substring(17), 16)).isGreaterThan(Long.parseLong(first.substring(17), 16));
     }
 }

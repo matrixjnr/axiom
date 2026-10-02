@@ -32,12 +32,14 @@ public interface Application extends AutoCloseable {
     /**
      * Registers a method/path template. Methods and static segments are case-sensitive.
      * Named parameters match one non-empty segment; named terminal wildcards match the remainder.
+     * Templates that differ only in capture names have the same shape and match the same paths;
+     * registering a second one for the same method fails here.
      *
      * @param method HTTP method token
      * @param path absolute path template without query or fragment
      * @param handler callback invoked for matching requests
      * @return the registered route identity
-     * @throws IllegalArgumentException for invalid or duplicate routes
+     * @throws IllegalArgumentException for invalid, duplicate, or same-shape routes for one method
      * @throws IllegalStateException if configuration has ended
      */
     Route route(String method, String path, Handler handler);
@@ -131,7 +133,7 @@ public interface Application extends AutoCloseable {
      * Repeated calls while running are harmless. A compilation failure leaves registration
      * intact and the application in the configuring state.
      * @return this application
-     * @throws IllegalArgumentException if routes have the same shape and method
+     * @throws IllegalArgumentException if the route table cannot be compiled
      * @throws IllegalStateException if closed
      */
     Application start();
@@ -209,10 +211,13 @@ public interface Application extends AutoCloseable {
 
     /**
      * Executes a request synchronously on the calling thread with a fresh context.
-     * Selects the most specific complete path before the method (static, parameter, wildcard).
-     * Returns 404 for an unknown path and 405 with Allow for a method mismatch on that path.
+     * Selects the most specific complete path match (static, parameter, wildcard at the first
+     * differing segment) that is registered for the request method; a more specific template
+     * without that method does not hide a less specific one with it. HEAD uses an explicit
+     * HEAD route, or else the GET route of the same template, and suppresses response bodies.
+     * Returns 404 for an unknown path, and 405 when no matching template has the method, with
+     * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
      * Handler exceptions propagate unchanged; this method is not a network error boundary.
-     * HEAD dispatches only explicitly registered HEAD routes and suppresses response bodies.
      *
      * @param request request to execute
      * @return mapped handler result
@@ -241,8 +246,10 @@ public interface Application extends AutoCloseable {
 
     /**
      * Permanently rejects new requests. Already accepted requests may finish.
-     * Idempotent and nonblocking. Owned listeners close connections and interrupt network handlers.
-     * In-memory handlers are not interrupted. Await each listener's termination to join shutdown.
+     * Idempotent and nonblocking. Each owned listener starts the graceful drain described by
+     * {@link Server#close()}: queued requests are answered 503, running network handlers get a
+     * grace period before they are interrupted. In-memory handlers are not interrupted.
+     * Await each listener's termination to join shutdown.
      */
     @Override
     void close();

@@ -44,6 +44,12 @@ final class DefaultContext implements Context {
 
     @Override
     public Response response(Object body) {
+        if (body != null && (status == 204 || status == 205 || status == 304)) {
+            var route = match.route();
+            throw new IllegalStateException("Route " + route.method() + " " + route.path() + " set status "
+                    + status + ", which cannot carry a body, but produced a " + body.getClass().getName()
+                    + " body; return null or a Response without a body");
+        }
         return Response.of(body == null && !explicitStatus ? 204 : status, body);
     }
 }

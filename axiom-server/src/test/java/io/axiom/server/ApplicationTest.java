@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.axiom.Axiom;
 import io.axiom.application.Application;
+import io.axiom.http.InvalidRequestPathException;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import java.io.IOException;
@@ -81,22 +82,26 @@ class ApplicationTest {
             assertThat(app.handle(Request.get("/unknown")).status()).isEqualTo(404);
             var mismatch = app.handle(new Request("DELETE", "/users"));
             assertThat(mismatch.status()).isEqualTo(405);
-            assertThat(mismatch.headers()).containsEntry("allow", "GET, POST");
+            assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD, POST");
             assertThat(app.handle(new Request("get", "/users")).status()).isEqualTo(405);
         }
     }
 
     @Test
-    void doesNotNormalizeOrDecodePaths() throws Exception {
+    void rejectsAmbiguousPathsAndMatchesTheRestWithoutNormalizingOrDecoding() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/users", ctx -> "users");
-            app.get("/a%2Fb", ctx -> "encoded");
+            app.get("/a%20b", ctx -> "encoded");
             app.get("/time/12:00", ctx -> "literal colon");
             app.start();
-            for (var path : new String[] {"/users/", "/Users", "//users", "/x/../users", "/a/b", "/a%2fb"}) {
+            for (var path : new String[] {"/users/", "/Users", "/a%2520b", "/a%20B"}) {
                 assertThat(app.handle(Request.get(path)).status()).as(path).isEqualTo(404);
             }
-            assertThat(app.handle(Request.get("/a%2Fb")).body()).isEqualTo("encoded");
+            for (var path : new String[] {"//users", "/x/../users", "/./users", "/a%2fb", "/users%2F"}) {
+                assertThatThrownBy(() -> app.handle(Request.get(path))).as(path)
+                        .isInstanceOf(InvalidRequestPathException.class);
+            }
+            assertThat(app.handle(Request.get("/a%20b")).body()).isEqualTo("encoded");
             assertThat(app.handle(Request.get("/time/12:00")).body()).isEqualTo("literal colon");
         }
     }
@@ -135,18 +140,40 @@ class ApplicationTest {
     }
 
     @Test
-    void suppressesHeadBodiesIncludingErrorsWithoutImplicitGetFallback() throws Exception {
+    void headFallsBackToGetAndSuppressesBodiesIncludingErrors() throws Exception {
         try (var app = Axiom.create()) {
             app.head("/", ctx -> "metadata");
-            app.get("/get-only", ctx -> { throw new AssertionError("GET must not execute for HEAD"); });
+            app.get("/get-only", ctx -> ctx.status(201).text("body for " + ctx.method()));
+            app.post("/post-only", ctx -> "post");
             app.start();
             var response = app.handle(new Request("HEAD", "/"));
             assertThat(response.status()).isEqualTo(200);
             assertThat(response.body()).isNull();
             assertThat(response.headers()).containsKey("content-type");
-            assertThat(app.handle(new Request("HEAD", "/get-only")).status()).isEqualTo(405);
-            assertThat(app.handle(new Request("HEAD", "/get-only")).body()).isNull();
+            var fallback = app.handle(new Request("HEAD", "/get-only"));
+            assertThat(fallback.status()).isEqualTo(201);
+            assertThat(fallback.body()).isNull();
+            assertThat(fallback.headers()).containsEntry("content-type", "text/plain; charset=utf-8");
+            var mismatch = app.handle(new Request("HEAD", "/post-only"));
+            assertThat(mismatch.status()).isEqualTo(405);
+            assertThat(mismatch.headers()).containsEntry("allow", "POST");
+            assertThat(mismatch.body()).isNull();
             assertThat(app.handle(new Request("HEAD", "/missing")).body()).isNull();
+        }
+    }
+
+    @Test
+    void bodilessContextStatusesWithABodyFailWithTheRouteAndStatus() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/returned", ctx -> { ctx.status(204); return "body"; });
+            app.get("/text", ctx -> ctx.status(304).text("body"));
+            app.get("/empty", ctx -> { ctx.status(205); return null; });
+            app.start();
+            assertThatIllegalStateException().isThrownBy(() -> app.handle(Request.get("/returned")))
+                    .withMessageContaining("GET /returned").withMessageContaining("status 204");
+            assertThatIllegalStateException().isThrownBy(() -> app.handle(Request.get("/text")))
+                    .withMessageContaining("GET /text").withMessageContaining("status 304");
+            assertThat(app.handle(Request.get("/empty")).status()).isEqualTo(205);
         }
     }
 

@@ -59,31 +59,53 @@ final class CompiledRouter {
             var builder = nodes.get(i);
             var literals = new HashMap<String, Node>();
             builder.literals.forEach((segment, child) -> literals.put(segment, child.frozen));
+            var methods = new TreeSet<>(builder.endpoints.keySet());
+            if (methods.contains("GET")) { methods.add("HEAD"); }
             builder.frozen = new Node(Map.copyOf(literals),
                     builder.parameter == null ? null : builder.parameter.frozen,
                     builder.wildcard == null ? null : builder.wildcard.frozen,
-                    Map.copyOf(builder.endpoints), String.join(", ", new TreeSet<>(builder.endpoints.keySet())));
+                    Map.copyOf(builder.endpoints), List.copyOf(methods), String.join(", ", methods));
         }
         var exactPaths = new HashMap<String, Node>();
         exact.forEach((path, node) -> exactPaths.put(path, node.frozen));
         return new CompiledRouter(root.frozen, exactPaths);
     }
 
+    /**
+     * Finds the most specific complete path match registered for the request method.
+     * Complete matches are visited in precedence order; one without the method is skipped
+     * so a less specific template can serve it. When no complete match has the method, the
+     * result reports a method mismatch whose Allow value is the union over all of them.
+     */
     Match match(Request request) {
+        var method = request.method();
         var exact = exactPaths.get(request.path());
         if (exact != null) {
-            // Static matches allocate neither capture boundaries nor parameter maps.
-            return new Match(exact, request, null);
+            var endpoint = select(exact, method);
+            if (endpoint != null) {
+                // Static matches allocate neither capture boundaries nor parameter maps.
+                return new Match(endpoint, null, null);
+            }
         }
         var segments = new Segments(request.path());
         var pending = new ArrayDeque<Step>();
         pending.push(new Step(root, 0));
+        Node mismatch = null;
+        TreeSet<String> allowed = null;
         while (!pending.isEmpty()) {
             var step = pending.pop();
             var node = step.node();
             int index = step.index();
             if (index == segments.size()) {
-                if (!node.endpoints().isEmpty()) { return new Match(node, request, segments); }
+                if (node.endpoints().isEmpty()) { continue; }
+                var endpoint = select(node, method);
+                if (endpoint != null) { return new Match(endpoint, null, segments); }
+                if (mismatch == null) {
+                    mismatch = node;
+                } else {
+                    if (allowed == null) { allowed = new TreeSet<>(mismatch.methods()); }
+                    allowed.addAll(node.methods());
+                }
                 continue;
             }
             // Push in reverse precedence. Backtrack only when a branch cannot match the whole path.
@@ -98,20 +120,41 @@ final class CompiledRouter {
                 if (literal != null) { pending.push(new Step(literal, index + 1)); }
             }
         }
-        return null;
+        if (mismatch == null) { return null; }
+        return new Match(null, allowed == null ? mismatch.allow() : String.join(", ", allowed), null);
     }
 
-    /** Request-owned match; capture strings and the complete map are materialized on demand. */
+    /** HEAD uses an explicit HEAD endpoint on a node, or else that node's GET endpoint. */
+    private static Endpoint select(Node node, String method) {
+        var endpoint = node.endpoints().get(method);
+        if (endpoint == null && method.equals("HEAD")) { endpoint = node.endpoints().get("GET"); }
+        return endpoint;
+    }
+
+    /**
+     * Immutable match result. Captures are extracted into an unmodifiable map when the match is
+     * created, so a match holds no lazily initialized state and is safe to publish to any thread.
+     */
     static final class Match {
         private final Endpoint endpoint;
         private final String allow;
-        private final Segments segments;
-        private Map<String, String> parameters;
+        private final Map<String, String> parameters;
 
-        private Match(Node node, Request request, Segments segments) {
-            this.endpoint = node.endpoints().get(request.method());
-            this.allow = node.allow();
-            this.segments = segments;
+        private Match(Endpoint endpoint, String allow, Segments segments) {
+            this.endpoint = endpoint;
+            this.allow = allow;
+            this.parameters = endpoint == null || endpoint.captures().isEmpty()
+                    ? Map.of() : captures(endpoint, segments);
+        }
+
+        private static Map<String, String> captures(Endpoint endpoint, Segments segments) {
+            var values = new LinkedHashMap<String, String>();
+            for (var capture : endpoint.captures()) {
+                values.put(capture.name(), capture.wildcard()
+                        ? segments.path.substring(segments.starts[capture.index()])
+                        : segments.value(capture.index()));
+            }
+            return Collections.unmodifiableMap(values);
         }
 
         boolean methodAllowed() { return endpoint != null; }
@@ -120,38 +163,18 @@ final class CompiledRouter {
         Route route() { return endpoint.route(); }
 
         String parameter(String name) {
-            Objects.requireNonNull(name, "name");
-            if (parameters != null && parameters.containsKey(name)) { return parameters.get(name); }
-            for (var capture : endpoint.captures()) {
-                if (capture.name().equals(name)) { return captureValue(capture); }
-            }
-            throw new IllegalArgumentException("Unknown path parameter: " + name);
+            var value = parameters.get(Objects.requireNonNull(name, "name"));
+            if (value == null) { throw new IllegalArgumentException("Unknown path parameter: " + name); }
+            return value;
         }
 
-        Map<String, String> parameters() {
-            if (parameters == null) {
-                if (endpoint.captures().isEmpty()) {
-                    parameters = Map.of();
-                } else {
-                    var values = new LinkedHashMap<String, String>();
-                    for (var capture : endpoint.captures()) { values.put(capture.name(), captureValue(capture)); }
-                    parameters = Collections.unmodifiableMap(values);
-                }
-            }
-            return parameters;
-        }
-
-        private String captureValue(Capture capture) {
-            return capture.wildcard()
-                    ? segments.path.substring(segments.starts[capture.index()])
-                    : segments.value(capture.index());
-        }
+        Map<String, String> parameters() { return parameters; }
     }
 
     private record Capture(String name, int index, boolean wildcard) {}
     private record Endpoint(Route route, Handler handler, List<Capture> captures) {}
     private record Node(Map<String, Node> literals, Node parameter, Node wildcard,
-                        Map<String, Endpoint> endpoints, String allow) {}
+                        Map<String, Endpoint> endpoints, List<String> methods, String allow) {}
     private record Step(Node node, int index) {}
 
     private static final class Builder {

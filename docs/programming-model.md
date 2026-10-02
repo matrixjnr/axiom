@@ -24,23 +24,28 @@ app.get("/files/*path", ctx -> ctx.path("path"));
 `get`, `post`, `put`, `patch`, `delete`, `head`, and `options` delegate to `route`.
 A `Route` is an immutable identity; `routes()` returns an immutable snapshot in
 registration order. Duplicate method/template pairs fail without replacing a handler.
-At startup, equally shaped templates for the same method also fail, regardless of
-capture names. No partially compiled router is published on failure.
+Equally shaped templates for the same method also fail at registration, regardless
+of capture names. No partially compiled router is published on failure.
 
-Matching is case-sensitive and preserves the raw path. Whole-segment `:name`
+Matching is case-sensitive and preserves the raw path. Paths with empty or dot
+segments, backslashes, NUL, malformed percent-escapes, or encoded dots, slashes,
+backslashes or NUL are rejected with `InvalidRequestPathException` (400 over HTTP). Whole-segment `:name`
 parameters capture one non-empty segment; terminal `*name` wildcards capture the
 remaining path. At the first differing segment, static segments take precedence
 over parameters, then wildcards. Branches that cannot match the complete path are
-skipped. The HTTP method is selected only after the best complete path is found.
+skipped, and so are complete matches not registered for the request method: with
+`GET /users/me` and `POST /users/:id`, `POST /users/me` runs the parameter route.
 
-Unknown paths return 404. A matched path without the requested method returns 405
-and its sorted `Allow` header. It does not fall back to a broader route's method.
-HEAD must be registered explicitly and omits the response body. Automatic HEAD
-fallback and OPTIONS behavior are not enabled.
+Unknown paths return 404. When no matching template has the requested method, the
+response is 405 with a sorted `Allow` header listing every method registered on a
+matching template. HEAD uses an explicit HEAD route or else the GET route on the
+same template, and omits the response body; `Allow` includes HEAD wherever GET is
+registered. Automatic OPTIONS behavior is not enabled.
 
 `ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw
 capture; `ctx.pathParameters()` returns an immutable map in template order. Values
-are materialized on access, without percent-decoding or normalization. Query strings
+are extracted when the route matches, without percent-decoding or normalization;
+`ctx.pathDecoded("id")` decodes one capture as strict UTF-8. Captures are untrusted input. Query strings
 are not part of `Request.path()`. See [routing rules](routing.md) for edge cases.
 
 ## Lifecycle and concurrency
@@ -50,9 +55,16 @@ are not part of `Request.path()`. See [routing rules](routing.md) for edge cases
 - `close()` enters `CLOSED` permanently, releases registered handler references,
   and rejects new requests. It is safe to call repeatedly or before startup.
 
-Registration, startup, and shutdown are serialized. Request acceptance occurs
-under the lifecycle lock, which is released before invoking application code.
-Handlers can run concurrently and each invocation receives a fresh context.
+Registration, startup, and shutdown are serialized by a lifecycle lock. Startup
+publishes one immutable snapshot of the router, frozen routes, and admission
+policies; request acceptance, `resolve`, and `admissionPolicy(route)` read it
+without taking the lock. `listen` discovers the transport and binds outside the
+lock; if the application closes meanwhile, the new listener is closed and `listen`
+throws `IllegalStateException`.
+Handlers can run concurrently and each invocation receives a fresh context. A
+context is thread-confined: use it only on the handler's thread and only until the
+handler returns; pass `ctx.execution()`, `ctx.request()`, or extracted values to
+other tasks instead.
 Shared business objects must provide their own thread safety.
 
 Close does not wait for accepted requests. In-memory calls may complete after
@@ -76,13 +88,18 @@ A handler returns an object or throws an exception:
 - `String`: status 200 by default, with `text/plain; charset=utf-8`.
 - `byte[]`: status 200 by default, with `application/octet-stream`; copied defensively.
 - `null`: status 204 unless a status was explicitly set on the context.
-- Other objects: retained as body values without serialization or copying.
+- Other objects: retained as body values without serialization or copying. In-memory
+  callers receive them unchanged; the HTTP transport answers them with 500 until a
+  codec layer exists.
 
 `ctx.status(201).text("created")` sets a status and returns a response snapshot.
 `ctx.noContent()` returns 204. An explicit `Response.of(status, body)` can use
 `withHeader(name, value)` to create a modified copy. Headers are immutable and
 case-insensitive, with one value per name; repeated headers are not modeled yet.
 Final statuses range from 200 through 599; 204, 205, and 304 reject non-null bodies.
+After `ctx.status(204)` (or 205, 304), returning or mapping a body fails with an
+`IllegalStateException` naming the route and status instead of a generic error.
+`Response` compares by value (status, case-insensitive headers, body; byte arrays by content).
 
 Handler exceptions propagate unchanged to in-memory callers. The HTTP transport
 maps exceptions and unsupported body objects to generic 500 responses.

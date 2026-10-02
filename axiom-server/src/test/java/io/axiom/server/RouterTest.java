@@ -2,11 +2,11 @@ package io.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
-import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.axiom.Axiom;
 import io.axiom.application.Application;
+import io.axiom.http.InvalidRequestPathException;
 import io.axiom.http.Request;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,20 +29,20 @@ class RouterTest {
         try (var app = Axiom.create()) {
             var route = app.get("/teams/:team/users/:user", ctx -> {
                 assertThat(ctx.method()).isEqualTo("GET");
-                assertThat(ctx.path()).isEqualTo("/teams/a%2Fb/users/%E2%82%AC");
+                assertThat(ctx.path()).isEqualTo("/teams/a%20b/users/%E2%82%AC");
                 assertThat(ctx.route().path()).isEqualTo("/teams/:team/users/:user");
-                assertThat(ctx.path("team")).isEqualTo("a%2Fb");
+                assertThat(ctx.path("team")).isEqualTo("a%20b");
                 assertThat(ctx.path("user")).isEqualTo("%E2%82%AC");
                 assertThat(ctx.pathParameters()).containsExactly(
-                        Map.entry("team", "a%2Fb"), Map.entry("user", "%E2%82%AC"));
-                assertThat(ctx.path("team")).isEqualTo("a%2Fb");
+                        Map.entry("team", "a%20b"), Map.entry("user", "%E2%82%AC"));
+                assertThat(ctx.path("team")).isEqualTo("a%20b");
                 assertThatThrownBy(() -> ctx.pathParameters().put("team", "changed"))
                         .isInstanceOf(UnsupportedOperationException.class);
                 assertThatIllegalArgumentException().isThrownBy(() -> ctx.path("missing"));
                 return ctx.route();
             });
             app.start();
-            assertThat(app.handle(Request.get("/teams/a%2Fb/users/%E2%82%AC")).body()).isEqualTo(route);
+            assertThat(app.handle(Request.get("/teams/a%20b/users/%E2%82%AC")).body()).isEqualTo(route);
         }
     }
 
@@ -62,7 +62,7 @@ class RouterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/a/b", "/a%2Fb", "/a+b", "/./../b", "//b", "/é", "/"})
+    @ValueSource(strings = {"/a/b", "/a%20b", "/a+b", "/a/b/", "/é", "/"})
     void wildcardPreservesTheRawRemainder(String suffix) throws Exception {
         try (var app = Axiom.create()) {
             app.get("/files/*path", ctx -> ctx.path("path"));
@@ -77,15 +77,37 @@ class RouterTest {
         try (var app = Axiom.create()) {
             app.get("/users/:id", ctx -> ctx.path("id"));
             app.get("/users/:id/", ctx -> "trailing:" + ctx.path("id"));
-            app.get("//:value", ctx -> "double:" + ctx.path("value"));
             app.start();
             assertThat(app.handle(Request.get("/users/")).status()).isEqualTo(404);
-            assertThat(app.handle(Request.get("/users//")).status()).isEqualTo(404);
             assertThat(app.handle(Request.get("/users/7")).body()).isEqualTo("7");
             assertThat(app.handle(Request.get("/users/7/")).body()).isEqualTo("trailing:7");
-            assertThat(app.handle(Request.get("//v")).body()).isEqualTo("double:v");
             assertThat(app.handle(Request.get("/Users/7")).status()).isEqualTo(404);
         }
+    }
+
+    @Test
+    void decodesCapturesOnceAsStrictUtf8() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/users/:id", ctx -> ctx.pathDecoded("id"));
+            app.get("/files/*path", ctx -> ctx.pathDecoded("path"));
+            app.start();
+            assertThat(app.handle(Request.get("/users/a%20b%E2%82%AC")).body()).isEqualTo("a b\u20ac");
+            assertThat(app.handle(Request.get("/users/%2541")).body()).isEqualTo("%41");
+            assertThat(app.handle(Request.get("/users/é+x")).body()).isEqualTo("é+x");
+            assertThat(app.handle(Request.get("/files/a%20b/c/")).body()).isEqualTo("a b/c/");
+            assertThat(app.handle(Request.get("/files/")).body()).isEqualTo("");
+            for (var invalid : new String[] {"/users/%FF", "/users/%C3", "/users/%C3%28", "/files/a/%ED%A0%80"}) {
+                assertThatIllegalArgumentException().as(invalid)
+                        .isThrownBy(() -> app.handle(Request.get(invalid)));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/files/../secret", "/files/a/./b", "/files//etc", "/files/%2e%2e/secret",
+            "/files/a%2Fb", "/files/a%5Cb", "/files/a%00"})
+    void wildcardsNeverReceiveTraversalOrEncodedSeparators(String path) {
+        assertThatThrownBy(() -> Request.get(path)).isInstanceOf(InvalidRequestPathException.class);
     }
 
     @Test
@@ -122,21 +144,39 @@ class RouterTest {
     }
 
     @Test
-    void selectsThePathBeforeTheMethodAndPrecomputesItsAllowHeader() throws Exception {
+    void fallsBackToLessSpecificTemplatesWhenTheMethodDoesNotMatch() throws Exception {
         try (var app = Axiom.create()) {
             app.post("/users/new", ctx -> "static post");
             app.get("/users/:id", ctx -> "parameter get");
             app.put("/users/:name", ctx -> ctx.path("name"));
             app.patch("/users/*rest", ctx -> "wildcard patch");
             app.start();
-            var literalMismatch = app.handle(Request.get("/users/new"));
-            assertThat(literalMismatch.status()).isEqualTo(405);
-            assertThat(literalMismatch.headers()).containsEntry("Allow", "POST");
-            var parameterMismatch = app.handle(new Request("PATCH", "/users/7"));
-            assertThat(parameterMismatch.status()).isEqualTo(405);
-            assertThat(parameterMismatch.headers()).containsEntry("Allow", "GET, PUT");
+            assertThat(app.handle(new Request("POST", "/users/new")).body()).isEqualTo("static post");
+            assertThat(app.handle(Request.get("/users/new")).body()).isEqualTo("parameter get");
+            assertThat(app.handle(new Request("PUT", "/users/new")).body()).isEqualTo("new");
+            assertThat(app.handle(new Request("PATCH", "/users/new")).body()).isEqualTo("wildcard patch");
+            assertThat(app.handle(new Request("PATCH", "/users/7")).body()).isEqualTo("wildcard patch");
             assertThat(app.handle(new Request("PUT", "/users/7")).body()).isEqualTo("7");
-            assertThat(app.handle(new Request("PATCH", "/users/7/photo")).body()).isEqualTo("wildcard patch");
+            var literalMismatch = app.handle(new Request("DELETE", "/users/new"));
+            assertThat(literalMismatch.status()).isEqualTo(405);
+            assertThat(literalMismatch.headers()).containsEntry("Allow", "GET, HEAD, PATCH, POST, PUT");
+            var wildcardMismatch = app.handle(new Request("DELETE", "/users/7/photo"));
+            assertThat(wildcardMismatch.status()).isEqualTo(405);
+            assertThat(wildcardMismatch.headers()).containsEntry("Allow", "PATCH");
+        }
+    }
+
+    @Test
+    void aStaticRouteForOneMethodDoesNotHideAParameterRouteForAnother() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/users/me", ctx -> "current user");
+            app.post("/users/:id", ctx -> "updated " + ctx.path("id"));
+            app.start();
+            assertThat(app.handle(Request.get("/users/me")).body()).isEqualTo("current user");
+            assertThat(app.handle(new Request("POST", "/users/me")).body()).isEqualTo("updated me");
+            assertThat(app.resolve(new Request("POST", "/users/me")).orElseThrow().path()).isEqualTo("/users/:id");
+            assertThat(app.handle(new Request("DELETE", "/users/me")).headers())
+                    .containsEntry("Allow", "GET, HEAD, POST");
         }
     }
 
@@ -159,17 +199,17 @@ class RouterTest {
     @ParameterizedTest
     @CsvSource({"/users/:id,/users/:name", "/:a/:b,/:x/:y", "/files/*path,/files/*rest",
             "/:id/*tail,/:name/*rest"})
-    void rejectsEquivalentTemplatesAtStartupWithoutPublishingPartialState(String first, String second) {
+    void rejectsEquivalentTemplatesAtRegistration(String first, String second) throws Exception {
         try (var app = Axiom.create()) {
-            app.get(first, ctx -> "first");
-            app.get(second, ctx -> "second");
-            assertThatIllegalArgumentException().isThrownBy(app::start)
+            var kept = app.get(first, ctx -> "first");
+            assertThatIllegalArgumentException().isThrownBy(() -> app.get(second, ctx -> "second"))
                     .withMessageContaining("Ambiguous routes for GET").withMessageContaining(first)
                     .withMessageContaining(second);
             assertThat(app.state()).isEqualTo(Application.State.CONFIGURING);
-            assertThat(app.routes()).hasSize(2);
-            assertThatIllegalStateException().isThrownBy(() -> app.handle(Request.get("/users/1")));
-            assertThatIllegalArgumentException().isThrownBy(app::start);
+            assertThat(app.routes()).containsExactly(kept);
+            app.post(second, ctx -> "other method");
+            app.start();
+            assertThat(app.resolve(Request.get(first.replace(":", "x").replace("*", "y")))).contains(kept);
         }
     }
 
@@ -189,13 +229,35 @@ class RouterTest {
         try (var app = Axiom.create()) {
             app.head("/users/:id", ctx -> ctx.path("id"));
             app.head("/files/*path", ctx -> ctx.path("path"));
-            app.get("/:other", ctx -> "get-only");
+            app.get("/:other", ctx -> "get " + ctx.method());
+            app.post("/posts/:id", ctx -> "post-only");
             app.start();
             assertThat(app.handle(new Request("HEAD", "/users/1")).body()).isNull();
             assertThat(app.handle(new Request("HEAD", "/files/a/b")).body()).isNull();
-            var mismatch = app.handle(new Request("HEAD", "/other"));
+            var fallback = app.handle(new Request("HEAD", "/other"));
+            assertThat(fallback.status()).isEqualTo(200);
+            assertThat(fallback.body()).isNull();
+            assertThat(app.resolve(new Request("HEAD", "/other")).orElseThrow().method()).isEqualTo("GET");
+            var mismatch = app.handle(new Request("HEAD", "/posts/1"));
             assertThat(mismatch.status()).isEqualTo(405);
+            assertThat(mismatch.headers()).containsEntry("Allow", "POST");
             assertThat(mismatch.body()).isNull();
+        }
+    }
+
+    @Test
+    void headPrefersAnExplicitHeadRouteThenGetOnTheMostSpecificTemplate() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/items/static", ctx -> "static get");
+            app.head("/items/:id", ctx -> { throw new AssertionError("less specific HEAD must not run"); });
+            app.get("/both", ctx -> { throw new AssertionError("GET must not run when HEAD is registered"); });
+            app.head("/both", ctx -> "explicit head");
+            app.start();
+            assertThat(app.resolve(new Request("HEAD", "/items/static")).orElseThrow().path())
+                    .isEqualTo("/items/static");
+            assertThat(app.handle(new Request("HEAD", "/items/static")).status()).isEqualTo(200);
+            assertThat(app.resolve(new Request("HEAD", "/both")).orElseThrow().method()).isEqualTo("HEAD");
+            assertThat(app.handle(new Request("HEAD", "/both")).headers()).containsKey("content-type");
         }
     }
 

@@ -1,8 +1,10 @@
 package io.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.axiom.Axiom;
+import io.axiom.http.InvalidRequestPathException;
 import io.axiom.http.Request;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -12,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
 /** Compares the trie against an intentionally simple scan of complete route templates. */
@@ -49,19 +52,34 @@ class RouterReferenceTest {
                 prefixes = next;
             }
             for (var path : paths) {
+                if (path.contains("//")) {
+                    // Interior empty segments are rejected before routing.
+                    assertThatThrownBy(() -> Request.get(path)).isInstanceOf(InvalidRequestPathException.class);
+                    continue;
+                }
                 // Rank complete matches lexicographically: literals 2, parameters 1, wildcards 0.
-                var expected = routes.stream().map(route -> scan(route, path)).filter(match -> match != null)
-                        .max(Comparator.comparing(Reference::rank)).orElse(null);
-                for (var method : List.of("GET", "POST", "DELETE")) {
+                var complete = routes.stream().map(route -> scan(route, path)).filter(match -> match != null)
+                        .sorted(Comparator.comparing(Reference::rank).reversed()).toList();
+                var allowed = new TreeSet<String>();
+                complete.forEach(match -> allowed.add(match.template().method()));
+                if (allowed.contains("GET")) { allowed.add("HEAD"); }
+                for (var method : List.of("GET", "HEAD", "POST", "DELETE")) {
+                    // No HEAD routes are registered, so HEAD selects the best GET match.
+                    var served = method.equals("HEAD") ? "GET" : method;
+                    var expected = complete.stream().filter(match -> match.template().method().equals(served))
+                            .findFirst().orElse(null);
                     var actual = app.handle(new Request(method, path));
-                    int status = expected == null ? 404 : expected.template().method().equals(method) ? 200 : 405;
+                    int status = complete.isEmpty() ? 404 : expected == null ? 405 : 200;
                     assertThat(actual.status()).as("%s %s", method, path).isEqualTo(status);
-                    if (status == 200) {
+                    if (status == 200 && !method.equals("HEAD")) {
                         assertThat(actual.body()).as("%s %s", method, path)
                                 .isEqualTo(new Captured(expected.template().path(), expected.parameters()));
+                    } else if (status == 200) {
+                        assertThat(app.resolve(new Request(method, path))).as("%s %s", method, path)
+                                .contains(new io.axiom.routing.Route("GET", expected.template().path()));
                     } else if (status == 405) {
                         assertThat(actual.headers()).as("%s %s", method, path)
-                                .containsEntry("Allow", expected.template().method());
+                                .containsEntry("Allow", String.join(", ", allowed));
                     }
                 }
             }

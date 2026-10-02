@@ -38,7 +38,7 @@ class HttpListenerTest {
                 wire.write("POST /users/x HTTP/1.1\r\nHost: localhost\r\n\r\n");
                 var mismatch = wire.read(false);
                 assertThat(mismatch.status()).isEqualTo(405);
-                assertThat(mismatch.headers()).containsEntry("allow", "GET");
+                assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD");
             }
         }
     }
@@ -98,6 +98,11 @@ class HttpListenerTest {
             "GET / HTTP/1.1\r\nHost: a/path\r\n\r\n",
             "GET http://localhost/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
             "GET /bad%zz HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET /a/../ HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET /%2e%2e/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET //etc HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET /?bad%zz HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET /?a#b HTTP/1.1\r\nHost: localhost\r\n\r\n",
             "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n",
             "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\n"
     })
@@ -403,7 +408,7 @@ class HttpListenerTest {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\nX-Request-ID: client-spoof\r\n\r\n");
                 var first = wire.read(false);
                 assertThat(first.headers()).containsEntry("X-Request-ID", first.text());
-                assertThat(java.util.UUID.fromString(first.text())).isNotNull();
+                assertThat(first.text()).matches("[A-Za-z0-9_-]{16}-[0-9a-f]+");
                 assertThat(wire.get("/").text()).isNotEqualTo(first.text());
             }
         }
