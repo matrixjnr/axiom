@@ -57,6 +57,16 @@ fails the build and names the module and the file to update. To see it fire, rem
 a `api(project(...))` line from `axiom-bom/build.gradle.kts` or a module from the map
 and run `./gradlew checkPublicationCoverage`.
 
+## Allocation-based tests
+
+The no-copy tests measure allocation per thread through `com.sun.management.ThreadMXBean`
+and are skipped (JUnit assumption) on a JVM that cannot measure it. Passing
+`-Daxiom.requireAllocationTests=true` to Gradle turns that skip into a failure; the Build
+workflow sets it, and the `axiom.java-test` convention forwards it to every test JVM.
+Locally it is off by default so a different JDK does not break `check`. Currently only
+the `axiom-json` test (`decodesFromAReadOnlyViewWithoutCopyingIt`) honors the flag; the
+`axiom-server` `CodecViewTest` case still skips silently (tracked as a limitation).
+
 ## Hygiene and deferred items
 
 Compilation runs with `-Xlint:all -Werror`; the build is warning-free. Archives

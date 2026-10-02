@@ -15,5 +15,6 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew clean check
+      # Temurin 21 can measure per-thread allocation; fail instead of skipping if that changes.
+      - run: ./gradlew clean check -Daxiom.requireAllocationTests=true
       - run: ./gradlew :examples:hello:run --args="--smoke"
