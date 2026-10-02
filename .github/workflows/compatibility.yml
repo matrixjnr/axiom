@@ -1,0 +1,22 @@
+name: Compatibility
+# Builds Gradle (Kotlin and Groovy DSL) and Maven consumer projects against locally published
+# artifacts. Slow, so it is not part of the Build workflow.
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      # The Maven consumer is skipped silently by Gradle when mvn is missing; fail here instead.
+      - run: mvn --version
+      - run: ./gradlew compatibilityTest --no-build-cache
