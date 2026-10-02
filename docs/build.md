@@ -55,13 +55,13 @@ Facts from `./gradlew :axiom-starter:dependencies --configuration runtimeClasspa
 at 0.1.0-SNAPSHOT (Netty 4.2.18.Final, Jackson 2.22.3):
 
 - Compile classpath of a consumer: `axiom`, `axiom-core`.
-- Runtime classpath: 17 jars. 5 are Axiom (`axiom`, `axiom-core`, `axiom-http`,
+- Runtime classpath: 19 jars. 5 are Axiom (`axiom`, `axiom-core`, `axiom-http`,
   `axiom-server`, `axiom-json`), 9 are Netty (common, buffer, transport, resolver,
   codec-base, codec-compression, codec-http, handler, transport-native-unix-common)
-  and 3 are Jackson (databind, core, annotations).
-- Axiom jar sizes in bytes: core 49,562; server 44,317; http 24,685; json 8,432;
-  starter 261 (total 127,257). Third-party jars total 5,963,045 bytes: Netty
-  3,574,454 and Jackson 2,388,591.
+  and 5 are Jackson (databind, core, annotations, datatype-jsr310, datatype-jdk8).
+- Axiom jar sizes in bytes: core 49,793; server 44,337; http 24,685; json 15,163;
+  starter 261 (total 134,239). Third-party jars total 6,135,959 bytes: Netty
+  3,574,454 and Jackson 2,561,505.
 - No other libraries (logging, annotation, or test libraries) are on the runtime
   classpath.
 
