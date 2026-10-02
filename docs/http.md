@@ -55,8 +55,11 @@ and closes that connection. Connections are
 limited to 128; additional connections close immediately. A connection holds at
 most eight outstanding requests. Pipeline overflow closes the connection.
 
-Reads pause while a response is outstanding, and the next queued handler starts
-after the previous write completes. The decoder limits request lines to 4 KiB and
+Reads continue while a handler runs, so a client disconnect (including a
+half-close after sending the request) cancels and interrupts the active handler
+and drops queued requests. Pipelined requests are buffered only up to the
+eight-request bound above; the next queued handler starts after the previous
+write completes. The decoder limits request lines to 4 KiB and
 headers to 8 KiB. Response bodies are limited to 1 MiB after encoding and response
 headers to 8 KiB; larger responses produce 500. Application allocations before
 returning a response are outside these limits. Idle keep-alive connections close

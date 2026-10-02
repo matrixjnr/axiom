@@ -35,6 +35,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static final System.Logger LOG = System.getLogger(HttpConnection.class.getName());
     private static final Object UNMATCHED = new Object();
     private static final int MAX_RESPONSE = 1024 * 1024;
+    /** Outstanding requests per connection, including the active one; more closes the connection. */
+    static final int MAX_PIPELINED = 8;
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
@@ -74,7 +76,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (message instanceof HttpContent content) {
             if (receiving == null || content.content().isReadable()) { fail(ctx, 400); return; }
             if (message instanceof LastHttpContent) {
-                if (pending.size() + (busy ? 1 : 0) >= 8) { abort(ctx); return; }
+                if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { abort(ctx); return; }
                 pending.addLast(receiving);
                 receiving = null;
                 dispatch(ctx);
@@ -96,8 +98,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     private void dispatch(ChannelHandlerContext ctx) {
         if (busy || closing || pending.isEmpty()) { return; }
+        // Reads stay enabled so a client disconnect cancels the running handler; the
+        // pipeline bound below keeps buffered requests finite.
         busy = true;
-        ctx.channel().config().setAutoRead(false);
         var exchange = pending.removeFirst();
         if (exchange.execution().isExpired()) { send(ctx, exchange, error(504)); return; }
         try {
@@ -186,8 +189,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 active = null;
                 if (!future.isSuccess() || !keepAlive) { ctx.close(); return; }
                 busy = false;
-                if (pending.isEmpty()) { ctx.channel().config().setAutoRead(true); }
-                else { dispatch(ctx); }
+                dispatch(ctx);
             });
         } catch (RuntimeException failure) {
             message.release();

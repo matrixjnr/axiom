@@ -192,6 +192,26 @@ class HttpListenerTest {
         }
     }
 
+    @Test void clientDisconnectInterruptsRunningHandler() throws Exception {
+        var entered = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.requestTimeout(java.time.Duration.ofHours(1));
+            fixture.app.get("/", ctx -> {
+                entered.countDown();
+                try { new CountDownLatch(1).await(); }
+                catch (InterruptedException expected) { interrupted.countDown(); Thread.currentThread().interrupt(); }
+                return "abandoned";
+            });
+            var server = fixture.listen();
+            var wire = new Wire(server);
+            wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            wire.close();
+            assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
     @Test void bindFailureCanBeRetriedAndHandlerCanCloseApplication() throws Exception {
         try (var fixture = new Fixture(); var occupied = new java.net.ServerSocket(0)) {
             fixture.app.get("/", ctx -> { fixture.app.close(); return "closed"; });
