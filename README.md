@@ -104,6 +104,10 @@ Maven:
 </dependencies>
 ```
 
+Validation is opt-in and not part of the starter: add `io.axiom:axiom-validation`, or
+`io.axiom:axiom-validation-jakarta` for Jakarta annotations, alongside it (versions come
+from the BOM). See [validation](docs/validation.md).
+
 Consumer builds against locally published artifacts are exercised by
 `./gradlew compatibilityTest`.
 

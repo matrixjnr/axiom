@@ -8,8 +8,8 @@ that is not covered here.
 ## Published modules
 
 `axiom` (the starter, project `axiom-starter`), `axiom-core`, `axiom-server`,
-`axiom-http`, `axiom-json`, `axiom-test` and `axiom-bom`. Examples and benchmarks are
-not published. A new library module that applies `axiom.java-library` is published
+`axiom-http`, `axiom-json`, `axiom-test`, `axiom-validation`, `axiom-validation-jakarta`
+and `axiom-bom`. Examples, benchmarks and `integration-tests` are not published. A new library module that applies `axiom.java-library` is published
 automatically; add it to `axiom-bom` as well.
 
 ## Owner actions before the first release
@@ -61,7 +61,7 @@ automatically; add it to `axiom-bom` as well.
    `-Paxiom.release=true -Paxiom.publish.url=...`:
    `./gradlew publishAllPublicationsToRemoteRepository`. With that flag the build
    refuses to publish while placeholders remain or the key is missing.
-8. Verify on Central that all seven modules, their `.module` files, signatures,
+8. Verify on Central that all nine modules, their `.module` files, signatures,
    sources and Javadoc jars are present, then run the Maven and Gradle snippets from
    the README against the released version.
 9. Bump `version=` to the next `-SNAPSHOT` and add an empty `Unreleased` section.
