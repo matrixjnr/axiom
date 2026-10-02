@@ -124,7 +124,8 @@ reviewed more closely than other dependency updates.
 ## Workflows
 
 - `build.yml`: `./gradlew clean check` and the hello smoke run on JDK 21, Linux, for
-  pushes to `main` and pull requests.
+  pushes to `main` and pull requests. Pull requests also run the `commits` job, which
+  builds each commit of the PR (up to 20, see `docs/build.md`).
 - `compatibility.yml`: weekly and on demand; runs `./gradlew compatibilityTest`
   (Gradle Kotlin, Gradle Groovy and Maven consumers).
 - `release.yml`: on `v*` tags; skeleton described above.

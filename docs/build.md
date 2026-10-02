@@ -151,6 +151,22 @@ build fail. The standalone consumer projects in `compatibility/` are not covered
 Dependency locking was evaluated and not enabled: versions are already exact
 through the catalog and the Netty and Jackson BOMs, and checksums pin the contents.
 
+## Every commit builds
+
+Rule: checksums go in the same commit as the dependency. A commit that adds or changes
+a dependency or plugin without the matching entries in `gradle/verification-metadata.xml`
+does not build, even if a later commit repairs it, and it breaks `git bisect`.
+
+The `commits` job of the Build workflow (pull requests only, `contents: read`, no
+secrets) checks out the PR head with full history and runs
+`./gradlew clean check` on each non-merge commit between the base and the head, oldest
+first, through `.github/scripts/check-each-commit.sh`. It stops at the first failing
+commit. Up to 20 commits are all built. A longer series is bounded: only commits that
+touch build files (`*.gradle(.kts)`, `gradle/`, `build-logic/`, `gradle.properties`,
+the wrapper) are built, the newest 20 of them, so a non-build commit in a long series
+can still be unbuilt. The script's selection logic was exercised locally against a
+scratch repository; the workflow itself only runs on GitHub.
+
 ## Integration tests
 
 Server, HTTP and test-client tests use small stand-in codecs, because those modules
