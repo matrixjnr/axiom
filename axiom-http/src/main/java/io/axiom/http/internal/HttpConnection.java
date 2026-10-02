@@ -1,10 +1,12 @@
 package io.axiom.http.internal;
 
 import io.axiom.application.Application;
+import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
+import io.axiom.server.internal.execution.RequestDispatcher;
+import io.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
 import io.netty.buffer.Unpooled;
-
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
@@ -20,13 +22,11 @@ import io.netty.handler.timeout.IdleStateEvent;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
 
 /** All mutable connection state belongs to the channel's event loop. */
 final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
@@ -35,14 +35,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
-    private final ThreadPoolExecutor executor;
+    private final RequestDispatcher executor;
     private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
     private Exchange receiving;
     private boolean busy;
     private boolean closing;
-    private FutureTask<Void> active;
+    private RequestDispatcher.Task<WireResponse> active;
 
-    HttpConnection(Application application, ThreadPoolExecutor executor) {
+    HttpConnection(Application application, RequestDispatcher executor) {
         this.application = application;
         this.executor = executor;
     }
@@ -65,7 +65,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 if (!target.startsWith("/") || target.indexOf('#') >= 0) { fail(ctx, 400); return; }
                 var uri = URI.create("http://axiom.invalid" + target);
                 receiving = new Exchange(new Request(request.method().name(), uri.getRawPath()),
-                        HttpUtil.isKeepAlive(request));
+                        HttpUtil.isKeepAlive(request), ExecutionContext.create(application.requestTimeout()));
             } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
         }
         if (message instanceof HttpContent content) {
@@ -96,27 +96,43 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         busy = true;
         ctx.channel().config().setAutoRead(false);
         var exchange = pending.removeFirst();
-        active = new FutureTask<>(() -> {
-            WireResponse result;
-            try { result = prepare(application.handle(exchange.request())); }
-            catch (Exception failure) {
-                LOG.log(System.Logger.Level.ERROR, "HTTP handler failed", failure);
-                result = error(500);
-            }
-            catch (Error fatal) { ctx.close(); throw fatal; }
-            var completed = result;
-            try {
-                ctx.executor().execute(() -> {
-                    if (!closing && ctx.channel().isActive()) { send(ctx, exchange, completed); }
-                });
-            } catch (RejectedExecutionException stopped) { /* Channel shutdown already owns cleanup. */ }
-            return null;
-        });
-        try { executor.execute(active); }
-        catch (RejectedExecutionException overloaded) {
+        if (exchange.execution().isExpired()) { send(ctx, exchange, error(504)); return; }
+        try {
+            active = executor.submit(exchange.execution(), () -> {
+                try { return prepare(application.handle(exchange.request(), exchange.execution())); }
+                catch (Exception | Error failure) {
+                    if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
+                        LOG.log(System.Logger.Level.ERROR,
+                                "HTTP request " + exchange.execution().requestId() + " failed", failure);
+                    }
+                    throw failure;
+                }
+            });
+            active.result().whenComplete((response, thrown) -> {
+                var failure = unwrap(thrown);
+                try {
+                    ctx.executor().execute(() -> {
+                        if (closing || !ctx.channel().isActive()) { return; }
+                        if (failure instanceof Error) {
+                            abort(ctx);
+                        } else {
+                            send(ctx, exchange, failure == null ? response
+                                    : error(failure instanceof DeadlineExceededException ? 504 : 500));
+                        }
+                    });
+                } catch (RejectedExecutionException stopped) { /* Channel shutdown owns cleanup. */ }
+            });
+        } catch (RejectedExecutionException overloaded) {
             active = null;
             send(ctx, exchange, error(503));
         }
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        while (failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null) {
+            failure = failure.getCause();
+        }
+        return failure;
     }
 
     private static WireResponse prepare(Response response) {
@@ -154,6 +170,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             if (!head && response.status() != 204 && response.status() != 304) {
                 HttpUtil.setContentLength(message, response.body().length);
             }
+            message.headers().set("X-Request-ID", exchange.execution().requestId());
             boolean keepAlive = exchange.keepAlive() && !response.close();
             HttpUtil.setKeepAlive(message, keepAlive);
             if (!keepAlive) { closing = true; pending.clear(); }
@@ -178,7 +195,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private void fail(ChannelHandlerContext ctx, int status) {
         // Never send an error ahead of an earlier pipelined response.
         if (busy || !pending.isEmpty()) { abort(ctx); return; }
-        send(ctx, new Exchange(Request.get("/"), false), error(status));
+        send(ctx, new Exchange(Request.get("/"), false, ExecutionContext.create(application.requestTimeout())), error(status));
     }
 
     private void abort(ChannelHandlerContext ctx) { closing = true; ctx.close(); }
@@ -187,7 +204,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         closing = true;
         receiving = null;
         pending.clear();
-        if (active != null) { active.cancel(true); executor.remove(active); active = null; }
+        if (active != null) { active.cancel(); active = null; }
     }
 
     @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
@@ -197,6 +214,6 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) { abort(ctx); }
 
-    private record Exchange(Request request, boolean keepAlive) { }
+    private record Exchange(Request request, boolean keepAlive, ExecutionContext execution) { }
     private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close) { }
 }

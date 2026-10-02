@@ -60,6 +60,13 @@ Close does not wait for accepted requests. In-memory calls may complete after
 handlers. Await each listener's `termination()` to join shutdown. See
 [HTTP ownership, execution and limits](http.md).
 
+## Execution metadata
+
+`ctx.execution()` exposes the request ID and monotonic remaining budget.
+HTTP uses bounded virtual-thread execution with a configurable deadline;
+direct calls and the test client retain synchronous caller-thread execution.
+See [execution semantics](execution.md) for cancellation and timeout boundaries.
+
 ## Responses and failures
 
 A handler returns an object or throws an exception:

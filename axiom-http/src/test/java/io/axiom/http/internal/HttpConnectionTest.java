@@ -3,15 +3,16 @@ package io.axiom.http.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.axiom.Axiom;
+import io.axiom.execution.ExecutionContext;
+import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
-import java.util.concurrent.ArrayBlockingQueue;
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
@@ -21,12 +22,13 @@ class HttpConnectionTest {
         var release = new CountDownLatch(1);
         var executor = executor();
         try (var app = Axiom.create()) {
-            executor.execute(() -> {
+            executor.submit(ExecutionContext.create(Duration.ofSeconds(10)), () -> {
                 entered.countDown();
                 try { release.await(); } catch (InterruptedException expected) { Thread.currentThread().interrupt(); }
+                return null;
             });
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-            executor.execute(() -> { }); // Fill the only queue slot.
+
             app.get("/", ctx -> { throw new AssertionError("Rejected request must not execute"); });
             app.start();
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
@@ -41,8 +43,8 @@ class HttpConnectionTest {
             } finally { channel.finishAndReleaseAll(); }
         } finally {
             release.countDown();
-            executor.shutdownNow();
-            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -68,8 +70,8 @@ class HttpConnectionTest {
                 assertThat(channel.<Object>readOutbound()).isNull();
             } finally { channel.finishAndReleaseAll(); }
         } finally {
-            executor.shutdownNow();
-            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -88,8 +90,8 @@ class HttpConnectionTest {
                 assertThat(channel.<Object>readOutbound()).isNull();
             } finally { channel.finishAndReleaseAll(); }
         } finally {
-            executor.shutdownNow();
-            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -101,7 +103,7 @@ class HttpConnectionTest {
                 channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
                 assertThat(channel.isActive()).isFalse();
             } finally { channel.finishAndReleaseAll(); }
-        } finally { executor.shutdownNow(); }
+        } finally { executor.close(); }
     }
     private static void request(EmbeddedChannel channel) {
         var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/");
@@ -109,7 +111,7 @@ class HttpConnectionTest {
         channel.writeInbound(request, LastHttpContent.EMPTY_LAST_CONTENT);
     }
 
-    private static ThreadPoolExecutor executor() {
-        return new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1));
+    private static RequestDispatcher executor() {
+        return new RequestDispatcher(1);
     }
 }

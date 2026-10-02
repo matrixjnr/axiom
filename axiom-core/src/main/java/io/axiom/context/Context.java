@@ -1,5 +1,6 @@
 package io.axiom.context;
 
+import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.routing.Route;
@@ -13,6 +14,12 @@ public interface Context {
      * @return the immutable request metadata
      */
     Request request();
+
+    /**
+     * Returns immutable identity and deadline metadata for this invocation.
+     * @return execution context, safe to share with application tasks
+     */
+    ExecutionContext execution();
     /**
      * Returns the case-sensitive HTTP method.
      *

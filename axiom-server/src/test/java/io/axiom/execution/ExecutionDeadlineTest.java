@@ -1,0 +1,45 @@
+package io.axiom.execution;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import io.axiom.Axiom;
+import io.axiom.http.Request;
+import io.axiom.server.internal.execution.RequestDispatcher;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import org.junit.jupiter.api.Test;
+
+/** Uses core's package-private clock seam without adding a public test clock API. */
+class ExecutionDeadlineTest {
+    @Test void completionChecksClockEvenWhenScheduledTimerHasNotFired() throws Exception {
+        var clock = new AtomicLong();
+        var budget = Duration.ofHours(1);
+        var execution = ExecutionContext.create(budget, clock::get);
+        var dispatcher = new RequestDispatcher(1);
+        try {
+            var task = dispatcher.submit(execution, () -> { clock.set(budget.toNanos()); return "too late"; });
+            assertThatThrownBy(() -> task.result().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(RequestDispatcher.DeadlineExceededException.class);
+        } finally {
+            dispatcher.close();
+            dispatcher.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void expiredExplicitContextDoesNotInvokeSynchronousHandler() {
+        var clock = new AtomicLong();
+        var execution = ExecutionContext.create(Duration.ofSeconds(1), clock::get);
+        var called = new AtomicBoolean();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> { called.set(true); return "unexpected"; });
+            app.start();
+            clock.set(Duration.ofSeconds(1).toNanos());
+            assertThatThrownBy(() -> app.handle(Request.get("/"), execution)).isInstanceOf(TimeoutException.class);
+            assertThat(called).isFalse();
+        }
+    }
+}

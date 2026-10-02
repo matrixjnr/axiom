@@ -2,6 +2,7 @@ package io.axiom.server.internal;
 
 import io.axiom.application.Application;
 import io.axiom.context.Handler;
+import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.http.spi.HttpTransportProvider;
@@ -9,7 +10,9 @@ import io.axiom.lifecycle.Server;
 import io.axiom.routing.Route;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.concurrent.TimeoutException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +23,7 @@ final class DefaultApplication implements Application {
     private final Map<Route, Handler> registrations = new LinkedHashMap<>();
     private CompiledRouter router;
     private List<Route> frozenRoutes = List.of();
+    private volatile Duration requestTimeout = Duration.ofSeconds(10);
     private volatile State state = State.CONFIGURING;
     private final List<Server> listeners = new ArrayList<>();
 
@@ -71,6 +75,21 @@ final class DefaultApplication implements Application {
 
     @Override
     public Response handle(Request request) throws Exception {
+        return handle(request, ExecutionContext.create(requestTimeout));
+    }
+
+    @Override public synchronized Application requestTimeout(Duration timeout) {
+        requireState(State.CONFIGURING);
+        ExecutionContext.validateTimeout(timeout);
+        requestTimeout = timeout;
+        return this;
+    }
+
+    @Override public Duration requestTimeout() { return requestTimeout; }
+
+    @Override
+    public Response handle(Request request, ExecutionContext execution) throws Exception {
+        Objects.requireNonNull(execution, "execution");
         Objects.requireNonNull(request, "request");
         CompiledRouter acceptedRouter;
         synchronized (this) {
@@ -78,6 +97,7 @@ final class DefaultApplication implements Application {
             // Admission ends here. Never hold the lifecycle lock while invoking user code.
             acceptedRouter = router;
         }
+        if (execution.isExpired()) { throw new TimeoutException("Request deadline exceeded"); }
         var match = acceptedRouter.match(request);
         Response response;
         if (match == null) {
@@ -87,7 +107,7 @@ final class DefaultApplication implements Application {
                 response = Response.of(405, "Method Not Allowed")
                         .withHeader("Allow", match.allow());
             } else {
-                var context = new DefaultContext(request, match);
+                var context = new DefaultContext(request, match, execution);
                 var result = match.handler().handle(context);
                 response = result instanceof Response explicit ? explicit : context.response(result);
             }

@@ -2,28 +2,26 @@ package io.axiom.http.internal;
 
 import io.axiom.application.Application;
 import io.axiom.lifecycle.Server;
+import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.MultiThreadIoEventLoopGroup;
 import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.channel.MultiThreadIoEventLoopGroup;
 import io.netty.channel.nio.NioIoHandler;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.timeout.IdleStateHandler;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Future;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 
 final class NettyServer implements Server {
     private final MultiThreadIoEventLoopGroup acceptors = new MultiThreadIoEventLoopGroup(
@@ -31,14 +29,10 @@ final class NettyServer implements Server {
     private final MultiThreadIoEventLoopGroup io = new MultiThreadIoEventLoopGroup(
             2, Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());
     private final DefaultChannelGroup channels = new DefaultChannelGroup(io.next(), true);
-    private final CompletableFuture<Void> handlersStopped = new CompletableFuture<>();
-    private final ThreadPoolExecutor handlers = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(32), Thread.ofPlatform().name("axiom-http-handler-", 0).factory(),
-            new ThreadPoolExecutor.AbortPolicy()) {
-        @Override protected void terminated() { handlersStopped.complete(null); }
-    };
+    private final RequestDispatcher handlers = new RequestDispatcher(36);
     private final CompletableFuture<Void> stopped = CompletableFuture.allOf(
-            handlersStopped, completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
+            handlers.termination().toCompletableFuture(),
+            completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
     private final AtomicBoolean closing = new AtomicBoolean();
     private final AtomicInteger connections = new AtomicInteger();
     private Channel listener;
@@ -87,9 +81,7 @@ final class NettyServer implements Server {
     @Override public void close() {
         if (!closing.compareAndSet(false, true)) { return; }
         channels.close().addListener(ignored -> {
-            for (var task : handlers.shutdownNow()) {
-                if (task instanceof Future<?> future) { future.cancel(true); }
-            }
+            handlers.close();
             acceptors.shutdownGracefully(0, 5, TimeUnit.SECONDS);
             io.shutdownGracefully(0, 5, TimeUnit.SECONDS);
         });

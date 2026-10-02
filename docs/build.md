@@ -17,5 +17,7 @@ classes, including generic types, to reject implementation and third-party types
 These run as part of `check` alongside behavior and lifecycle tests.
 
 Core discovers the default runtime through a JDK service provider. HTTP and test
-client consumers receive core through `api` and server through `runtimeOnly`.
+client consumers receive core through `api`. HTTP uses server through
+`implementation` for its protocol-neutral execution dispatcher; the test client
+uses server through `runtimeOnly`. Neither exposes server on consumer compile classpaths.
 The server depends on core; core has no reverse dependency on the runtime.
