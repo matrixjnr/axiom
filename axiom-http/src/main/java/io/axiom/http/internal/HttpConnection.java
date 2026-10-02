@@ -15,6 +15,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.socket.DuplexChannel;
 import io.netty.handler.codec.DateFormatter;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpContent;
@@ -64,6 +65,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * earlier pipelined requests finish. Beyond it, reading pauses until the connection closes.
      */
     static final int MAX_DISCARDED_INPUT = 1024 * 1024;
+    /**
+     * After a listener error response the output is shut down and input is read and discarded for
+     * at most this long before the connection closes, so a client still sending (for example the
+     * rest of a rejected body) reads the response instead of a reset.
+     */
+    static final Duration LINGER_TIMEOUT = Duration.ofSeconds(2);
+    /** Input discarded while lingering; a client sending more is closed at once. */
+    static final int LINGER_MAX_INPUT = 16 * 1024 * 1024;
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
@@ -79,6 +88,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * no further input is decoded or executed.
      */
     private int deferredStatus;
+    /** Output is shut down after an error response; input is discarded until the connection closes. */
+    private boolean lingering;
+    private ScheduledFuture<?> lingerTimer;
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
     private ScheduledFuture<?> headTimer;
@@ -375,7 +387,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         }
         boolean close = java.util.Arrays.stream(response.headers().getOrDefault("Connection", "").split(","))
                 .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
-        return new WireResponse(response.status(), response.headers(), bytes, close);
+        return new WireResponse(response.status(), response.headers(), bytes, close, false);
     }
 
     private void send(ChannelHandlerContext ctx, Exchange exchange, WireResponse response) {
@@ -410,7 +422,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             owned = null;
             ctx.writeAndFlush(message).addListener(future -> {
                 active = null;
-                if (!future.isSuccess() || !keepAlive || draining) { ctx.close(); return; }
+                if (!future.isSuccess()) { ctx.close(); return; }
+                if (!keepAlive || draining) {
+                    if (response.error()) { linger(ctx); } else { ctx.close(); }
+                    return;
+                }
                 busy = false;
                 dispatch(ctx);
                 sendContinue(ctx);
@@ -438,7 +454,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     private static WireResponse error(int status, Exchange exchange) {
         return new WireResponse(status, Map.of("Content-Type", Problems.MEDIA_TYPE),
-                Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true);
+                Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true, true);
     }
 
     /**
@@ -458,6 +474,27 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         sendError(ctx, status);
     }
 
+    /**
+     * Half-closes after a listener error response: the client reads the response and end of stream,
+     * and input it is still sending is discarded rather than left unread, which would make the
+     * operating system reset the connection and could destroy the response. The connection closes
+     * when the client closes its side, after {@link #LINGER_TIMEOUT}, after {@link #LINGER_MAX_INPUT}
+     * bytes, or on inactivity, whichever comes first.
+     */
+    private void linger(ChannelHandlerContext ctx) {
+        var decoder = ctx.pipeline().get(RequestDecoder.class);
+        if (!(ctx.channel() instanceof DuplexChannel duplex) || decoder == null || !ctx.channel().isActive()) {
+            ctx.close();
+            return;
+        }
+        lingering = true;
+        decoder.discard(LINGER_MAX_INPUT);
+        lingerTimer = ctx.executor().schedule(() -> { ctx.close(); }, LINGER_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
+        duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
+        // Reading may have paused while an error waited for earlier responses.
+        ctx.channel().config().setAutoRead(true);
+    }
+
     private void sendError(ChannelHandlerContext ctx, int status) {
         var exchange = new Exchange(Request.get("/"), false, false, ExecutionContext.create(application.requestTimeout()));
         send(ctx, exchange, error(status, exchange));
@@ -474,6 +511,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override public void channelInactive(ChannelHandlerContext ctx) {
         closing = true;
+        if (lingerTimer != null) { lingerTimer.cancel(false); lingerTimer = null; }
         headComplete();
         releaseBody();
         receiving = null;
@@ -487,7 +525,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // executes; idle connections and stalled response writes still close.
         if (event == RequestDecoder.DECODED) { inputDecoded(ctx); }
         // Pausing keeps a client that keeps sending after an error from occupying the event loop.
-        else if (event == RequestDecoder.DISCARD_LIMIT) { ctx.channel().config().setAutoRead(false); }
+        else if (event == RequestDecoder.DISCARD_LIMIT) {
+            if (lingering) { ctx.close(); } else { ctx.channel().config().setAutoRead(false); }
+        }
         else if (event instanceof IdleStateEvent) { if (active == null) { abort(ctx); } }
         else { super.userEventTriggered(ctx, event); }
     }
@@ -497,5 +537,6 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private record CachedDate(long second, String value) { }
     private static volatile CachedDate date = new CachedDate(Long.MIN_VALUE, "");
     private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) { }
-    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close) { }
+    /** {@code error} marks a listener error response, after which the connection lingers. */
+    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean error) { }
 }

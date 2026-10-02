@@ -62,6 +62,19 @@ section 431; an
 `Expect` other than `100-continue` 417; other HTTP versions 505; malformed requests
 400. These close the connection.
 
+Closing right after an error could destroy the response: if the client is still
+sending (for example the rest of a rejected body), unread input makes the operating
+system reset the connection, and a client may then report the reset instead of the
+response. After every error response the listener generates itself (the "Listener"
+rows in [errors](errors.md#framework-statuses), including its 500, 503 and 504) it
+therefore shuts down its output, so the client reads the response and end of stream,
+and keeps reading and discarding input without buffering it. The connection closes
+when the client closes its side, after two seconds, after 16 MiB of discarded input,
+or on inactivity, whichever comes first. A lingering connection still counts against
+the connection limit and can delay listener shutdown by up to those two seconds.
+Responses that close for other reasons (`Connection: close`, HTTP/1.0, shutdown)
+close at once.
+
 ### Errors on pipelined requests
 
 A listener error never overtakes an earlier response and never aborts earlier work.
@@ -142,15 +155,6 @@ do not start it.
 A request body must arrive before the request deadline, which starts when the head
 is parsed; otherwise the listener answers 408 and closes. A connection receiving
 body bytes is not idle, but one that stops sending mid-body for 30 seconds is.
-
-### Known limitations
-
-- **Error responses close without lingering.** Responses that end a connection
-  (400, 408, 413, 417 and the other listener errors) are written and the socket is
-  closed at once. If the client is still sending, for example the rest of an
-  oversized body, the operating system may answer the unread data with a TCP reset,
-  and the client can see a reset instead of the response. Clients that send
-  `Expect: 100-continue` and wait avoid this for 413.
 
 The default execution deadline is ten seconds, configurable before startup through
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.

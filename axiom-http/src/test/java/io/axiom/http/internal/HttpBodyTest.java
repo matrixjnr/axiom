@@ -50,6 +50,40 @@ class HttpBodyTest {
         assertThat(calls).hasValue(0);
     }
 
+    @Test void clientStillSendingAnOversizedBodyReadsThe413AndIsNotReset() throws Exception {
+        try (var fixture = echo(16)) {
+            var wire = new Wire(fixture.listen());
+            int length = 8 * 1024 * 1024;
+            var piece = new byte[16 * 1024];
+            // The head and the start of the body arrive together, so body bytes are unread when the 413 is sent.
+            var head = ("POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: " + length + "\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII);
+            wire.socket.getOutputStream().write(java.util.Arrays.copyOf(head, head.length + piece.length));
+            // Keeps sending the declared body without waiting, as many clients do.
+            var failure = new java.util.concurrent.atomic.AtomicReference<IOException>();
+            var sender = Thread.ofVirtual().start(() -> {
+                try {
+                    for (int sent = piece.length; sent < length; sent += piece.length) {
+                        wire.socket.getOutputStream().write(piece);
+                    }
+                    wire.socket.shutdownOutput();
+                } catch (IOException reset) { failure.set(reset); }
+            });
+            try {
+                var reply = wire.read(false);
+                assertThat(reply.status()).isEqualTo(413);
+                assertThat(reply.headers()).containsEntry("connection", "close");
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+                sender.join();
+                // The server kept reading and discarding the body instead of resetting the connection.
+                assertThat(failure.get()).isNull();
+            } finally {
+                wire.close();
+                sender.join();
+            }
+        }
+    }
+
     @Test void deliversChunkedBodiesUnderTheLimit() throws Exception {
         try (var fixture = echo(16); var wire = new Wire(fixture.listen())) {
             wire.write("POST /echo HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nContent-Type: text/plain\r\n\r\n"

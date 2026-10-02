@@ -66,13 +66,15 @@ connections, so its worst case is about `128 × 3 × L` (384 MiB at the default)
 and each additional listener has its own 128 connections. There is no
 process-wide body budget; size `L`, the request timeout and the heap together.
 
-## Known limitations
+## Rejected bodies
 
 A 413 (or another error) on a pipelined request is sent after the responses to
 earlier requests, which still run; see
-[errors on pipelined requests](http.md#errors-on-pipelined-requests). Error responses
-close the socket without lingering, so a client still sending a body may see a reset
-instead of the 413; see [HTTP known limitations](http.md#known-limitations).
+[errors on pipelined requests](http.md#errors-on-pipelined-requests). After the 413
+the listener discards the rest of the body for a bounded time instead of resetting
+the connection, so a client still sending reads the response; see
+[wire behavior](http.md#wire-behavior). Clients that send `Expect: 100-continue` and
+wait avoid sending the body at all.
 
 ## Timing
 
