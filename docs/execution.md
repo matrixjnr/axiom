@@ -18,14 +18,17 @@ app.get("/status", ctx -> {
 app.listen(8080);
 ```
 
-Every invocation has immutable `ExecutionContext` metadata: a generated UUID and
-a monotonic deadline. It can be shared with application tasks, while the mutable
+Every invocation has immutable `ExecutionContext` metadata: a generated request ID
+and a monotonic deadline. The ID is a random 96-bit per-process prefix plus a
+sequence number in hexadecimal (for example `q3J0bW9yZS1yYW5k-1a`), so generating it costs one atomic increment rather
+than a secure random draw per request. It can be shared with application tasks, while the mutable
 handler `Context` remains confined to the handler. No thread-local propagation is
 provided. Pass the metadata explicitly to work that needs the remaining budget.
 
 HTTP responses carry the same identity in `X-Request-ID`, including framework
 failures. Incoming IDs and application-supplied response IDs do not replace the
-framework identity. IDs are correlation values, not authentication credentials.
+framework identity. IDs are correlation values, not authentication credentials: anyone who has seen
+one ID can predict later IDs from the same process.
 Handler exception logs include the identity; no exception details enter the body.
 
 ## Deadline boundary

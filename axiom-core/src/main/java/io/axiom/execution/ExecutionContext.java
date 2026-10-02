@@ -1,13 +1,19 @@
 package io.axiom.execution;
 
+import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.function.LongSupplier;
 import java.util.Objects;
-import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Immutable request identity and monotonic deadline; safe to share with application tasks. */
 public final class ExecutionContext {
-    private final String requestId = UUID.randomUUID().toString();
+    /** 96 random bits chosen once per process, so identities from different processes do not collide. */
+    private static final String PROCESS_PREFIX = processPrefix();
+    private static final AtomicLong SEQUENCE = new AtomicLong();
+
+    private final String requestId = PROCESS_PREFIX + "-" + Long.toHexString(SEQUENCE.incrementAndGet());
     private final long started;
     private final long budget;
     private final LongSupplier clock;
@@ -45,8 +51,19 @@ public final class ExecutionContext {
         }
     }
 
+    private static String processPrefix() {
+        var bytes = new byte[12];
+        new SecureRandom().nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
     /**
      * Returns a framework-generated identity; client headers cannot choose it.
+     * The identity is a random per-process prefix (16 URL-safe Base64 characters) followed by
+     * {@code -} and a hexadecimal sequence number. It is unique within the process and, with
+     * overwhelming probability, across processes. The prefix cannot be guessed without seeing
+     * an identity, but anyone who has seen one can predict later identities from the same
+     * process, so it is a correlation value and must never be used as a secret or credential.
      * @return unique request identifier
      */
     public String requestId() { return requestId; }

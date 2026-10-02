@@ -406,7 +406,7 @@ class HttpListenerTest {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\nX-Request-ID: client-spoof\r\n\r\n");
                 var first = wire.read(false);
                 assertThat(first.headers()).containsEntry("X-Request-ID", first.text());
-                assertThat(java.util.UUID.fromString(first.text())).isNotNull();
+                assertThat(first.text()).matches("[A-Za-z0-9_-]{16}-[0-9a-f]+");
                 assertThat(wire.get("/").text()).isNotEqualTo(first.text());
             }
         }
