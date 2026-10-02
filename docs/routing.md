@@ -42,7 +42,8 @@ Methods remain case-sensitive.
 
 When no complete match is registered for the method, the response is **405**. Its
 `Allow` header is the union of the methods registered on every template that
-matches the complete path, sorted alphabetically. An unknown path returns 404.
+matches the complete path, sorted alphabetically. An unknown path returns 404. Both
+use `application/problem+json` bodies (see [errors](errors.md)).
 
 HEAD is served by an explicit HEAD route or, failing that, by the GET route on the
 same template, checked template by template in precedence order. With
@@ -110,7 +111,8 @@ All captures are untrusted client input. A wildcard remainder spans several
 segments and contains `/`; the rules above keep `..` and encoded separators out of
 it, but resolving it against a file system still requires the application's own
 containment check (for example, normalizing a `Path` and verifying its prefix).
-Request size limits and typed parameter conversion are separate work.
+Typed parameter conversion is separate work; request body limits are described in
+[request bodies](bodies.md).
 
 ## Implementation and verification
 

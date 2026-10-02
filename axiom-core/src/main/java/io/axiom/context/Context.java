@@ -197,7 +197,8 @@ public interface Context {
     /**
      * Maps a body using the current status (200 by default).
      * Strings use UTF-8 text and byte arrays use application/octet-stream.
-     * Other objects are retained for a future codec layer; no serialization occurs.
+     * Other objects are retained without a Content-Type and are not encoded; use
+     * {@link #json(Object)} to encode them with the JSON codec.
      * Null without an explicit status produces 204.
      * @param body returned body, or null
      * @return a response snapshot

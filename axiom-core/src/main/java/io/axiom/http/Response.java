@@ -14,8 +14,9 @@ import java.util.regex.Pattern;
  * Header names are case-insensitive. One value per header is supported at this stage.
  * <p>
  * Bodies may be {@code null}, a {@link String}, a {@code byte[]}, or any other object.
- * Other objects are retained for a future codec layer without serialization; the HTTP
- * transport currently answers them with 500. Two responses are equal when their statuses,
+ * Other objects are retained without copying. When the response is prepared, the runtime
+ * encodes them with the installed codec for the response's Content-Type (see
+ * {@code Context.json}); without such a codec the HTTP transport answers 500. Two responses are equal when their statuses,
  * headers (names compared case-insensitively), and bodies are equal, comparing byte arrays
  * by content and other bodies with {@link Object#equals(Object)}.
  */
