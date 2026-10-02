@@ -122,10 +122,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                         || HttpUtil.getContentLength(request, 0) != 0) {
                     fail(ctx, 501); return;
                 }
-                var target = request.uri();
-                if (!target.startsWith("/") || target.indexOf('#') >= 0) { fail(ctx, 400); return; }
-                var uri = URI.create("http://axiom.invalid" + target);
-                receiving = new Exchange(new Request(request.method().name(), uri.getRawPath()),
+                // Validates the path and query in one pass; any rejection is a 400.
+                receiving = new Exchange(Request.fromTarget(request.method().name(), request.uri()),
                         HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
             } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
         }

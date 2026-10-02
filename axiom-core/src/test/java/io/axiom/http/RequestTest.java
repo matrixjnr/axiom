@@ -32,6 +32,22 @@ class RequestTest {
     }
 
     @Test
+    void parsesOriginFormTargetsOnceAndDiscardsTheQuery() {
+        assertThat(Request.fromTarget("GET", "/a%20b")).isEqualTo(Request.get("/a%20b"));
+        assertThat(Request.fromTarget("GET", "/a?x=1&y=%2F/?z")).isEqualTo(Request.get("/a"));
+        assertThat(Request.fromTarget("POST", "/a?").path()).isEqualTo("/a");
+        for (var invalidQuery : new String[] {"/a?bad%zz", "/a?%2", "/a?x#frag", "/a?x y", "/a?\\"}) {
+            assertThatIllegalArgumentException().as(invalidQuery)
+                    .isThrownBy(() -> Request.fromTarget("GET", invalidQuery));
+        }
+        for (var invalidPath : new String[] {"*", "http://host/a", "/a#frag", "/a/../b?x", "//a?x"}) {
+            assertThatThrownBy(() -> Request.fromTarget("GET", invalidPath)).as(invalidPath)
+                    .isInstanceOf(InvalidRequestPathException.class);
+        }
+        assertThatIllegalArgumentException().isThrownBy(() -> Request.fromTarget("G ET", "/"));
+    }
+
+    @Test
     void preservesMethodCaseAndAllowsExtensionMethods() {
         assertThat(new Request("propfind", "/").method()).isEqualTo("propfind");
         assertThat(new Request("CUSTOM-METHOD", "/").method()).isEqualTo("CUSTOM-METHOD");

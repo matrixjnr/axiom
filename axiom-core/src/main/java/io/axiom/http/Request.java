@@ -48,6 +48,37 @@ public record Request(String method, String path) {
         return new Request("GET", path);
     }
 
+    /**
+     * Creates a request from an HTTP origin-form request target ({@code path[?query]}) in a
+     * single pass. The path is validated as by {@link #Request(String, String)}; the query
+     * must use RFC 3986 query characters and well-formed percent-escapes, and is discarded
+     * because queries are not modeled yet. Transports use this instead of parsing the target
+     * separately.
+     *
+     * @param method HTTP token
+     * @param target origin-form request target
+     * @return a request for the target's path
+     * @throws InvalidRequestPathException for a rejected path
+     * @throws IllegalArgumentException for an invalid method or query
+     */
+    public static Request fromTarget(String method, String target) {
+        Objects.requireNonNull(target, "target");
+        int query = target.indexOf('?');
+        if (query < 0) { return new Request(method, target); }
+        for (int i = query + 1; i < target.length(); i++) {
+            char c = target.charAt(i);
+            if (c == '%') {
+                if (i + 2 >= target.length() || hex(target.charAt(i + 1)) < 0 || hex(target.charAt(i + 2)) < 0) {
+                    throw new IllegalArgumentException("Malformed percent-escape in query");
+                }
+                i += 2;
+            } else if (c != '/' && c != '?' && !pathCharacter(c)) {
+                throw new IllegalArgumentException("Invalid character in query");
+            }
+        }
+        return new Request(method, target.substring(0, query));
+    }
+
     private static void validatePath(String path) {
         if (!path.startsWith("/")) {
             throw new InvalidRequestPathException("Expected an absolute path: " + path);
