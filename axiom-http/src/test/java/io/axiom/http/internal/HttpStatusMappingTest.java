@@ -15,8 +15,6 @@ class HttpStatusMappingTest {
                 Arguments.of("GET /" + "a".repeat(5000) + " HTTP/1.1\r\nHost: a\r\n\r\n", 414, "uri_too_long"),
                 Arguments.of("GET / HTTP/1.1\r\nHost: a\r\nX-Large: " + "x".repeat(9000) + "\r\n\r\n", 431,
                         "request_header_fields_too_large"),
-                Arguments.of("POST /echo HTTP/1.1\r\nHost: a\r\n\r\n", 411, "length_required"),
-                Arguments.of("PUT /echo HTTP/1.0\r\n\r\n", 411, "length_required"),
                 // RFC 9112: without chunked as the final coding the body length is unknown, so 400.
                 Arguments.of("POST /echo HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip\r\n\r\n", 400, "bad_request"),
                 // A framed body with a coding the server does not implement.

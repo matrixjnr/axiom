@@ -138,5 +138,5 @@ produce the same problem responses as a listener. Other handler exceptions
 propagate rather than becoming 500 responses. Response bodies the transport cannot
 send (anything other than `String` or `byte[]` after encoding, or over the size
 limits) fail with `IllegalStateException` where a listener would answer 500.
-Sockets, HTTP parsing and connection behavior (411, 414, 431, Expect, pipelining)
+Sockets, HTTP parsing and connection behavior (414, 431, Expect, pipelining)
 are not simulated.

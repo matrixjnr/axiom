@@ -85,13 +85,12 @@ for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 
 | Status | When | Where |
 | --- | --- | --- |
-| 400 | Malformed request line or headers, invalid Host, rejected path, both Content-Length and Transfer-Encoding, a coding list not ending in `chunked` | Listener |
+| 400 | Malformed request line or headers, invalid Host, rejected path, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked` | Listener |
 | 400 | Empty body or codec failure in `ctx.body` | Runtime |
 | 404 | No route matches the path | Runtime |
 | 405 | Route exists for other methods; `Allow` lists them | Runtime |
 | 406 | Accept excludes the codec response's media type | Runtime |
 | 408 | Request head not complete within ten seconds, or body not complete by the request deadline | Listener |
-| 411 | POST, PUT or PATCH without Content-Length or chunked framing | Listener |
 | 413 | Body over `maxRequestBody` | Listener and runtime |
 | 414 | Request line longer than 4 KiB | Listener |
 | 415 | Missing, unsupported or non-UTF-8 Content-Type in `ctx.body` | Runtime |

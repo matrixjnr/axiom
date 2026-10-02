@@ -58,7 +58,7 @@ Every error response, whether produced by the listener or the application, is an
 `application/problem+json` body holding only status, code and request ID; see
 [errors](errors.md) for the full status table. CONNECT, upgrades and unknown
 transfer codings return 501; an overlong request line 414; an oversized header
-section 431; a POST, PUT or PATCH without Content-Length or chunked framing 411; an
+section 431; an
 `Expect` other than `100-continue` 417; other HTTP versions 505. These close the
 connection. Malformed requests return 400 when no earlier response is outstanding;
 otherwise the connection closes to avoid sending an error ahead of an earlier

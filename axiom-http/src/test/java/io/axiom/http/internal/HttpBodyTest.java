@@ -182,4 +182,43 @@ class HttpBodyTest {
             }
         }
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"+5", "-1", "", "abc", "5 5", "0x5", "5.0", "1234567890123456789"})
+    void rejectsMalformedContentLengthAndCloses(String value) throws Exception {
+        try (var fixture = echo(16); var wire = new Wire(fixture.listen())) {
+            wire.write("POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: " + value + "\r\n\r\nhello");
+            var reply = wire.read(false);
+            assertThat(reply.status()).isEqualTo(400);
+            HttpStatusMappingTest.assertProblem(reply, 400, "bad_request");
+            assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+        }
+    }
+
+    @Test void acceptsOptionalWhitespaceAroundContentLength() throws Exception {
+        try (var fixture = echo(16); var wire = new Wire(fixture.listen())) {
+            // RFC 9110 5.5: surrounding whitespace is not part of a field value.
+            wire.write("POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length:  5 \r\n\r\nhello");
+            assertThat(wire.read(false).text()).isEqualTo("none|5|hello");
+        }
+    }
+
+    @Test void rejectsTransferEncodingOnHttp10() throws Exception {
+        try (var fixture = echo(16); var wire = new Wire(fixture.listen())) {
+            wire.write("POST /echo HTTP/1.0\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n");
+            assertThat(wire.read(false).status()).isEqualTo(400);
+            assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+        }
+    }
+
+    @Test void treatsABodyMethodWithoutFramingAsAnEmptyBody() throws Exception {
+        try (var fixture = echo(16); var wire = new Wire(fixture.listen())) {
+            // RFC 9112 6.3: neither Content-Length nor Transfer-Encoding means a zero-length body.
+            wire.write("POST /echo HTTP/1.1\r\nHost: a\r\n\r\nGET /next HTTP/1.1\r\nHost: a\r\n\r\n");
+            assertThat(wire.read(false).text()).isEqualTo("none|0|");
+            assertThat(wire.read(false).text()).isEqualTo("next");
+            wire.write("PUT /echo HTTP/1.0\r\nConnection: keep-alive\r\n\r\n");
+            assertThat(wire.read(false).status()).isEqualTo(405);
+        }
+    }
 }

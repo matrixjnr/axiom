@@ -2,7 +2,10 @@ package io.axiom.error;
 
 import java.io.Serial;
 
-/** A request body sent without a declared length (411). */
+/**
+ * A request the application requires to declare its length (411). The HTTP listener does not
+ * use this status: a request without Content-Length or Transfer-Encoding has an empty body.
+ */
 public class LengthRequiredException extends AxiomException {
     @Serial private static final long serialVersionUID = 1L;
 

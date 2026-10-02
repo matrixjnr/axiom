@@ -54,8 +54,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** Bound from a request's first byte until its head is complete; a slower client receives 408. */
     static final Duration REQUEST_HEAD_TIMEOUT = Duration.ofSeconds(10);
     private static final int MAX_RESPONSE = 1024 * 1024;
-    /** Methods whose requests must declare Content-Length or chunked framing (411 otherwise). */
-    private static final Set<String> BODY_METHODS = Set.of("POST", "PUT", "PATCH");
+    private static final java.util.regex.Pattern CONTENT_LENGTH = java.util.regex.Pattern.compile("[0-9]{1,18}");
     /** Outstanding requests per connection, including the active one; more closes the connection. */
     static final int MAX_PIPELINED = 8;
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
@@ -170,14 +169,21 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         long length;
         try {
             if (chunked && headers.contains(HttpHeaderNames.CONTENT_LENGTH)) { fail(ctx, 400); return false; }
+            // Transfer codings do not exist in HTTP/1.0 (RFC 9112 6.1), so the framing is ambiguous.
+            if (chunked && http10) { fail(ctx, 400); return false; }
             if (chunked && !headers.get(HttpHeaderNames.TRANSFER_ENCODING).trim()
                     .equalsIgnoreCase(HttpHeaderValues.CHUNKED.toString())) {
                 fail(ctx, 501); return false;
             }
-            length = chunked ? -1 : HttpUtil.getContentLength(request, -1L);
+            var declared = headers.getAll(HttpHeaderNames.CONTENT_LENGTH);
+            // The decoder already rejects signs, empty values and non-digits; this keeps the rule
+            // explicit: exactly one value of 1 to 18 digits (surrounding whitespace is not part of it).
+            if (declared.size() > 1 || (declared.size() == 1 && !CONTENT_LENGTH.matcher(declared.getFirst().trim()).matches())) {
+                fail(ctx, 400); return false;
+            }
+            // RFC 9112 6.3: without Content-Length or Transfer-Encoding a request has no body.
+            length = chunked || declared.isEmpty() ? (chunked ? -1 : 0) : Long.parseLong(declared.getFirst().trim());
         } catch (NumberFormatException invalid) { fail(ctx, 400); return false; }
-        // A body-bearing method must declare how its body is framed, even when it is empty.
-        if (length < 0 && !chunked && BODY_METHODS.contains(request.method().name())) { fail(ctx, 411); return false; }
         bodyLimit = application.maxRequestBody();
         // Rejected before any body byte is read; the connection closes after the response.
         if (length > bodyLimit) { fail(ctx, 413); return false; }

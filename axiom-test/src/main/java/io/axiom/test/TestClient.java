@@ -29,7 +29,7 @@ import java.util.concurrent.RejectedExecutionException;
  * must be {@code null}, {@code String} or {@code byte[]} and within the transport size limits;
  * anything else fails the call with {@link IllegalStateException}, where the listener would answer
  * 500. Bodies are sent as raw bytes; this module installs no codec, so decoding uses whatever codec
- * the test's runtime classpath provides. Transport rules such as 411, 414, 431, Expect handling,
+ * the test's runtime classpath provides. Transport rules such as 414, 431, Expect handling,
  * pipelining and keep-alive are not modeled. Limits apply per client, as they do per listener.
  */
 public final class TestClient implements AutoCloseable {
