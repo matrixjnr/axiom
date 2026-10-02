@@ -44,9 +44,10 @@ JSON notes API on the same port.
 - `axiom-test`: in-memory test client, sending raw request bodies
 - `axiom-starter`: published as `io.axiom:axiom`, the single dependency for applications
 - `axiom-bom`: aligned library versions
+- `integration-tests`: end-to-end JSON tests with the real codec, through `TestClient` and a live listener
 - `examples/hello`: runnable HTTP server and network smoke example
 - `examples/rest-api`: small JSON API with validation and error responses, and its tests
-- `benchmarks/http`: JMH routing and dispatch benchmarks
+- `benchmarks/http`: JMH routing, JSON, negotiation, admission and problem benchmarks ([docs](docs/benchmarks.md))
 
 Core uses JDK service loading to discover the runtime. Applications depending on
 `axiom-http` receive core on the compile classpath and server on the runtime

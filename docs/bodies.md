@@ -54,9 +54,10 @@ so at most `3 × L` per connection (3 MiB at the default). A declared Content-Le
 is reserved in full against the `2 × L` share when its head arrives; a chunked
 body is counted as it arrives, and while its array doubles the old and new arrays
 briefly coexist. Exceeding the `2 × L` share closes the connection. Handler-side
-copies are additional: `ctx.body(...)` passes the codec a copy of the running body
-(up to `L`) and the decoded value lives until the handler drops it, and
-`Body.bytes()` copies on every call.
+memory is additional: `ctx.body(...)` passes the codec a read-only view of the
+running body, so the JSON codec reads it without a copy, but a codec that implements
+only the array method receives one copy (up to `L`); the decoded value lives until
+the handler drops it, and `Body.bytes()` copies on every call.
 
 These bounds are **per connection, not global**. A listener accepts up to 128
 connections, so its worst case is about `128 × 3 × L` (384 MiB at the default),
@@ -134,11 +135,11 @@ Decoding is strict:
 | Input | Code |
 | --- | --- |
 | Unknown property | `unknown_field` (field: path of the enclosing object, if any) |
-| Duplicate key | `duplicate_field` |
+| Duplicate key in any object, at any depth | `duplicate_field` |
 | Content after the value | `trailing_content` |
-| Wrong type, string for a number, float for an integer, null or missing primitive, a number too large for a `double` or `float` field (for example `1e400`, which would otherwise become infinity) | `type_mismatch` (field: property path) |
+| Wrong type, string for a number, number or boolean for a string, malformed date or UUID, unknown enum constant, an integer too large for its field, float for an integer, null or missing primitive, a number too large for a `double` or `float` field (for example `1e400`, which would otherwise become infinity) | `type_mismatch` (field: property path) |
 | Record constructor rejects the values | `invalid_value` (field: property path) |
-| Syntax error, comments, single quotes | `malformed_json` |
+| Syntax error at any depth, comments, single quotes | `malformed_json` |
 | Nesting deeper than 64, strings over 1 Mi characters, names over 1024, numbers over 256 digits, documents over 64 Mi characters | `limit_exceeded` |
 | Invalid UTF-8 | `invalid_encoding` |
 | `null` | `null_body` |
@@ -150,7 +151,48 @@ Missing reference-type components become `null`; validate
 them in the record or the handler. Field paths use declared property names and
 indexes (`items[0].quantity`) and stop at the first map, because map keys are
 client input. Parser messages, input fragments and unknown property names are never
-reported. `java.time` types and other modules are not registered yet.
+reported.
+
+Codes are chosen from exception types and document structure, never from Jackson's
+message text. Trailing content is found by reading one more token after the value.
+When a syntax, encoding or duplicate-key failure surfaces (possibly wrapped by the
+data binder), the codec reads the rejected document's tokens again with its own
+duplicate tracking and reports the first token-level problem; this second pass runs
+only for rejected bodies and is bounded by the same limits.
+
+### Supported types
+
+| Java type | JSON form | Notes |
+| --- | --- | --- |
+| Records, classes with a Jackson-visible constructor or setters | object | unknown properties rejected |
+| `String` | string | numbers and booleans are not read as text |
+| `int`, `long`, `Integer`, ... | integer | no floats, no strings, no overflow |
+| `double`, `float` and boxes | number | finite values only |
+| `BigDecimal`, `BigInteger` | number | exact; strings rejected; written with `BigDecimal.toString()` (may use an exponent such as `1E+3`) |
+| `boolean`, `Boolean` | `true`/`false` | |
+| enums | string | exact constant name; unknown names, other case, numbers and numeric strings rejected; written by name |
+| `UUID` | string | canonical `8-4-4-4-12` hexadecimal form only (any case) |
+| `byte[]` | string | base64; arrays of numbers rejected |
+| `Optional<T>` | `T` or `null` | missing or `null` reads as `Optional.empty()`, which is written as `null` |
+| `List`, `Set`, arrays | array | |
+| `Map<String, T>` | object | keys are client input and never appear in errors |
+| `Instant` | string | ISO-8601 with `Z` or an offset, for example `2024-02-29T10:15:30Z` |
+| `LocalDate`, `LocalTime`, `LocalDateTime` | string | ISO-8601, for example `2024-02-29` |
+| `OffsetDateTime`, `ZonedDateTime` | string | ISO-8601; the offset is kept as sent, not adjusted to UTC |
+| `Duration`, `Period` | string | ISO-8601, for example `PT1H30M` |
+| other `java.time` types | string | ISO-8601 text form |
+| `Object` | any | objects become `Map`, arrays `List`, decimals `BigDecimal` |
+
+Every `java.time` value is an ISO-8601 **string** in both directions. Numeric
+timestamps (`1700000000`), array forms (`[2024,2,29]`), empty strings and
+impossible dates (`2024-02-30`) fail with `type_mismatch` and the property path;
+the input value and parser text are never reported. An unknown enum constant is
+also a `type_mismatch` without echoing the value. `java.util.Date` and `Calendar`
+are not recommended; use `java.time`. Type information is never read from input:
+default typing is not enabled, so `{"@class": ...}` is an ordinary property.
+`BigDecimal` and `BigInteger` values are bounded to 256 characters, but a short
+literal such as `1e999999999` has a huge exponent; check scale or magnitude before
+arithmetic that expands it (`toBigInteger()`, `toPlainString()`).
 
 ## Encoding
 
@@ -188,3 +230,9 @@ during `start()`; two codecs declaring the same media type fail startup with
 `IllegalStateException` and the application stays configurable. Codecs are shared
 across requests and must be thread-safe. See [errors](errors.md) for how failures
 reach clients.
+
+The runtime decodes through `decode(ByteBuffer, Class)`, passing a read-only view of
+the request body that the codec must not retain. Its default implementation copies
+the bytes once and calls `decode(byte[], Class)`, so codecs written against the array
+method keep working; codecs that can stream from a buffer override it to avoid the
+copy, as the JSON codec does.
