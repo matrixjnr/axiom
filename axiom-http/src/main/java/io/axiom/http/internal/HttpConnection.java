@@ -45,11 +45,25 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private Exchange receiving;
     private boolean busy;
     private boolean closing;
+    private boolean draining;
+    private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
 
     HttpConnection(Application application, RequestDispatcher executor) {
         this.application = application;
         this.executor = executor;
+    }
+
+    @Override public void handlerAdded(ChannelHandlerContext ctx) { context = ctx; }
+
+    /**
+     * Starts graceful shutdown on the channel's event loop: an idle connection closes now, and a
+     * connection with a running exchange closes after that response. Queued requests are dropped.
+     */
+    void drain() {
+        if (closing || draining) { return; }
+        draining = true;
+        if (!busy) { abort(context); }
     }
 
     @Override protected void channelRead0(ChannelHandlerContext ctx, HttpObject message) {
@@ -182,12 +196,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 HttpUtil.setContentLength(message, response.body().length);
             }
             message.headers().set("X-Request-ID", exchange.execution().requestId());
-            boolean keepAlive = exchange.keepAlive() && !response.close();
+            boolean keepAlive = exchange.keepAlive() && !response.close() && !draining;
             HttpUtil.setKeepAlive(message, keepAlive);
             if (!keepAlive) { closing = true; pending.clear(); }
             ctx.writeAndFlush(message).addListener(future -> {
                 active = null;
-                if (!future.isSuccess() || !keepAlive) { ctx.close(); return; }
+                if (!future.isSuccess() || !keepAlive || draining) { ctx.close(); return; }
                 busy = false;
                 dispatch(ctx);
             });

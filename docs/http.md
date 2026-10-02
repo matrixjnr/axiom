@@ -13,10 +13,14 @@ routes. Closing one listener leaves the application and other listeners running.
 Closing the application permanently rejects requests and closes all its listeners.
 Both close operations are idempotent and nonblocking, including from a handler.
 
-Listener shutdown closes connections, cancels queued requests, and interrupts
-active network handlers. Await `server.termination()` to join resource shutdown.
-Handlers must cooperate with interruption; termination cannot complete while a
-handler refuses to stop. This is immediate shutdown, without a graceful drain.
+Listener shutdown is graceful. It stops accepting connections at once and closes
+idle keep-alive connections and connections still receiving a request. A
+connection with a running handler keeps it running; its response is sent with
+`Connection: close` and queued pipelined requests on it are dropped unanswered.
+After a fixed five-second grace period, remaining connections close and their
+handlers are interrupted; then execution and I/O threads stop. Await
+`server.termination()` to join resource shutdown. Handlers must cooperate with
+interruption; termination cannot complete while a handler refuses to stop.
 Direct in-memory `app.handle` calls remain the caller's responsibility.
 
 A failed bind releases its resources before reporting `IOException`. The
@@ -71,4 +75,5 @@ The default execution deadline is ten seconds, configurable before startup throu
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
 Other limits remain fixed. TLS, HTTP/2, JSON codecs, request body/header/query APIs,
-observability integrations and graceful draining remain future work.
+observability integrations and a configurable shutdown grace period remain future
+work.

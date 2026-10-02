@@ -184,11 +184,67 @@ class HttpListenerTest {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 fixture.app.close();
-                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
-                second.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                // The handler ignores the drain, so it is interrupted once the grace period ends.
+                long grace = NettyServer.SHUTDOWN_GRACE.toSeconds();
+                assertThat(interrupted.await(grace + 5, TimeUnit.SECONDS)).isTrue();
+                second.termination().toCompletableFuture().get(grace + 5, TimeUnit.SECONDS);
                 assertThat(second.isOpen()).isFalse();
             }
             assertThatThrownBy(() -> fixture.app.listen(0)).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test void closeLetsInFlightRequestFinishAndClosesIdleConnections() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/", ctx -> {
+                entered.countDown();
+                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                return "finished";
+            });
+            var server = fixture.listen();
+            try (var busy = new Wire(server); var idle = new Wire(server)) {
+                assertThat(idle.get("/missing").status()).isEqualTo(404);
+                busy.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                server.close();
+                assertThat(server.isOpen()).isFalse();
+                assertThat(idle.socket.getInputStream().read()).isEqualTo(-1);
+                assertThat(server.termination().toCompletableFuture()).isNotDone();
+                release.countDown();
+                var response = busy.read(false);
+                assertThat(response.status()).isEqualTo(200);
+                assertThat(response.text()).isEqualTo("finished");
+                assertThat(response.headers()).containsEntry("connection", "close");
+                assertThat(busy.socket.getInputStream().read()).isEqualTo(-1);
+                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                assertThatThrownBy(() -> new Wire(server)).isInstanceOf(IOException.class);
+            } finally { release.countDown(); }
+        }
+    }
+
+    @Test void closeInterruptsHandlersThatOutliveTheGracePeriod() throws Exception {
+        var entered = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> {
+                entered.countDown();
+                try { new CountDownLatch(1).await(); }
+                catch (InterruptedException expected) { interrupted.countDown(); Thread.currentThread().interrupt(); }
+                return "late";
+            });
+            app.start();
+            var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                    java.time.Duration.ofMillis(100));
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                server.close();
+                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            } finally { server.close(); }
         }
     }
 
