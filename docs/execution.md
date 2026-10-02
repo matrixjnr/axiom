@@ -52,13 +52,13 @@ body upload and slow response delivery do not have absolute deadlines yet.
 
 ## Capacity and cancellation
 
-Each listener admits at most 36 execution tasks before creating virtual threads.
-There is no dispatcher waiting queue. Excess requests receive 503 and close their
-connection. This preserves the previous total execution capacity while replacing
-four platform workers plus 32 waiting tasks with up to 36 active virtual threads.
-The existing connection and pipeline bounds still apply. Per-route limits,
-configurable capacity, queue policies and CPU execution classes are future work.
-
+Each listener defaults to 36 active tasks and no dispatcher waiting queue.
+Configure aggregate and route limits through `app.admissionPolicy(...)` before
+startup. Bounded queues create no execution threads and expire without invoking
+handlers. Excess capacity and queue-wait expiry produce 503; the execution
+deadline continues while a request is queued and produces 504 if it expires first.
+See [admission and bounded queues](admission.md) for configuration, scheduling,
+listener scope and counters. Connection and pipeline bounds still apply.
 Cancellation interrupts the owned virtual thread. **Capacity is released only
 when that thread exits the request action**, even if its outcome is already 504
 or cancelled. A handler that ignores interruption continues occupying capacity;

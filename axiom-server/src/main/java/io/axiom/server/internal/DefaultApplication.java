@@ -2,6 +2,7 @@ package io.axiom.server.internal;
 
 import io.axiom.application.Application;
 import io.axiom.context.Handler;
+import io.axiom.execution.AdmissionPolicy;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
@@ -12,17 +13,21 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.concurrent.TimeoutException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.ServiceLoader;
+import java.util.concurrent.TimeoutException;
 
 final class DefaultApplication implements Application {
     private final Map<Route, Handler> registrations = new LinkedHashMap<>();
     private CompiledRouter router;
+    private AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
+    private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private List<Route> frozenRoutes = List.of();
+    private java.util.Set<Route> frozenRouteSet = java.util.Set.of();
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
     private volatile State state = State.CONFIGURING;
     private final List<Server> listeners = new ArrayList<>();
@@ -68,6 +73,7 @@ final class DefaultApplication implements Application {
         requireState(State.CONFIGURING);
         router = CompiledRouter.compile(registrations);
         frozenRoutes = List.copyOf(registrations.keySet());
+        frozenRouteSet = java.util.Set.copyOf(frozenRoutes);
         registrations.clear();
         state = State.RUNNING;
         return this;
@@ -86,6 +92,44 @@ final class DefaultApplication implements Application {
     }
 
     @Override public Duration requestTimeout() { return requestTimeout; }
+
+    @Override public synchronized Application admissionPolicy(AdmissionPolicy policy) {
+        requireState(State.CONFIGURING);
+        admissionPolicy = Objects.requireNonNull(policy, "policy");
+        return this;
+    }
+
+    @Override public synchronized AdmissionPolicy admissionPolicy() { return admissionPolicy; }
+
+    @Override public synchronized Application admissionPolicy(Route route, AdmissionPolicy policy) {
+        requireState(State.CONFIGURING);
+        requireRegistered(route);
+        routePolicies.put(route, Objects.requireNonNull(policy, "policy"));
+        return this;
+    }
+
+    @Override public synchronized AdmissionPolicy admissionPolicy(Route route) {
+        requireRegistered(route);
+        return routePolicies.getOrDefault(route, admissionPolicy);
+    }
+
+    @Override public Optional<Route> resolve(Request request) {
+        Objects.requireNonNull(request, "request");
+        CompiledRouter acceptedRouter;
+        synchronized (this) {
+            requireState(State.RUNNING);
+            acceptedRouter = router;
+        }
+        var match = acceptedRouter.match(request);
+        return match == null || !match.methodAllowed() ? Optional.empty() : Optional.of(match.route());
+    }
+
+    private void requireRegistered(Route route) {
+        Objects.requireNonNull(route, "route");
+        if (!(state == State.CONFIGURING ? registrations.containsKey(route) : frozenRouteSet.contains(route))) {
+            throw new IllegalArgumentException("Route is not registered: " + route);
+        }
+    }
 
     @Override
     public Response handle(Request request, ExecutionContext execution) throws Exception {
@@ -124,6 +168,7 @@ final class DefaultApplication implements Application {
         synchronized (this) {
             if (state == State.CONFIGURING) {
                 frozenRoutes = List.copyOf(registrations.keySet());
+                frozenRouteSet = java.util.Set.copyOf(frozenRoutes);
             }
             state = State.CLOSED;
             registrations.clear();

@@ -3,19 +3,19 @@ package io.axiom.http.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.axiom.application.Application;
 import io.axiom.Axiom;
+import io.axiom.application.Application;
 import io.axiom.http.Response;
 import io.axiom.lifecycle.Server;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -69,12 +69,13 @@ class HttpListenerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"exception", "object", "oversize", "header", "application-timeout", "application-cancel"})
+    @ValueSource(strings = {"exception", "object", "oversize", "header", "application-timeout", "application-cancel", "application-reject"})
     void mapsFailuresToSafeFinalResponse(String failure) throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.get("/", ctx -> switch (failure) {
                 case "exception" -> throw new IOException("secret");
                 case "application-timeout" -> throw new java.util.concurrent.TimeoutException("downstream secret");
+                case "application-reject" -> throw new java.util.concurrent.RejectedExecutionException("downstream overloaded");
                 case "application-cancel" -> throw new java.util.concurrent.CancellationException("application secret");
                 case "object" -> new Object();
                 case "oversize" -> new byte[1024 * 1024 + 1];
@@ -316,6 +317,62 @@ class HttpListenerTest {
                 release.countDown();
                 for (var wire : wires) { wire.close(); }
             }
+        }
+    }
+    @Test void routeQueueTimeoutUsesTemplateIdentityAndLeavesOtherRoutesAvailable() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.admissionPolicy(new io.axiom.execution.AdmissionPolicy(2, 4, java.time.Duration.ofSeconds(5)));
+            var limited = fixture.app.get("/limited/:id", ctx -> {
+                calls.incrementAndGet();
+                entered.countDown();
+                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                return ctx.path("id");
+            });
+            fixture.app.admissionPolicy(limited,
+                    new io.axiom.execution.AdmissionPolicy(1, 1, java.time.Duration.ofSeconds(1)));
+            fixture.app.get("/other", ctx -> "available");
+            var server = fixture.listen();
+            try (var first = new Wire(server); var second = new Wire(server); var other = new Wire(server)) {
+                first.write("GET /limited/a HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                var timeout = second.get("/limited/b");
+                assertThat(timeout.status()).isEqualTo(503);
+                assertThat(timeout.headers()).containsKey("X-Request-ID");
+                assertThat(second.socket.getInputStream().read()).isEqualTo(-1);
+                assertThat(calls).hasValue(1);
+                assertThat(server.admission().queueTimeouts()).isEqualTo(1);
+                assertThat(server.admission().queued()).isZero();
+                assertThat(other.get("/other").text()).isEqualTo("available");
+                release.countDown();
+                assertThat(first.read(false).text()).isEqualTo("a");
+            } finally { release.countDown(); }
+        }
+    }
+
+    @Test void aggregateLimitAppliesAcrossDifferentRoutes() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.admissionPolicy(io.axiom.execution.AdmissionPolicy.reject(1));
+            fixture.app.get("/busy", ctx -> {
+                entered.countDown();
+                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                return "done";
+            });
+            fixture.app.get("/other", ctx -> { throw new AssertionError("must be rejected before invocation"); });
+            var server = fixture.listen();
+            try (var first = new Wire(server); var other = new Wire(server)) {
+                first.write("GET /busy HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(other.get("/other").status()).isEqualTo(503);
+                assertThat(server.admission().active()).isEqualTo(1);
+                assertThat(server.admission().rejected()).isEqualTo(1);
+                release.countDown();
+                assertThat(first.read(false).text()).isEqualTo("done");
+            } finally { release.countDown(); }
         }
     }
     private static final class Fixture implements AutoCloseable {
