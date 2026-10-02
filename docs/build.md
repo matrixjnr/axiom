@@ -17,6 +17,17 @@ Telemetry dependencies will be selected when their implementations land.
 JPMS and stress suites are later work. The BOM constrains all six published libraries
 (core, server, http, json, test and the starter).
 
+Validation uses Hibernate Validator 9.1 (the Jakarta Validation 3.1 reference
+implementation, actively maintained, Java 17+, with container-element constraints and
+validation of record components) and `jakarta.validation-api` 3.1, both as `implementation`
+dependencies of `axiom-validation-jakarta` only. Applications declare
+`jakarta.validation-api` themselves to annotate their types; no Jakarta or Hibernate
+type appears in an Axiom API. Expression Language (`jakarta.el`) is deliberately not
+a dependency: the adapter never interpolates messages (see [validation](validation.md)).
+Hibernate Validator brings `jboss-logging` and `classmate` transitively. The
+annotation-free `axiom-validation` module has no external dependencies. The BOM does
+not list the two validation modules yet.
+
 Module checks enforce dependency direction across production, annotation processor
 and test configurations, fail with a clear message for modules missing from the
 allowed-dependency table, and confine external production dependencies to the
@@ -25,6 +36,10 @@ module that adapts them: Netty (`io.netty`) to `axiom-http`, Jackson
 client may not depend on `axiom-json`; tests send raw bodies. Public signature tests scan the exported core and test-client
 classes, including generic types, to reject implementation and third-party types.
 These run as part of `check` alongside behavior and lifecycle tests.
+Jakarta Validation and Hibernate Validator (`jakarta.validation`, `org.hibernate.validator`)
+are confined to `axiom-validation-jakarta`, which depends on `axiom-validation`, which
+depends on core only. Both validation modules may use `axiom-test` in test configurations
+only, for end-to-end tests; a signature test keeps provider types out of their public API.
 
 Core discovers the default runtime through a JDK service provider. HTTP and test
 client consumers receive core through `api`. HTTP uses server through

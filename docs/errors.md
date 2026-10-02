@@ -46,6 +46,9 @@ throw new UnauthorizedException("Bearer realm=\"api\"");
 throw new TooManyRequestsException(Duration.ofSeconds(30));
 ```
 
+`Validation.require` in the optional validation modules throws `ValidationException`
+from rules or Jakarta annotations; see [validation](validation.md).
+
 | Status | Exception | Default code | Extra header |
 | --- | --- | --- | --- |
 | 400 | `BadRequestException`, `DecodeException` | `bad_request` | |
