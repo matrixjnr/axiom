@@ -101,6 +101,10 @@ identity with its template. `ctx.path(name)` returns the raw capture and rejects
 undeclared names. `ctx.pathDecoded(name)` percent-decodes a capture once as strict
 UTF-8, segment by segment, and throws `IllegalArgumentException` for malformed UTF-8
 or for a segment that would decode to a `/`, backslash, NUL, `.` or `..`.
+`Request` already rejects every path that could produce such a segment, so through
+an application only the UTF-8 check can fail; the other checks stay in the decoder
+deliberately, as defence in depth for `Context` implementations whose captures do
+not come from a validated `Request`, and are tested directly.
 `ctx.pathParameters()` returns an immutable map of raw captures in declaration order.
 Captures are extracted into that map once, when a dynamic route matches; the match
 holds no lazily initialized state. Fully static matches allocate no capture
