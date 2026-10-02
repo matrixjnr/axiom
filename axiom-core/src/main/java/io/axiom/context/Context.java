@@ -4,6 +4,11 @@ import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.routing.Route;
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /** Request-scoped response settings. A context must not be shared across threads. */
@@ -54,11 +59,74 @@ public interface Context {
 
     /**
      * Reads a raw path capture without percent-decoding or normalization.
+     * Captures are untrusted client input. A wildcard remainder may contain {@code /} and
+     * must not be used as a file system path without the application's own containment checks.
      * @param name capture name declared in the route template
      * @return captured segment or wildcard remainder (which may be empty)
      * @throws IllegalArgumentException if the name is not declared by the matched route
      */
     String path(String name);
+
+    /**
+     * Reads a path capture with strict, single-pass UTF-8 percent-decoding. Each segment is
+     * decoded once; a decoded value is never decoded again. Wildcard remainders keep their
+     * raw {@code /} separators. Decoding fails rather than producing a {@code /}, backslash,
+     * or NUL inside a segment, a {@code .} or {@code ..} segment, or malformed UTF-8.
+     * The result is still untrusted client input.
+     * @param name capture name declared in the route template
+     * @return decoded capture
+     * @throws IllegalArgumentException if the name is not declared or the value cannot be
+     *         decoded safely
+     */
+    default String pathDecoded(String name) {
+        var raw = path(name);
+        var decoded = new StringBuilder(raw.length());
+        int start = 0;
+        while (true) {
+            int end = raw.indexOf('/', start);
+            decoded.append(decodeSegment(raw, start, end < 0 ? raw.length() : end));
+            if (end < 0) { return decoded.toString(); }
+            decoded.append('/');
+            start = end + 1;
+        }
+    }
+
+    private static String decodeSegment(String raw, int start, int end) {
+        var bytes = new ByteArrayOutputStream(end - start);
+        for (int i = start; i < end; i++) {
+            char c = raw.charAt(i);
+            if (c == '%') {
+                if (i + 2 >= end) { throw new IllegalArgumentException("Malformed percent-escape in path capture"); }
+                int high = Character.digit(raw.charAt(i + 1), 16);
+                int low = Character.digit(raw.charAt(i + 2), 16);
+                if (high < 0 || low < 0) {
+                    throw new IllegalArgumentException("Malformed percent-escape in path capture");
+                }
+                bytes.write(high * 16 + low);
+                i += 2;
+            } else if (c < 0x80) {
+                bytes.write(c);
+            } else {
+                int next = Character.isHighSurrogate(c) && i + 1 < end ? i + 2 : i + 1;
+                bytes.writeBytes(raw.substring(i, next).getBytes(StandardCharsets.UTF_8));
+                i = next - 1;
+            }
+        }
+        String segment;
+        try {
+            segment = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes.toByteArray())).toString();
+        } catch (CharacterCodingException malformed) {
+            throw new IllegalArgumentException("Path capture is not valid percent-encoded UTF-8", malformed);
+        }
+        if (segment.equals(".") || segment.equals("..") || segment.indexOf('/') >= 0
+                || segment.indexOf('\\') >= 0 || segment.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("Path capture decodes to a separator, NUL, or dot segment");
+        }
+        return segment;
+    }
 
     /**
      * Returns all captures in template order, materializing them on first access.

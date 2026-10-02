@@ -9,7 +9,6 @@
 | `/teams/:team/users/:user` | `/teams/a/users/b` | `team = "a"`, `user = "b"` |
 | `/files/*path` | `/files/a/b.txt` | `path = "a/b.txt"` |
 | `/files/*path` | `/files/` | `path = ""` |
-| `/files/*path` | `/files//a` | `path = "/a"` |
 | `/*path` | `/` | `path = ""` |
 
 Parameters occupy a whole segment, match a non-empty value, and do not consume `/`.
@@ -67,20 +66,39 @@ the table. Shutdown preserves the existing rule: accepted requests may finish.
 
 ## Raw paths and ownership
 
-No decoding, case folding, slash merging, dot-segment removal, or redirects occur.
-`/users` and `/users/` are distinct. `%2F` remains part of one raw segment;
-`ctx.path("id")` for `/users/a%2Fb` returns `a%2Fb`. `%2F` and `%2f` are distinct
-literal spellings. Repeated slashes and Unicode are preserved.
+Paths that another component could resolve to a different resource are rejected,
+not normalized. `new Request(...)` throws `InvalidRequestPathException` (an
+`IllegalArgumentException`) for:
+
+- an empty segment such as `//users` or `/a//b` (one trailing slash is allowed);
+- a `.` or `..` segment;
+- a backslash, NUL, space, or other character outside RFC 3986 path syntax
+  (non-ASCII characters other than controls and spaces are allowed);
+- a malformed percent-escape such as `%zz` or a trailing `%`;
+- an encoded dot, slash, backslash, or NUL (`%2E`, `%2F`, `%5C`, `%00`, either case),
+  anywhere in the path.
+
+HTTP listeners answer these requests with 400 without routing them. Route templates
+follow the same rules, so `//:id` and `/a%2F:id` fail at registration.
+
+Accepted paths are matched verbatim. No decoding, case folding, or redirects occur.
+`/users` and `/users/` are distinct, `%20` and a raw space are different spellings
+(the latter is rejected), and `/a%20b` does not match `/a%2520b`. Unicode is preserved.
 
 `ctx.path()` returns the request path. `ctx.route()` returns the stable route
-identity with its template. `ctx.path(name)` rejects undeclared names.
-`ctx.pathParameters()` returns an immutable map in declaration order. Capture
-strings and maps are created when requested and belong to that request's context.
-Static matches need no capture-boundary arrays or per-request parameter maps.
+identity with its template. `ctx.path(name)` returns the raw capture and rejects
+undeclared names. `ctx.pathDecoded(name)` percent-decodes a capture once as strict
+UTF-8, segment by segment, and throws `IllegalArgumentException` for malformed UTF-8
+or for a segment that would decode to a `/`, backslash, NUL, `.` or `..`.
+`ctx.pathParameters()` returns an immutable map of raw captures in declaration order.
+Capture strings and maps are created when requested and belong to that request's
+context. Static matches need no capture-boundary arrays or per-request parameter maps.
 
-These are in-memory matching rules. A future network adapter must define and test
-its ingress validation policy consistently with routing and security. Request size
-limits, percent-decoding, and typed parameter conversion are separate work.
+All captures are untrusted client input. A wildcard remainder spans several
+segments and contains `/`; the rules above keep `..` and encoded separators out of
+it, but resolving it against a file system still requires the application's own
+containment check (for example, normalizing a `Path` and verifying its prefix).
+Request size limits and typed parameter conversion are separate work.
 
 ## Implementation and verification
 
@@ -90,9 +108,10 @@ compilation and lookup avoid recursive calls, including for deeply nested paths.
 Backtracking can visit multiple branches; no constant-time or strict linear-time
 bound is claimed for adversarial overlapping templates.
 
-Tests cover raw paths, conflicts, method mismatches, HEAD, deep paths, 10,000 routes,
-and concurrent captures. An independent exhaustive template scanner checks 1,020
-method/path combinations to catch differences in matching and precedence.
+Tests cover raw and rejected paths, conflicts, method mismatches, HEAD, deep paths,
+10,000 routes, and concurrent captures. An independent exhaustive template scanner
+checks 480 method/path combinations to catch differences in matching and precedence,
+and confirms that the generated paths with empty segments are rejected.
 
 The [JMH harness](../benchmarks/http/README.md) exercises the public in-memory
 dispatcher. No timing threshold is enforced by CI.

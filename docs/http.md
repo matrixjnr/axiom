@@ -35,8 +35,9 @@ The listener accepts HTTP/1.1 origin-form requests with exactly one valid Host,
 and HTTP/1.0 requests, whose Host is optional but validated when present.
 Responses always use HTTP/1.1. An HTTP/1.0 connection closes after each response
 unless the request sends `Connection: keep-alive`, which the response echoes.
-Raw paths retain encoding and repeated slashes; query strings are excluded from
-routing and are not yet exposed through the request API. Responses support UTF-8
+Paths that `Request` rejects (empty or dot segments, backslashes, malformed or
+encoded separators; see [routing rules](routing.md)) receive 400. Accepted raw paths
+retain their encoding; query strings are excluded from routing and are not yet exposed through the request API. Responses support UTF-8
 strings, byte arrays, and empty bodies. Unsupported body objects and handler
 exceptions produce a generic 500 and close the connection; exception details are
 not sent to clients. The in-memory API still propagates exceptions.

@@ -98,6 +98,9 @@ class HttpListenerTest {
             "GET / HTTP/1.1\r\nHost: a/path\r\n\r\n",
             "GET http://localhost/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
             "GET /bad%zz HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET /a/../ HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET /%2e%2e/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET //etc HTTP/1.1\r\nHost: localhost\r\n\r\n",
             "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n",
             "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\n"
     })

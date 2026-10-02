@@ -1,8 +1,10 @@
 package io.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.axiom.Axiom;
+import io.axiom.http.InvalidRequestPathException;
 import io.axiom.http.Request;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,6 +51,11 @@ class RouterReferenceTest {
                 prefixes = next;
             }
             for (var path : paths) {
+                if (path.contains("//")) {
+                    // Interior empty segments are rejected before routing.
+                    assertThatThrownBy(() -> Request.get(path)).isInstanceOf(InvalidRequestPathException.class);
+                    continue;
+                }
                 // Rank complete matches lexicographically: literals 2, parameters 1, wildcards 0.
                 var expected = routes.stream().map(route -> scan(route, path)).filter(match -> match != null)
                         .max(Comparator.comparing(Reference::rank)).orElse(null);

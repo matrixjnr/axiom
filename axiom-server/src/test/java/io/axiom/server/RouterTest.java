@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.axiom.Axiom;
 import io.axiom.application.Application;
+import io.axiom.http.InvalidRequestPathException;
 import io.axiom.http.Request;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,20 +30,20 @@ class RouterTest {
         try (var app = Axiom.create()) {
             var route = app.get("/teams/:team/users/:user", ctx -> {
                 assertThat(ctx.method()).isEqualTo("GET");
-                assertThat(ctx.path()).isEqualTo("/teams/a%2Fb/users/%E2%82%AC");
+                assertThat(ctx.path()).isEqualTo("/teams/a%20b/users/%E2%82%AC");
                 assertThat(ctx.route().path()).isEqualTo("/teams/:team/users/:user");
-                assertThat(ctx.path("team")).isEqualTo("a%2Fb");
+                assertThat(ctx.path("team")).isEqualTo("a%20b");
                 assertThat(ctx.path("user")).isEqualTo("%E2%82%AC");
                 assertThat(ctx.pathParameters()).containsExactly(
-                        Map.entry("team", "a%2Fb"), Map.entry("user", "%E2%82%AC"));
-                assertThat(ctx.path("team")).isEqualTo("a%2Fb");
+                        Map.entry("team", "a%20b"), Map.entry("user", "%E2%82%AC"));
+                assertThat(ctx.path("team")).isEqualTo("a%20b");
                 assertThatThrownBy(() -> ctx.pathParameters().put("team", "changed"))
                         .isInstanceOf(UnsupportedOperationException.class);
                 assertThatIllegalArgumentException().isThrownBy(() -> ctx.path("missing"));
                 return ctx.route();
             });
             app.start();
-            assertThat(app.handle(Request.get("/teams/a%2Fb/users/%E2%82%AC")).body()).isEqualTo(route);
+            assertThat(app.handle(Request.get("/teams/a%20b/users/%E2%82%AC")).body()).isEqualTo(route);
         }
     }
 
@@ -62,7 +63,7 @@ class RouterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/a/b", "/a%2Fb", "/a+b", "/./../b", "//b", "/é", "/"})
+    @ValueSource(strings = {"/a/b", "/a%20b", "/a+b", "/a/b/", "/é", "/"})
     void wildcardPreservesTheRawRemainder(String suffix) throws Exception {
         try (var app = Axiom.create()) {
             app.get("/files/*path", ctx -> ctx.path("path"));
@@ -77,15 +78,37 @@ class RouterTest {
         try (var app = Axiom.create()) {
             app.get("/users/:id", ctx -> ctx.path("id"));
             app.get("/users/:id/", ctx -> "trailing:" + ctx.path("id"));
-            app.get("//:value", ctx -> "double:" + ctx.path("value"));
             app.start();
             assertThat(app.handle(Request.get("/users/")).status()).isEqualTo(404);
-            assertThat(app.handle(Request.get("/users//")).status()).isEqualTo(404);
             assertThat(app.handle(Request.get("/users/7")).body()).isEqualTo("7");
             assertThat(app.handle(Request.get("/users/7/")).body()).isEqualTo("trailing:7");
-            assertThat(app.handle(Request.get("//v")).body()).isEqualTo("double:v");
             assertThat(app.handle(Request.get("/Users/7")).status()).isEqualTo(404);
         }
+    }
+
+    @Test
+    void decodesCapturesOnceAsStrictUtf8() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/users/:id", ctx -> ctx.pathDecoded("id"));
+            app.get("/files/*path", ctx -> ctx.pathDecoded("path"));
+            app.start();
+            assertThat(app.handle(Request.get("/users/a%20b%E2%82%AC")).body()).isEqualTo("a b\u20ac");
+            assertThat(app.handle(Request.get("/users/%2541")).body()).isEqualTo("%41");
+            assertThat(app.handle(Request.get("/users/é+x")).body()).isEqualTo("é+x");
+            assertThat(app.handle(Request.get("/files/a%20b/c/")).body()).isEqualTo("a b/c/");
+            assertThat(app.handle(Request.get("/files/")).body()).isEqualTo("");
+            for (var invalid : new String[] {"/users/%FF", "/users/%C3", "/users/%C3%28", "/files/a/%ED%A0%80"}) {
+                assertThatIllegalArgumentException().as(invalid)
+                        .isThrownBy(() -> app.handle(Request.get(invalid)));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/files/../secret", "/files/a/./b", "/files//etc", "/files/%2e%2e/secret",
+            "/files/a%2Fb", "/files/a%5Cb", "/files/a%00"})
+    void wildcardsNeverReceiveTraversalOrEncodedSeparators(String path) {
+        assertThatThrownBy(() -> Request.get(path)).isInstanceOf(InvalidRequestPathException.class);
     }
 
     @Test

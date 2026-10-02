@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.axiom.Axiom;
 import io.axiom.application.Application;
+import io.axiom.http.InvalidRequestPathException;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import java.io.IOException;
@@ -87,16 +88,20 @@ class ApplicationTest {
     }
 
     @Test
-    void doesNotNormalizeOrDecodePaths() throws Exception {
+    void rejectsAmbiguousPathsAndMatchesTheRestWithoutNormalizingOrDecoding() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/users", ctx -> "users");
-            app.get("/a%2Fb", ctx -> "encoded");
+            app.get("/a%20b", ctx -> "encoded");
             app.get("/time/12:00", ctx -> "literal colon");
             app.start();
-            for (var path : new String[] {"/users/", "/Users", "//users", "/x/../users", "/a/b", "/a%2fb"}) {
+            for (var path : new String[] {"/users/", "/Users", "/a%2520b", "/a%20B"}) {
                 assertThat(app.handle(Request.get(path)).status()).as(path).isEqualTo(404);
             }
-            assertThat(app.handle(Request.get("/a%2Fb")).body()).isEqualTo("encoded");
+            for (var path : new String[] {"//users", "/x/../users", "/./users", "/a%2fb", "/users%2F"}) {
+                assertThatThrownBy(() -> app.handle(Request.get(path))).as(path)
+                        .isInstanceOf(InvalidRequestPathException.class);
+            }
+            assertThat(app.handle(Request.get("/a%20b")).body()).isEqualTo("encoded");
             assertThat(app.handle(Request.get("/time/12:00")).body()).isEqualTo("literal colon");
         }
     }

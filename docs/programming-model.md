@@ -27,7 +27,9 @@ registration order. Duplicate method/template pairs fail without replacing a han
 At startup, equally shaped templates for the same method also fail, regardless of
 capture names. No partially compiled router is published on failure.
 
-Matching is case-sensitive and preserves the raw path. Whole-segment `:name`
+Matching is case-sensitive and preserves the raw path. Paths with empty or dot
+segments, backslashes, NUL, malformed percent-escapes, or encoded dots, slashes,
+backslashes or NUL are rejected with `InvalidRequestPathException` (400 over HTTP). Whole-segment `:name`
 parameters capture one non-empty segment; terminal `*name` wildcards capture the
 remaining path. At the first differing segment, static segments take precedence
 over parameters, then wildcards. Branches that cannot match the complete path are
@@ -40,7 +42,8 @@ fallback and OPTIONS behavior are not enabled.
 
 `ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw
 capture; `ctx.pathParameters()` returns an immutable map in template order. Values
-are materialized on access, without percent-decoding or normalization. Query strings
+are materialized on access, without percent-decoding or normalization;
+`ctx.pathDecoded("id")` decodes one capture as strict UTF-8. Captures are untrusted input. Query strings
 are not part of `Request.path()`. See [routing rules](routing.md) for edge cases.
 
 ## Lifecycle and concurrency
