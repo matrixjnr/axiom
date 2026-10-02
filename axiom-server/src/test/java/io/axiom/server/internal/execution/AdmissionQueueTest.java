@@ -137,6 +137,66 @@ class AdmissionQueueTest {
         }
     }
 
+    @Test void completionExpiresStaleWaitsBehindABlockedEndpointWithoutItsTimer() {
+        try (var f = new Fixture(policy(2, 4))) {
+            var route = policy(1, 2);
+            f.dispatcher.submit("a", route, context(), () -> "a1");
+            var stale = f.dispatcher.submit("a", route, context(), () -> { throw new AssertionError("must not run"); });
+            var alsoStale = f.dispatcher.submit("a", route, context(), () -> { throw new AssertionError("must not run"); });
+            f.dispatcher.submit("b", route, context(), () -> "b1");
+            f.clock.set(Duration.ofSeconds(5).toNanos());
+            // No timer fires: the queue timers are late. Endpoint a stays at its own active limit.
+            f.workers.run(1);
+            assertThat(stale.result().toCompletableFuture()).isCompletedExceptionally();
+            assertThatThrownBy(() -> stale.result().toCompletableFuture().join())
+                    .hasCauseInstanceOf(RequestDispatcher.QueueTimeoutException.class);
+            assertThat(alsoStale.result().toCompletableFuture()).isCompletedExceptionally();
+            assertThatThrownBy(() -> alsoStale.result().toCompletableFuture().join())
+                    .hasCauseInstanceOf(RequestDispatcher.QueueTimeoutException.class);
+            assertThat(f.dispatcher.snapshot().queued()).isZero();
+            assertThat(f.dispatcher.snapshot().queueTimeouts()).isEqualTo(2);
+            assertThat(f.dispatcher.snapshot().active()).isEqualTo(1);
+        }
+    }
+
+    @Test void completionExpiresOnlyStaleHeadsAndKeepsLiveWaits() {
+        try (var f = new Fixture(policy(2, 4))) {
+            var route = policy(1, 3);
+            f.dispatcher.submit("a", route, context(), () -> "a1");
+            var stale = f.dispatcher.submit("a", route, context(), () -> null);
+            f.clock.set(Duration.ofSeconds(3).toNanos());
+            var live = f.dispatcher.submit("a", route, context(), () -> "live");
+            f.dispatcher.submit("b", route, context(), () -> "b1");
+            f.clock.set(Duration.ofSeconds(6).toNanos());
+            f.workers.run(1);
+            assertThat(stale.result().toCompletableFuture()).isCompletedExceptionally();
+            assertThatThrownBy(() -> stale.result().toCompletableFuture().join())
+                    .hasCauseInstanceOf(RequestDispatcher.QueueTimeoutException.class);
+            assertThat(live.result().toCompletableFuture()).isNotDone();
+            assertThat(f.dispatcher.snapshot().queued()).isEqualTo(1);
+            f.workers.run(0);
+            f.workers.run(0);
+            assertThat(live.result().toCompletableFuture().join()).isEqualTo("live");
+        }
+    }
+
+    @Test void submissionReclaimsQueueSlotsHeldByExpiredWaits() {
+        try (var f = new Fixture(policy(1, 1))) {
+            f.dispatcher.submit(context(), () -> null);
+            var stale = f.dispatcher.submit(context(), () -> { throw new AssertionError("must not run"); });
+            f.clock.set(Duration.ofSeconds(5).toNanos());
+            var next = f.dispatcher.submit(context(), () -> "next");
+            assertThat(stale.result().toCompletableFuture()).isCompletedExceptionally();
+            assertThatThrownBy(() -> stale.result().toCompletableFuture().join())
+                    .hasCauseInstanceOf(RequestDispatcher.QueueTimeoutException.class);
+            assertThat(f.dispatcher.snapshot().rejected()).isZero();
+            assertThat(f.dispatcher.snapshot().queued()).isEqualTo(1);
+            f.workers.run(0);
+            f.workers.run(0);
+            assertThat(next.result().toCompletableFuture().join()).isEqualTo("next");
+        }
+    }
+
     @Test void queuedCancellationImmediatelyReturnsQueueCapacity() {
         try (var f = new Fixture(policy(1, 1))) {
             f.dispatcher.submit(context(), () -> null);
