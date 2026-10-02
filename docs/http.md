@@ -75,8 +75,9 @@ eight-request bound above; the next queued handler starts after the previous
 write completes. The decoder limits request lines to 4 KiB and
 headers to 8 KiB. Response bodies are limited to 1 MiB after encoding and response
 headers to 8 KiB; larger responses produce 500. Application allocations before
-returning a response are outside these limits. Idle keep-alive connections close
-after 30 seconds without network read/write activity. A running handler is not
+returning a response are outside these limits. Connections close after 30 seconds
+without network read/write activity, including idle keep-alive connections and a
+response write stalled by a client that stopped reading. A running handler is not
 interrupted by inactivity; its execution deadline bounds it instead.
 A request head must arrive within ten seconds of its first byte; otherwise the
 listener answers 408 Request Timeout and closes (or just closes when an earlier

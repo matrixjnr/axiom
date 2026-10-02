@@ -184,6 +184,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 var failure = unwrap(thrown);
                 try {
                     ctx.executor().execute(() -> {
+                        active = null; // The outcome is final; only the response write remains.
                         if (closing || !ctx.channel().isActive()) { return; }
                         if (failure instanceof Error) {
                             abort(ctx);
@@ -307,9 +308,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
-        // Idle means no exchange is in progress; a running handler is bounded by its own deadline.
+        // A running handler is bounded by its own deadline, so inactivity is ignored only while it
+        // executes; idle connections and stalled response writes still close.
         if (event == RequestBytes.EVENT) { requestBytes(ctx); }
-        else if (event instanceof IdleStateEvent) { if (!busy) { abort(ctx); } }
+        else if (event instanceof IdleStateEvent) { if (active == null) { abort(ctx); } }
         else { super.userEventTriggered(ctx, event); }
     }
 

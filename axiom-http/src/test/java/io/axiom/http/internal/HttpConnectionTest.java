@@ -298,6 +298,38 @@ class HttpConnectionTest {
                 });
     }
 
+    @Test void idleEventClosesConnectionWhoseResponseWriteIsStalled() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> "unread");
+            app.start();
+            var written = new java.util.concurrent.atomic.AtomicReference<Object>();
+            // Holds writes without completing them, like a client that stopped reading.
+            var stalled = new io.netty.channel.ChannelOutboundHandlerAdapter() {
+                @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
+                        io.netty.channel.ChannelPromise promise) { written.set(message); }
+            };
+            var channel = new EmbeddedChannel(stalled, new HttpConnection(app, executor));
+            try {
+                request(channel);
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (written.get() == null && System.nanoTime() < deadline) {
+                    channel.runPendingTasks();
+                    Thread.onSpinWait();
+                }
+                assertThat(written.get()).isNotNull();
+                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                assertThat(channel.isActive()).isFalse();
+            } finally {
+                io.netty.util.ReferenceCountUtil.release(written.get());
+                channel.finishAndReleaseAll();
+            }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     /** Runs tasks posted from handler threads until a response is written; bounded by the handler's progress. */
     private static <T> T awaitResponse(EmbeddedChannel channel) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
