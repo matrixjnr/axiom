@@ -53,8 +53,9 @@ connection are:
 so at most `3 × L` per connection (3 MiB at the default). A declared Content-Length
 is reserved in full against the `2 × L` share when its head arrives, although its
 array only grows as bytes arrive; a chunked body is counted as it arrives. While an
-array doubles, the old and new arrays briefly coexist. Exceeding the `2 × L` share
-closes the connection. Handler-side memory is additional: `ctx.body(...)` passes the
+array doubles, the old and new arrays briefly coexist. A request that would exceed the
+`2 × L` share is not executed: it is answered 503 after the earlier responses and the
+connection closes. Handler-side memory is additional: `ctx.body(...)` passes the
 codec a read-only view of the running body, so the JSON codec reads it without a
 copy, but a codec that implements only the array method receives one copy (up to
 `L`); the decoded value lives until the handler drops it, and `Body.bytes()` copies
@@ -67,10 +68,11 @@ process-wide body budget; size `L`, the request timeout and the heap together.
 
 ## Known limitations
 
-An error on a pipelined request closes the connection and cancels the earlier
-in-flight handler, and error responses close the socket without lingering, so a
-client still sending a body may see a reset instead of the 413; see
-[HTTP known limitations](http.md#known-limitations).
+A 413 (or another error) on a pipelined request is sent after the responses to
+earlier requests, which still run; see
+[errors on pipelined requests](http.md#errors-on-pipelined-requests). Error responses
+close the socket without lingering, so a client still sending a body may see a reset
+instead of the 413; see [HTTP known limitations](http.md#known-limitations).
 
 ## Timing
 

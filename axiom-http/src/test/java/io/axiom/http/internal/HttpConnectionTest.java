@@ -48,48 +48,71 @@ class HttpConnectionTest {
         }
     }
 
-    @Test void pipelineOverflowClosesAndInterruptsActiveHandlerWithoutOutOfOrderResponse() throws Exception {
+    @Test void pipelineOverflowIsAnswered503AfterEarlierResponsesWithoutInterruptingTheHandler() throws Exception {
         var entered = new CountDownLatch(1);
-        var interrupted = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
         var executor = executor();
         try (var app = Axiom.create()) {
             app.get("/", ctx -> {
+                if (entered.getCount() == 0) { return "queued"; }
                 entered.countDown();
-                try { new CountDownLatch(1).await(); }
-                catch (InterruptedException expected) { interrupted.countDown(); Thread.currentThread().interrupt(); }
-                return "late";
+                try { release.await(); }
+                catch (InterruptedException cancelled) { interrupted.set(true); throw cancelled; }
+                return "first";
             });
             app.start();
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
                 request(channel);
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-                for (int i = 0; i < 8; i++) { request(channel); }
-                assertThat(channel.isActive()).isFalse();
-                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+                for (int i = 0; i < HttpConnection.MAX_PIPELINED; i++) { request(channel); }
+                assertThat(channel.isActive()).isTrue();
                 assertThat(channel.<Object>readOutbound()).isNull();
+                release.countDown();
+                for (int i = 0; i < HttpConnection.MAX_PIPELINED; i++) {
+                    FullHttpResponse response = awaitResponse(channel);
+                    try {
+                        assertThat(response.status().code()).isEqualTo(200);
+                        assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8))
+                                .isEqualTo(i == 0 ? "first" : "queued");
+                    } finally { response.release(); }
+                }
+                FullHttpResponse refused = awaitResponse(channel);
+                try {
+                    assertThat(refused.status().code()).isEqualTo(503);
+                    assertThat(refused.headers().get("Connection")).isEqualTo("close");
+                } finally { refused.release(); }
+                assertThat(channel.isActive()).isFalse();
+                assertThat(interrupted).isFalse();
             } finally { channel.finishAndReleaseAll(); }
         } finally {
+            release.countDown();
             executor.close();
             executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
-    @Test void malformedPipelineClosesInsteadOfOvertakingEarlierResponse() throws Exception {
+    @Test void malformedPipelinedRequestIsAnsweredAfterTheEarlierResponse() throws Exception {
         var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
         var executor = executor();
         try (var app = Axiom.create()) {
-            app.get("/", ctx -> { entered.countDown(); new CountDownLatch(1).await(); return "never"; });
+            app.get("/", ctx -> { entered.countDown(); release.await(); return "first"; });
             app.start();
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
                 request(channel);
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                // No Host header: rejected, but only after the earlier response.
                 channel.writeInbound(new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/"));
-                assertThat(channel.isActive()).isFalse();
+                assertThat(channel.isActive()).isTrue();
                 assertThat(channel.<Object>readOutbound()).isNull();
+                release.countDown();
+                assertResponses(channel, 200, 400);
             } finally { channel.finishAndReleaseAll(); }
         } finally {
+            release.countDown();
             executor.close();
             executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }

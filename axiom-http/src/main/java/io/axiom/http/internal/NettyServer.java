@@ -97,12 +97,16 @@ final class NettyServer implements Server {
         }
         // The slot is released exactly once, by this listener, whether or not setup succeeds.
         channel.closeFuture().addListener(ignored -> connections.decrementAndGet());
-        var config = new HttpDecoderConfig().setMaxInitialLineLength(4096)
+        channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new RequestDecoder(decoderConfig()),
+                new HttpResponseEncoder(), new HttpConnection(application, handlers));
+    }
+
+    /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */
+    static HttpDecoderConfig decoderConfig() {
+        return new HttpDecoderConfig().setMaxInitialLineLength(4096)
                 .setMaxHeaderSize(8192).setMaxChunkSize(8192)
                 .setValidateHeaders(true).setAllowDuplicateContentLengths(false)
                 .setStrictLineParsing(true).setUseRfc9112TransferEncoding(true);
-        channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new RequestDecoder(config),
-                new HttpResponseEncoder(), new HttpConnection(application, handlers));
     }
 
     @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }

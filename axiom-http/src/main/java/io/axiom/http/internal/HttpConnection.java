@@ -54,8 +54,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     static final Duration REQUEST_HEAD_TIMEOUT = Duration.ofSeconds(10);
     private static final int MAX_RESPONSE = 1024 * 1024;
     private static final java.util.regex.Pattern CONTENT_LENGTH = java.util.regex.Pattern.compile("[0-9]{1,18}");
-    /** Outstanding requests per connection, including the active one; more closes the connection. */
+    /**
+     * Outstanding requests per connection, including the active one. A further request is not
+     * executed: it is answered 503 after the earlier responses, and the connection closes.
+     */
     static final int MAX_PIPELINED = 8;
+    /**
+     * Input read and dropped after a listener error, so a client disconnect is still noticed while
+     * earlier pipelined requests finish. Beyond it, reading pauses until the connection closes.
+     */
+    static final int MAX_DISCARDED_INPUT = 1024 * 1024;
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
@@ -66,6 +74,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private boolean busy;
     private boolean closing;
     private boolean draining;
+    /**
+     * Status of a listener error waiting for earlier pipelined responses; zero when none. Once set,
+     * no further input is decoded or executed.
+     */
+    private int deferredStatus;
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
     private ScheduledFuture<?> headTimer;
@@ -102,7 +115,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     private void inputDecoded(ChannelHandlerContext ctx) {
         // Body bytes are bounded by the request deadline, not the head timeout.
-        if (closing || headTimer != null || receiving != null) { return; }
+        if (closing || deferredStatus != 0 || headTimer != null || receiving != null) { return; }
         var decoder = ctx.pipeline().get(RequestDecoder.class);
         if (decoder == null || !decoder.headStarted()) { return; }
         headTimer = ctx.executor().schedule(() -> {
@@ -136,7 +149,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     @Override protected void channelRead0(ChannelHandlerContext ctx, HttpObject message) {
-        if (closing) { return; }
+        // After an error, requests already decoded from the same read are dropped unexecuted.
+        if (closing || deferredStatus != 0) { return; }
         if (!message.decoderResult().isSuccess()) { fail(ctx, decoderFailureStatus(message.decoderResult().cause())); return; }
         if (message instanceof HttpRequest request) {
             if (receiving != null) { fail(ctx, 400); return; }
@@ -152,6 +166,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Validates a request head and starts receiving it; false when a response or close has been issued. */
     private boolean accept(ChannelHandlerContext ctx, HttpRequest request) {
+        // The request beyond the bound is refused before its body is read; earlier ones still complete.
+        if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { fail(ctx, 503); return false; }
         boolean http10 = request.protocolVersion().equals(HttpVersion.HTTP_1_0);
         if (!http10 && !request.protocolVersion().equals(HttpVersion.HTTP_1_1)) { fail(ctx, 505); return false; }
         if (!validHost(request, http10)) { fail(ctx, 400); return false; }
@@ -196,7 +212,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             bodyChunked = chunked;
             declaredLength = length;
             // Declared bodies are reserved in full against the per-connection bound up front.
-            if (!chunked && queuedBodyBytes + length > 2L * bodyLimit) { abort(ctx); return false; }
+            if (!chunked && queuedBodyBytes + length > 2L * bodyLimit) { fail(ctx, 503); return false; }
             var exchange = receiving;
             // A slow body counts against the request deadline that started with the head.
             bodyTimer = ctx.executor().schedule(() -> {
@@ -218,7 +234,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         int readable = content.readableBytes();
         long total = (long) bodyLength + readable;
         if (total > bodyLimit) { fail(ctx, 413); return false; }
-        if (queuedBodyBytes + total > 2L * bodyLimit) { abort(ctx); return false; }
+        if (queuedBodyBytes + total > 2L * bodyLimit) { fail(ctx, 503); return false; }
         // Growth is capped at the declared length, so a complete declared body fills its array exactly.
         long cap = bodyChunked ? bodyLimit : declaredLength;
         if (total > cap) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
@@ -234,7 +250,6 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     private void completeRequest(ChannelHandlerContext ctx) {
-        if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { abort(ctx); return; }
         var exchange = receiving;
         if (bodyBytes != null) {
             if (bodyLength != declaredLength && !bodyChunked) { fail(ctx, 400); return; }
@@ -259,7 +274,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * has been written, so the interim response never overtakes a pipelined final response.
      */
     private void sendContinue(ChannelHandlerContext ctx) {
-        if (!continuePending || busy || !pending.isEmpty() || closing) { return; }
+        if (!continuePending || busy || !pending.isEmpty() || closing || deferredStatus != 0) { return; }
         continuePending = false;
         ctx.writeAndFlush(new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE,
                 Unpooled.EMPTY_BUFFER)).addListener(future -> { if (!future.isSuccess()) { abort(ctx); } });
@@ -280,9 +295,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     private void dispatch(ChannelHandlerContext ctx) {
-        if (busy || closing || pending.isEmpty()) { return; }
+        if (busy || closing) { return; }
+        if (pending.isEmpty()) {
+            // Every earlier response has been written; a deferred error is the last response.
+            if (deferredStatus != 0) { sendError(ctx, deferredStatus); }
+            return;
+        }
         // Reads stay enabled so a client disconnect cancels the running handler; the
-        // pipeline bound below keeps buffered requests finite.
+        // pipeline bound checked in accept keeps buffered requests finite.
         busy = true;
         var exchange = pending.removeFirst();
         queuedBodyBytes -= exchange.request().body().length();
@@ -421,9 +441,24 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true);
     }
 
+    /**
+     * Rejects the request being received (or the input that could not be parsed). Nothing after it
+     * is decoded or executed: input is discarded from now on, because after a framing error its
+     * boundaries cannot be trusted. Earlier pipelined requests, running or queued, still complete
+     * and are answered in order; the error follows them and closes the connection.
+     */
     private void fail(ChannelHandlerContext ctx, int status) {
-        // Never send an error ahead of an earlier pipelined response.
-        if (busy || !pending.isEmpty()) { abort(ctx); return; }
+        if (closing || deferredStatus != 0) { return; }
+        headComplete();
+        releaseBody();
+        receiving = null;
+        var decoder = ctx.pipeline().get(RequestDecoder.class);
+        if (decoder != null) { decoder.discard(MAX_DISCARDED_INPUT); }
+        if (busy || !pending.isEmpty()) { deferredStatus = status; return; }
+        sendError(ctx, status);
+    }
+
+    private void sendError(ChannelHandlerContext ctx, int status) {
         var exchange = new Exchange(Request.get("/"), false, false, ExecutionContext.create(application.requestTimeout()));
         send(ctx, exchange, error(status, exchange));
     }
@@ -451,6 +486,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // A running handler is bounded by its own deadline, so inactivity is ignored only while it
         // executes; idle connections and stalled response writes still close.
         if (event == RequestDecoder.DECODED) { inputDecoded(ctx); }
+        // Pausing keeps a client that keeps sending after an error from occupying the event loop.
+        else if (event == RequestDecoder.DISCARD_LIMIT) { ctx.channel().config().setAutoRead(false); }
         else if (event instanceof IdleStateEvent) { if (active == null) { abort(ctx); } }
         else { super.userEventTriggered(ctx, event); }
     }
