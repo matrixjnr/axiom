@@ -216,7 +216,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
-        if (event instanceof IdleStateEvent) { abort(ctx); }
+        // Idle means no exchange is in progress; a running handler is bounded by its own deadline.
+        if (event instanceof IdleStateEvent) { if (!busy) { abort(ctx); } }
         else { super.userEventTriggered(ctx, event); }
     }
 

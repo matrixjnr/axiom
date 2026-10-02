@@ -59,8 +59,9 @@ Reads pause while a response is outstanding, and the next queued handler starts
 after the previous write completes. The decoder limits request lines to 4 KiB and
 headers to 8 KiB. Response bodies are limited to 1 MiB after encoding and response
 headers to 8 KiB; larger responses produce 500. Application allocations before
-returning a response are outside these limits. Connections close after 30 seconds
-without network read/write activity, including during a stalled handler.
+returning a response are outside these limits. Idle keep-alive connections close
+after 30 seconds without network read/write activity. A running handler is not
+interrupted by inactivity; its execution deadline bounds it instead.
 
 The default execution deadline is ten seconds, configurable before startup through
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.

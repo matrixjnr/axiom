@@ -105,6 +105,45 @@ class HttpConnectionTest {
             } finally { channel.finishAndReleaseAll(); }
         } finally { executor.close(); }
     }
+    @Test void idleEventDoesNotAbortRunningHandler() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> { entered.countDown(); release.await(); return "done"; });
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            try {
+                request(channel);
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                assertThat(channel.isActive()).isTrue();
+                release.countDown();
+                FullHttpResponse response = awaitResponse(channel);
+                try { assertThat(response.status().code()).isEqualTo(200); }
+                finally { response.release(); }
+                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                assertThat(channel.isActive()).isFalse();
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            release.countDown();
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    /** Runs tasks posted from handler threads until a response is written; bounded by the handler's progress. */
+    private static <T> T awaitResponse(EmbeddedChannel channel) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            channel.runPendingTasks();
+            T message = channel.readOutbound();
+            if (message != null) { return message; }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("No response written");
+    }
+
     private static void request(EmbeddedChannel channel) {
         var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/");
         request.headers().set("Host", "localhost");
