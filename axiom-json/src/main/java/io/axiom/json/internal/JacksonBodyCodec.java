@@ -3,22 +3,36 @@ package io.axiom.json.internal;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.exc.StreamConstraintsException;
 import com.fasterxml.jackson.core.exc.StreamReadException;
+import com.fasterxml.jackson.databind.BeanDescription;
+import com.fasterxml.jackson.databind.DeserializationConfig;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.deser.BeanDeserializerModifier;
+import com.fasterxml.jackson.databind.deser.std.DelegatingDeserializer;
 import com.fasterxml.jackson.databind.deser.std.NumberDeserializers;
+import com.fasterxml.jackson.databind.deser.std.StdScalarDeserializer;
 import com.fasterxml.jackson.databind.exc.InvalidDefinitionException;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import com.fasterxml.jackson.databind.exc.ValueInstantiationException;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.type.ArrayType;
+import com.fasterxml.jackson.databind.type.LogicalType;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.axiom.codec.spi.BodyCodec;
 import io.axiom.error.DecodeException;
 import java.io.ByteArrayInputStream;
@@ -33,6 +47,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Strict JSON codec for {@code application/json}, discovered through {@link java.util.ServiceLoader}.
@@ -40,8 +56,9 @@ import java.util.Set;
  * Decoding reads the content as strict UTF-8 (malformed bytes fail with {@code invalid_encoding};
  * no UTF-16/32 auto-detection), rejects unknown properties, duplicate keys, trailing content,
  * scalar coercion such as {@code "1"} for a number, floats for integers and null or missing
- * primitives, and bounds nesting depth, string, name, number and document length. Records are
- * supported. Failures become {@link DecodeException} with a fixed code and, when the property
+ * primitives, numbers or booleans for strings, and bounds nesting depth, string, name, number
+ * and document length. Records, {@code Optional} and java.time types (as ISO-8601 strings only)
+ * are supported; default typing is never enabled. Failures become {@link DecodeException} with a fixed code and, when the property
  * path consists of declared properties, that path; Jackson messages and input never leave this
  * class. Not application API.
  */
@@ -85,8 +102,79 @@ public final class JacksonBodyCodec implements BodyCodec {
                 .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
                 // Untyped numbers keep their exact value instead of overflowing a double.
                 .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .enable(DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+                // java.time values are ISO-8601 strings both ways, and offsets are kept as sent.
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .disable(SerializationFeature.WRITE_DURATIONS_AS_TIMESTAMPS)
+                .disable(DeserializationFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE)
+                // Rejects lenient forms such as an empty string read as a null date.
+                .defaultLeniency(false)
+                .addModule(new Jdk8Module())
+                .addModule(new JavaTimeModule())
                 .addModule(finiteFloatingPoint())
+                .addModule(strictValues())
+                // A number or boolean is not read as text, mirroring the rejection of "1" for a number.
+                .withCoercionConfig(LogicalType.Textual, config -> config
+                        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
                 .build();
+    }
+
+    /**
+     * Accepts java.time values and byte arrays only as JSON strings (ISO-8601 text and base64),
+     * not as the numbers or arrays Jackson would otherwise read as timestamps or byte lists, and
+     * UUIDs only in their canonical 36-character form.
+     */
+    private static SimpleModule strictValues() {
+        var module = new SimpleModule("axiom-strict-values");
+        module.addDeserializer(UUID.class, new CanonicalUuid());
+        module.setDeserializerModifier(new BeanDeserializerModifier() {
+            @Override public JsonDeserializer<?> modifyDeserializer(DeserializationConfig config,
+                    BeanDescription description, JsonDeserializer<?> deserializer) {
+                return description.getBeanClass().getPackageName().equals("java.time")
+                        ? new StringOnly(deserializer) : deserializer;
+            }
+
+            @Override public JsonDeserializer<?> modifyArrayDeserializer(DeserializationConfig config,
+                    ArrayType type, BeanDescription description, JsonDeserializer<?> deserializer) {
+                return type.getRawClass() == byte[].class ? new StringOnly(deserializer) : deserializer;
+            }
+        });
+        return module;
+    }
+
+    /** Requires a JSON string before handing the value to the wrapped deserializer. */
+    private static final class StringOnly extends DelegatingDeserializer {
+        private static final long serialVersionUID = 1L;
+        StringOnly(JsonDeserializer<?> delegate) { super(delegate); }
+
+        @Override protected JsonDeserializer<?> newDelegatingInstance(JsonDeserializer<?> delegate) {
+            return new StringOnly(delegate);
+        }
+
+        @Override public Object deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            if (!parser.hasToken(JsonToken.VALUE_STRING)) { return context.handleUnexpectedToken(handledType(), parser); }
+            return super.deserialize(parser, context);
+        }
+    }
+
+    private static final class CanonicalUuid extends StdScalarDeserializer<UUID> {
+        private static final long serialVersionUID = 1L;
+        private static final Pattern CANONICAL =
+                Pattern.compile("\\p{XDigit}{8}-\\p{XDigit}{4}-\\p{XDigit}{4}-\\p{XDigit}{4}-\\p{XDigit}{12}");
+        CanonicalUuid() { super(UUID.class); }
+
+        @Override public UUID deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            if (!parser.hasToken(JsonToken.VALUE_STRING)) {
+                return (UUID) context.handleUnexpectedToken(UUID.class, parser);
+            }
+            var text = parser.getText();
+            if (!CANONICAL.matcher(text).matches()) {
+                return (UUID) context.handleWeirdStringValue(UUID.class, text, "not a canonical UUID");
+            }
+            return UUID.fromString(text);
+        }
     }
 
     /**
@@ -125,6 +213,9 @@ public final class JacksonBodyCodec implements BodyCodec {
             return value;
         }
     }
+
+    /** The configured mapper, for tests. */
+    ObjectMapper mapper() { return mapper; }
 
     @Override public Set<String> mediaTypes() { return Set.of("application/json"); }
 

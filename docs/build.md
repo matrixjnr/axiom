@@ -7,7 +7,9 @@ archives, and reproducible archive settings.
 
 The version catalog contains only dependencies in use. HTTP uses Netty 4.2 with
 its BOM to align implementation modules. JSON uses jackson-databind 2.22 with the
-Jackson BOM, as an `implementation` dependency of `axiom-json` only; no Jackson
+Jackson BOM, plus the `jackson-datatype-jsr310` (java.time) and `jackson-datatype-jdk8`
+(`Optional`) modules aligned by the same BOM, as `implementation` dependencies of
+`axiom-json` only; no Jackson
 type appears in an Axiom API, and applications add `axiom-json` with `runtimeOnly`.
 The 2.x line was chosen because its package names and exceptions are stable across
 the ecosystem; moving to Jackson 3 would only change `axiom-json` internals.
