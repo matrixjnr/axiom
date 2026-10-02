@@ -35,7 +35,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
         // Third-party production dependencies are confined to the module that adapts them.
         val externalGroups = mapOf(
             "axiom-http" to setOf("io.netty"),
-            "axiom-json" to setOf("com.fasterxml.jackson", "com.fasterxml.jackson.core", "com.fasterxml.jackson.datatype")
+            "axiom-json" to setOf("com.fasterxml.jackson", "com.fasterxml.jackson.core", "com.fasterxml.jackson.datatype"),
+            "axiom-validation-jakarta" to setOf("jakarta.validation", "org.hibernate.validator")
         )
         val module = moduleName.get()
         val moduleAllowed = allowed[module]
