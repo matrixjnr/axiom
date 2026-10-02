@@ -70,9 +70,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
     private ScheduledFuture<?> headTimer;
-    // Body of the request being received, copied out of each Netty buffer as it arrives; the
-    // array is exactly the declared Content-Length, or grows by doubling (capped at the limit)
-    // for chunked bodies. Dropped on every exit path (see releaseBody).
+    // Body of the request being received, copied out of each Netty buffer as it arrives. The array
+    // grows by doubling as bytes arrive, capped at the declared Content-Length or, for chunked
+    // bodies, at the limit, so a stalled sender holds little memory. Dropped on every exit path
+    // (see releaseBody).
     private byte[] bodyBytes;
     private boolean bodyChunked;
     private long declaredLength;
@@ -83,8 +84,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** An accepted {@code Expect: 100-continue} whose interim response is not yet written. */
     private boolean continuePending;
     private ScheduledFuture<?> bodyTimer;
-    /** First allocation for a chunked body; doubled as needed up to the body limit. */
-    private static final int INITIAL_CHUNKED_CAPACITY = 8192;
+    /** First allocation for a body; doubled as needed up to its declared length or the body limit. */
+    private static final int INITIAL_BODY_CAPACITY = 8192;
 
     HttpConnection(Application application, RequestDispatcher executor) {
         this(application, executor, REQUEST_HEAD_TIMEOUT);
@@ -225,13 +226,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         long total = (long) bodyLength + readable;
         if (total > bodyLimit) { fail(ctx, 413); return false; }
         if (queuedBodyBytes + total > 2L * bodyLimit) { abort(ctx); return false; }
+        // Growth is capped at the declared length, so a complete declared body fills its array exactly.
+        long cap = bodyChunked ? bodyLimit : declaredLength;
+        if (total > cap) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
         if (bodyBytes == null) {
-            bodyBytes = new byte[bodyChunked ? (int) Math.min(bodyLimit, Math.max(INITIAL_CHUNKED_CAPACITY, total))
-                    : (int) declaredLength];
-        }
-        if (total > bodyBytes.length) {
-            if (!bodyChunked) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
-            bodyBytes = Arrays.copyOf(bodyBytes, (int) Math.min(bodyLimit, Math.max(total, 2L * bodyBytes.length)));
+            bodyBytes = new byte[(int) Math.min(cap, Math.max(INITIAL_BODY_CAPACITY, total))];
+        } else if (total > bodyBytes.length) {
+            // Doubling keeps the copying linear in the body size.
+            bodyBytes = Arrays.copyOf(bodyBytes, (int) Math.min(cap, Math.max(total, 2L * bodyBytes.length)));
         }
         content.readBytes(bodyBytes, bodyLength, readable);
         bodyLength = (int) total;
@@ -242,9 +244,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { abort(ctx); return; }
         var exchange = receiving;
         if (bodyBytes != null) {
-            if (bodyLength != bodyBytes.length && !bodyChunked) { fail(ctx, 400); return; }
+            if (bodyLength != declaredLength && !bodyChunked) { fail(ctx, 400); return; }
             try {
-                // The array is handed over, not copied again; a chunked body is trimmed once.
+                // The array is handed over, not copied again unless it is larger than the body.
                 var bytes = bodyLength == bodyBytes.length ? bodyBytes : Arrays.copyOf(bodyBytes, bodyLength);
                 bodyBytes = null;
                 var body = OwnedBodies.adopt(exchange.request().header("Content-Type").orElse(null), bytes);

@@ -479,6 +479,68 @@ class HttpConnectionTest {
         }
     }
 
+    /** Heap bytes allocated by the calling thread, which runs every embedded channel task. */
+    private static long allocatedByThisThread() {
+        return ((com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean())
+                .getCurrentThreadAllocatedBytes();
+    }
+
+    @Test void stalledDeclaredBodyAllocatesOnlyWhatArrived() {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.maxRequestBody(1024 * 1024);
+            app.post("/", ctx -> { throw new AssertionError("incomplete body must not execute"); });
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            try {
+                var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/");
+                request.headers().set("Host", "localhost").set("Content-Length", String.valueOf(1024 * 1024));
+                var first = new io.netty.handler.codec.http.DefaultHttpContent(io.netty.buffer.Unpooled.wrappedBuffer(new byte[] {1}));
+                // Warm up the code path so class loading does not count.
+                channel.writeInbound(request);
+                long before = allocatedByThisThread();
+                channel.writeInbound(first);
+                long allocated = allocatedByThisThread() - before;
+                // A one-byte arrival must not reserve the declared megabyte in heap.
+                assertThat(allocated).isLessThan(64 * 1024);
+                assertThat(channel.isActive()).isTrue();
+            } finally { channel.finishAndReleaseAll(); }
+        } finally { executor.close(); }
+    }
+
+    @Test void declaredBodyArrivingInUnevenPiecesIsDeliveredIntact() throws Exception {
+        var executor = executor();
+        int length = 300_001;
+        var expected = new byte[length];
+        new java.util.Random(11).nextBytes(expected);
+        try (var app = Axiom.create()) {
+            app.maxRequestBody(length);
+            app.post("/", ctx -> java.util.Arrays.equals(ctx.request().body().bytes(), expected) ? "intact" : "corrupt");
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            try {
+                var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/");
+                request.headers().set("Host", "localhost").set("Content-Length", String.valueOf(length));
+                channel.writeInbound(request);
+                int offset = 0;
+                for (int size = 1; offset < length; size = size * 3 + 1) {
+                    int piece = Math.min(size, length - offset);
+                    var content = io.netty.buffer.Unpooled.copiedBuffer(expected, offset, piece);
+                    offset += piece;
+                    channel.writeInbound(offset == length ? new io.netty.handler.codec.http.DefaultLastHttpContent(content)
+                            : new io.netty.handler.codec.http.DefaultHttpContent(content));
+                }
+                FullHttpResponse response = awaitResponse(channel);
+                try {
+                    assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("intact");
+                } finally { response.release(); }
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     @Test void tinyChunksAreCopiedOnArrivalWithoutNettyAccumulation() throws Exception {
         var executor = executor();
         try (var app = Axiom.create()) {

@@ -51,13 +51,14 @@ connection are:
 | Bodies of pipelined requests waiting behind it, plus the body being received | `2 × L` together |
 
 so at most `3 × L` per connection (3 MiB at the default). A declared Content-Length
-is reserved in full against the `2 × L` share when its head arrives; a chunked
-body is counted as it arrives, and while its array doubles the old and new arrays
-briefly coexist. Exceeding the `2 × L` share closes the connection. Handler-side
-memory is additional: `ctx.body(...)` passes the codec a read-only view of the
-running body, so the JSON codec reads it without a copy, but a codec that implements
-only the array method receives one copy (up to `L`); the decoded value lives until
-the handler drops it, and `Body.bytes()` copies on every call.
+is reserved in full against the `2 × L` share when its head arrives, although its
+array only grows as bytes arrive; a chunked body is counted as it arrives. While an
+array doubles, the old and new arrays briefly coexist. Exceeding the `2 × L` share
+closes the connection. Handler-side memory is additional: `ctx.body(...)` passes the
+codec a read-only view of the running body, so the JSON codec reads it without a
+copy, but a codec that implements only the array method receives one copy (up to
+`L`); the decoded value lives until the handler drops it, and `Body.bytes()` copies
+on every call.
 
 These bounds are **per connection, not global**. A listener accepts up to 128
 connections, so its worst case is about `128 × 3 × L` (384 MiB at the default),
@@ -97,9 +98,11 @@ requests never receive `100 Continue`.
 Bodies are safe to share with other threads and their `toString` never shows
 content. The listener copies each received network buffer into a private array as
 it arrives and releases the buffer at once, so no Netty buffer outlives its read.
-For a declared Content-Length the array has exactly that size and is allocated when
-the first body byte arrives; for a chunked body it starts at 8 KiB and doubles, capped
-at the limit, and is trimmed once at the end. The finished array is handed to the
+The array is allocated when the first body byte arrives, starts at 8 KiB (or the
+body size if that is smaller) and doubles as bytes arrive, so a client that declares a
+large Content-Length and then stalls holds only what it has sent. A declared body's
+array is capped at the declared length and ends exactly full; a chunked body's array
+is capped at the limit and trimmed once at the end. The finished array is handed to the
 `Body` without another copy. The body keeps the request's
 `Content-Type`; `mediaType()` and `charset()` parse it. Request headers are
 available through `ctx.header(name)` (one value per name; repeated fields are joined
