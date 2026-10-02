@@ -50,7 +50,10 @@ same template, checked template by template in precedence order. With
 `GET /items/static` and `HEAD /items/:id`, `HEAD /items/static` runs the static GET
 route. `ctx.method()` still reports `HEAD`, `resolve` returns the GET route (whose
 admission policy applies), and `Allow` lists `HEAD` wherever `GET` is registered.
-HEAD responses suppress bodies for successful matches and routing errors.
+HEAD responses suppress bodies for successful matches and routing errors. A
+successful HEAD response (2xx other than 204 and 205) keeps the representation length
+instead: `app.handle` and `TestClient` return it with `Content-Length` set to the
+body's encoded length, and the listener sends that header with no body bytes.
 
 ## Conflicts and startup
 
@@ -99,8 +102,15 @@ Accepted paths are matched verbatim. No decoding, case folding, or redirects occ
 `ctx.path()` returns the request path. `ctx.route()` returns the stable route
 identity with its template. `ctx.path(name)` returns the raw capture and rejects
 undeclared names. `ctx.pathDecoded(name)` percent-decodes a capture once as strict
-UTF-8, segment by segment, and throws `IllegalArgumentException` for malformed UTF-8
-or for a segment that would decode to a `/`, backslash, NUL, `.` or `..`.
+UTF-8, segment by segment. Malformed UTF-8 (for example `/users/%FF`) or a segment
+that would decode to a `/`, backslash, NUL, `.` or `..` throws
+`BadRequestException` with code `invalid_path_encoding`, so the client receives a 400
+problem response that does not echo the capture; an undeclared name is still an
+`IllegalArgumentException` (a 500 over HTTP, because it is a handler bug).
+`Request` already rejects every path that could produce such a segment, so through
+an application only the UTF-8 check can fail; the other checks stay in the decoder
+deliberately, as defence in depth for `Context` implementations whose captures do
+not come from a validated `Request`, and are tested directly.
 `ctx.pathParameters()` returns an immutable map of raw captures in declaration order.
 Captures are extracted into that map once, when a dynamic route matches; the match
 holds no lazily initialized state. Fully static matches allocate no capture
@@ -113,6 +123,42 @@ it, but resolving it against a file system still requires the application's own
 containment check (for example, normalizing a `Path` and verifying its prefix).
 Typed parameter conversion is separate work; request body limits are described in
 [request bodies](bodies.md).
+
+## Query parameters
+
+The query is everything after the first `?` of the request target, without the
+`?`. It never takes part in routing. `Request.fromTarget` (used by the HTTP
+listener and `TestClient`) keeps it raw as `request.query()`; an absent and an
+empty query are both `""`, and the plain constructors create requests without one.
+A request is rejected with `IllegalArgumentException` (400 over HTTP, before
+routing) when its query
+
+- contains a character outside RFC 3986 query syntax (`pchar`, `/` and `?`; non-ASCII
+  characters other than controls and spaces are allowed), such as a space, `#`,
+  backslash or control character;
+- contains a malformed percent-escape such as `%zz` or a trailing `%`;
+- has a name or value that does not decode to well-formed UTF-8 (including overlong
+  forms, encoded surrogates and unpaired surrogates);
+- is longer than `Request.MAX_QUERY_LENGTH` (4096) characters or has more than
+  `Request.MAX_QUERY_PARAMETERS` (256) parameters.
+
+Over HTTP the 4 KiB request-line limit (414) is reached before the length limit;
+the length limit bounds requests built in memory. Rejection messages and error
+responses never contain the query, which may carry credentials, and
+`Request.toString()` omits it.
+
+The query is a list of `&`-separated `name=value` pairs. Empty pairs (`a=1&&b=2`,
+a trailing `&`) are ignored and not counted. A pair splits at its first `=`, so
+`a=b=c` has the value `b=c`, and a pair without `=` has the value `""`. Names and
+values are percent-decoded once as UTF-8: `%2541` is `%41`, not `A`. **`+` decodes
+to a space**, following the form encoding that HTML forms and `URLSearchParams`
+produce; send `%2B` for a literal plus. Names match exactly after decoding and are
+case-sensitive.
+
+`ctx.query(name)` returns the first value, `ctx.queryAll(name)` an immutable list
+of every value in order (empty when absent); `Request` has the same methods. Values
+are decoded on each call rather than cached, which the limits keep cheap. Typed
+conversion is left to the application, as for path captures.
 
 ## Implementation and verification
 

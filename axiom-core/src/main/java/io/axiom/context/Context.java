@@ -1,14 +1,12 @@
 package io.axiom.context;
 
+import io.axiom.error.BadRequestException;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.routing.Route;
-import java.io.ByteArrayOutputStream;
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.StandardCharsets;
+import io.axiom.internal.PercentDecoding;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -61,6 +59,32 @@ public interface Context {
      */
     default Optional<String> header(String name) {
         return request().header(name);
+    }
+
+    /**
+     * Returns the first value of a query parameter, percent-decoded as strict UTF-8 with
+     * {@code +} decoded as a space. Names match exactly after decoding. A parameter without
+     * {@code =} has an empty value. The query was validated when the request was created, so
+     * decoding cannot fail here. Values are untrusted client input.
+     *
+     * @param name decoded parameter name
+     * @return first value, if the parameter is present
+     * @see Request#query(String)
+     */
+    default Optional<String> query(String name) {
+        return request().query(name);
+    }
+
+    /**
+     * Returns every value of a query parameter in request order, decoded as by
+     * {@link #query(String)}.
+     *
+     * @param name decoded parameter name
+     * @return immutable values; empty when the parameter is absent
+     * @see Request#queryAll(String)
+     */
+    default List<String> queryAll(String name) {
+        return request().queryAll(name);
     }
 
     /**
@@ -132,10 +156,14 @@ public interface Context {
      * raw {@code /} separators. Decoding fails rather than producing a {@code /}, backslash,
      * or NUL inside a segment, a {@code .} or {@code ..} segment, or malformed UTF-8.
      * The result is still untrusted client input.
+     * A capture that cannot be decoded safely is the client's error: the failure is a
+     * {@link BadRequestException} with code {@code invalid_path_encoding}, answered 400 like
+     * any other {@link io.axiom.error.AxiomException}; it never carries the capture.
      * @param name capture name declared in the route template
      * @return decoded capture
-     * @throws IllegalArgumentException if the name is not declared or the value cannot be
-     *         decoded safely
+     * @throws IllegalArgumentException if the name is not declared by the matched route
+     * @throws BadRequestException if the value is malformed UTF-8 or would decode to a
+     *         separator, NUL or dot segment
      */
     default String pathDecoded(String name) {
         var raw = path(name);
@@ -151,38 +179,17 @@ public interface Context {
     }
 
     private static String decodeSegment(String raw, int start, int end) {
-        var bytes = new ByteArrayOutputStream(end - start);
-        for (int i = start; i < end; i++) {
-            char c = raw.charAt(i);
-            if (c == '%') {
-                if (i + 2 >= end) { throw new IllegalArgumentException("Malformed percent-escape in path capture"); }
-                int high = Character.digit(raw.charAt(i + 1), 16);
-                int low = Character.digit(raw.charAt(i + 2), 16);
-                if (high < 0 || low < 0) {
-                    throw new IllegalArgumentException("Malformed percent-escape in path capture");
-                }
-                bytes.write(high * 16 + low);
-                i += 2;
-            } else if (c < 0x80) {
-                bytes.write(c);
-            } else {
-                int next = Character.isHighSurrogate(c) && i + 1 < end ? i + 2 : i + 1;
-                bytes.writeBytes(raw.substring(i, next).getBytes(StandardCharsets.UTF_8));
-                i = next - 1;
-            }
-        }
         String segment;
         try {
-            segment = StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes.toByteArray())).toString();
-        } catch (CharacterCodingException malformed) {
-            throw new IllegalArgumentException("Path capture is not valid percent-encoded UTF-8", malformed);
+            segment = PercentDecoding.decode(raw, start, end, false);
+        } catch (IllegalArgumentException malformed) {
+            var failure = new BadRequestException("invalid_path_encoding");
+            failure.initCause(malformed); // For logs only; its message never contains the input.
+            throw failure;
         }
         if (segment.equals(".") || segment.equals("..") || segment.indexOf('/') >= 0
                 || segment.indexOf('\\') >= 0 || segment.indexOf('\0') >= 0) {
-            throw new IllegalArgumentException("Path capture decodes to a separator, NUL, or dot segment");
+            throw new BadRequestException("invalid_path_encoding");
         }
         return segment;
     }

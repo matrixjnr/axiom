@@ -38,8 +38,9 @@ Responses always use HTTP/1.1. An HTTP/1.0 connection closes after each response
 unless the request sends `Connection: keep-alive`, which the response echoes.
 Paths that `Request` rejects (empty or dot segments, backslashes, malformed or
 encoded separators; see [routing rules](routing.md)) receive 400. Accepted raw paths
-retain their encoding; query strings are excluded from routing and are not yet
-exposed through the request API. Request headers are available to handlers, and
+retain their encoding. Query strings are excluded from routing, retained on the
+request and validated as described in [routing rules](routing.md#query-parameters);
+a malformed or oversized query also receives 400. Request headers are available to handlers, and
 request bodies are read up to the application's limit; see
 [request bodies](bodies.md). Responses support UTF-8 strings, byte arrays, empty
 bodies and values encoded by an installed codec. Unencodable body objects and
@@ -50,9 +51,12 @@ propagates those exceptions.
 The transport controls Content-Length, Transfer-Encoding, connection headers and
 `Date`, which every response carries as an IMF-fixdate with one-second precision.
 Hop-by-hop headers, including names nominated by Connection, are removed. HEAD
-uses an explicit HEAD route or falls back to GET, and sends no body or Content-Length because the current
-application API does not retain the representation length. Statuses 204 and 304
-omit Content-Length; 205 uses zero, because RFC 9112 section 6.3 does not treat it as
+uses an explicit HEAD route or falls back to GET and sends no body bytes. A successful
+HEAD response (2xx other than 204 and 205) carries the Content-Length the GET
+representation would have, its encoded body length, replacing any value the
+application set; a representation the transport could not send is a 500 for HEAD as
+for GET. Error responses to HEAD keep their own framing: no body and no Content-Length.
+Statuses 204 and 304 omit Content-Length; 205 uses zero, because RFC 9112 section 6.3 does not treat it as
 bodiless and the client needs explicit framing to read the next response. The
 interim `100 Continue` carries no header fields. Keep-alive and pipelining are supported, with
 one active handler per connection and responses in request order.
@@ -146,8 +150,10 @@ responses and the connection closes), so `3 × L` with
 global: 128 connections allow about `384 × L` per listener; see
 [request bodies](bodies.md#memory-per-connection). Body bytes are copied out of
 network buffers as they arrive, so no Netty buffer is retained across reads.
-Response bodies are limited to 1 MiB after encoding and response
-headers to 8 KiB; larger responses produce 500. Application allocations before
+Response bodies are limited to 1 MiB of encoded bytes (a `String` counts its UTF-8
+bytes) and response headers to 8 KiB, counted as name, value and four characters
+per field; header values must be Latin-1. Other responses produce 500. The listener
+and `TestClient` apply these rules from one shared definition. Application allocations before
 returning a response are outside these limits. Connections close after 30 seconds
 without network read/write activity, including idle keep-alive connections and a
 response write stalled by a client that stopped reading. A request waiting for
@@ -167,6 +173,5 @@ The default execution deadline is ten seconds, configurable before startup throu
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
-Other limits remain fixed. TLS, HTTP/2, streaming request bodies, query parameter
-APIs, observability integrations and a configurable shutdown grace period remain
+Other limits remain fixed. TLS, HTTP/2, streaming request bodies, observability integrations and a configurable shutdown grace period remain
 future work.

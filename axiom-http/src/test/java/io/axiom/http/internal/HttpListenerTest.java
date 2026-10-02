@@ -54,7 +54,8 @@ class HttpListenerTest {
                 assertThat(response.headers()).containsEntry("content-length", "2")
                         .containsEntry("x-result", "yes").doesNotContainKeys("transfer-encoding", "x-hop");
                 wire.write("HEAD / HTTP/1.1\r\nHost: localhost\r\n\r\n");
-                assertThat(wire.read(true).headers()).doesNotContainKey("content-length");
+                // The explicit HEAD route's body length, without the bytes.
+                assertThat(wire.read(true).headers()).containsEntry("content-length", "15");
                 assertThat(wire.get("/reset").headers()).containsEntry("content-length", "0");
                 assertThat(wire.get("/cached").headers()).doesNotContainKey("content-length");
                 wire.write("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");

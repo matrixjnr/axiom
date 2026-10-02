@@ -1,6 +1,9 @@
 package io.axiom.http;
 
+import io.axiom.internal.PercentDecoding;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -12,18 +15,28 @@ import java.util.regex.Pattern;
  * case, trailing slashes, and percent-encoding are preserved and nothing is decoded.
  * Paths that could address a different resource after normalization or decoding are
  * rejected instead of normalized; see {@link #Request(String, String)}.
- * Query strings and fragments are not modeled yet.
+ * <p>
+ * The query is kept raw, without the leading {@code ?}; an absent and an empty query are both
+ * {@code ""}. It is validated when the request is created (see
+ * {@link #Request(String, String, String, Map, Body)}) and decoded on each lookup by
+ * {@link #query(String)} and {@link #queryAll(String)}. Fragments are not modeled.
  * <p>
  * Headers are an immutable, case-insensitive map with one value per name; transports join
  * repeated fields with {@code ", "}. The {@link Body} carries the content and its Content-Type.
- * {@link #toString()} omits header values and body content, which may hold credentials.
+ * {@link #toString()} omits the query, header values and body content, which may hold
+ * credentials.
  * @param method case-sensitive HTTP method token
  * @param path absolute raw path without query or fragment
+ * @param query raw query without the leading {@code ?}; {@code ""} when absent
  * @param headers request header fields; copied into an immutable case-insensitive map
  * @param body request content; never null, {@link Body#empty()} when absent
  */
-public record Request(String method, String path, Map<String, String> headers, Body body) {
+public record Request(String method, String path, String query, Map<String, String> headers, Body body) {
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
+    /** Longest accepted raw query, in characters. */
+    public static final int MAX_QUERY_LENGTH = 4096;
+    /** Most parameters an accepted query may contain; empty {@code &}-separated pairs do not count. */
+    public static final int MAX_QUERY_PARAMETERS = 256;
 
     /**
      * Creates a request without headers or body, validating the path as described by the
@@ -35,7 +48,22 @@ public record Request(String method, String path, Map<String, String> headers, B
      * @throws InvalidRequestPathException for a rejected path
      */
     public Request(String method, String path) {
-        this(method, path, Map.of(), Body.empty());
+        this(method, path, "", Map.of(), Body.empty());
+    }
+
+    /**
+     * Creates a request without a query, validating it as described by the canonical
+     * constructor.
+     *
+     * @param method HTTP token
+     * @param path absolute raw path
+     * @param headers header fields
+     * @param body request content
+     * @throws IllegalArgumentException for an invalid method or header
+     * @throws InvalidRequestPathException for a rejected path
+     */
+    public Request(String method, String path, Map<String, String> headers, Body body) {
+        this(method, path, "", headers, body);
     }
 
     /**
@@ -46,26 +74,37 @@ public record Request(String method, String path, Map<String, String> headers, B
      * allowed), a {@code .} or {@code ..} segment, a backslash, a NUL or other control
      * character, a malformed percent-escape, or an encoded dot, slash, backslash, or NUL
      * ({@code %2E}, {@code %2F}, {@code %5C}, {@code %00} in either case).
-     *
+     * <p>
+     * The query may contain RFC 3986 query characters ({@code pchar}, {@code /} and {@code ?})
+     * and non-ASCII characters other than controls and spaces, and every percent-escape must be
+     * well-formed. It holds {@code &}-separated {@code name=value} pairs; empty pairs are
+     * ignored, and each name and value must percent-decode (with {@code +} as a space) to
+     * well-formed UTF-8. At most {@link #MAX_QUERY_LENGTH} characters and
+     * {@link #MAX_QUERY_PARAMETERS} parameters are accepted. Rejection messages never contain
+     * the query.
+     * <p>
      * Header names must be HTTP tokens and values must not contain control characters other
      * than horizontal tab.
      *
      * @param method HTTP token
      * @param path absolute raw path
+     * @param query raw query without the leading {@code ?}; {@code ""} when absent
      * @param headers header fields
      * @param body request content
-     * @throws IllegalArgumentException for an invalid method or header
+     * @throws IllegalArgumentException for an invalid method, query or header
      * @throws InvalidRequestPathException for a rejected path
      */
     public Request {
         Objects.requireNonNull(method, "method");
         Objects.requireNonNull(path, "path");
+        Objects.requireNonNull(query, "query");
         Objects.requireNonNull(headers, "headers");
         Objects.requireNonNull(body, "body");
         if (!TOKEN.matcher(method).matches()) {
             throw new IllegalArgumentException("Invalid HTTP method: " + method);
         }
         validatePath(path);
+        validateQuery(query);
         if (headers.isEmpty()) {
             headers = Map.of();
         } else {
@@ -93,13 +132,38 @@ public record Request(String method, String path, Map<String, String> headers, B
     }
 
     /**
+     * Returns the first value of a query parameter. Names and values are percent-decoded once
+     * as UTF-8, with {@code +} decoded as a space ({@code %2B} is a literal plus), and names
+     * match exactly after decoding. A parameter without {@code =} has the value {@code ""}.
+     *
+     * @param name decoded parameter name
+     * @return first value, if present
+     */
+    public Optional<String> query(String name) {
+        Objects.requireNonNull(name, "name");
+        var values = parameters(name, true);
+        return values.isEmpty() ? Optional.empty() : Optional.of(values.getFirst());
+    }
+
+    /**
+     * Returns every value of a query parameter in request order, decoded as by
+     * {@link #query(String)}.
+     *
+     * @param name decoded parameter name
+     * @return immutable values; empty when the parameter is absent
+     */
+    public List<String> queryAll(String name) {
+        return List.copyOf(parameters(Objects.requireNonNull(name, "name"), false));
+    }
+
+    /**
      * Returns a copy with the supplied headers replacing the current ones.
      *
      * @param headers header fields
      * @return request with the headers
      */
     public Request withHeaders(Map<String, String> headers) {
-        return new Request(method, path, headers, body);
+        return new Request(method, path, query, headers, body);
     }
 
     /**
@@ -109,11 +173,11 @@ public record Request(String method, String path, Map<String, String> headers, B
      * @return request with the body
      */
     public Request withBody(Body body) {
-        return new Request(method, path, headers, body);
+        return new Request(method, path, query, headers, body);
     }
 
     /**
-     * Describes the request without header values or body content.
+     * Describes the request without its query, header values or body content.
      *
      * @return method, path, header names and body summary
      */
@@ -132,15 +196,14 @@ public record Request(String method, String path, Map<String, String> headers, B
     }
 
     /**
-     * Creates a request from an HTTP origin-form request target ({@code path[?query]}) in a
-     * single pass. The path is validated as by {@link #Request(String, String)}; the query
-     * must use RFC 3986 query characters and well-formed percent-escapes, and is discarded
-     * because queries are not modeled yet. Transports use this instead of parsing the target
-     * separately.
+     * Creates a request from an HTTP origin-form request target ({@code path[?query]}). The
+     * path is validated as by {@link #Request(String, String)} and the query, which is retained,
+     * as by the canonical constructor. Transports and the test client use this instead of
+     * splitting the target themselves.
      *
      * @param method HTTP token
      * @param target origin-form request target
-     * @return a request for the target's path
+     * @return a request for the target's path and query
      * @throws InvalidRequestPathException for a rejected path
      * @throws IllegalArgumentException for an invalid method or query
      */
@@ -148,10 +211,55 @@ public record Request(String method, String path, Map<String, String> headers, B
         Objects.requireNonNull(target, "target");
         int query = target.indexOf('?');
         if (query < 0) { return new Request(method, target); }
-        for (int i = query + 1; i < target.length(); i++) {
-            char c = target.charAt(i);
-            if (c == '%') {
-                if (i + 2 >= target.length() || hex(target.charAt(i + 1)) < 0 || hex(target.charAt(i + 2)) < 0) {
+        return new Request(method, target.substring(0, query), target.substring(query + 1), Map.of(), Body.empty());
+    }
+
+    /** Collects decoded values of one parameter; the query is already validated. */
+    private List<String> parameters(String name, boolean first) {
+        if (query.isEmpty()) { return List.of(); }
+        var values = new ArrayList<String>(1);
+        int start = 0;
+        while (start <= query.length()) {
+            int end = query.indexOf('&', start);
+            if (end < 0) { end = query.length(); }
+            if (end > start) {
+                int equals = query.indexOf('=', start);
+                int nameEnd = equals < 0 || equals > end ? end : equals;
+                if (PercentDecoding.decode(query, start, nameEnd, true).equals(name)) {
+                    values.add(nameEnd == end ? "" : PercentDecoding.decode(query, nameEnd + 1, end, true));
+                    if (first) { return values; }
+                }
+            }
+            start = end + 1;
+        }
+        return values;
+    }
+
+    private static void validateQuery(String query) {
+        if (query.length() > MAX_QUERY_LENGTH) {
+            throw new IllegalArgumentException("Query longer than " + MAX_QUERY_LENGTH + " characters");
+        }
+        int parameters = 0;
+        int start = 0;
+        for (int i = 0; i <= query.length(); i++) {
+            char c = i < query.length() ? query.charAt(i) : '&';
+            if (c == '&') {
+                if (i > start) {
+                    if (++parameters > MAX_QUERY_PARAMETERS) {
+                        throw new IllegalArgumentException("Query has more than " + MAX_QUERY_PARAMETERS + " parameters");
+                    }
+                    int equals = query.indexOf('=', start);
+                    int nameEnd = equals < 0 || equals > i ? i : equals;
+                    try {
+                        PercentDecoding.decode(query, start, nameEnd, true);
+                        if (nameEnd < i) { PercentDecoding.decode(query, nameEnd + 1, i, true); }
+                    } catch (IllegalArgumentException malformed) {
+                        throw new IllegalArgumentException("Query parameter is not valid percent-encoded UTF-8");
+                    }
+                }
+                start = i + 1;
+            } else if (c == '%') {
+                if (i + 2 >= query.length() || hex(query.charAt(i + 1)) < 0 || hex(query.charAt(i + 2)) < 0) {
                     throw new IllegalArgumentException("Malformed percent-escape in query");
                 }
                 i += 2;
@@ -159,7 +267,6 @@ public record Request(String method, String path, Map<String, String> headers, B
                 throw new IllegalArgumentException("Invalid character in query");
             }
         }
-        return new Request(method, target.substring(0, query));
     }
 
     private static void validatePath(String path) {
@@ -207,10 +314,5 @@ public record Request(String method, String path, Map<String, String> headers, B
                 || "-._~!$&'()*+,;=:@".indexOf(c) >= 0;
     }
 
-    private static int hex(char c) {
-        if (c >= '0' && c <= '9') { return c - '0'; }
-        if (c >= 'a' && c <= 'f') { return c - 'a' + 10; }
-        if (c >= 'A' && c <= 'F') { return c - 'A' + 10; }
-        return -1;
-    }
+    private static int hex(char c) { return PercentDecoding.hex(c); }
 }

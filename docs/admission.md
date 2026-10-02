@@ -53,6 +53,20 @@ HTTP pipelined requests. Queue waiting cannot extend that deadline. Promotion
 checks both clocks, so a delayed timer cannot start expired work. Queue timer
 callbacks from before promotion cannot cancel the promoted request.
 
+Expiry does not depend on timers alone. Each queued request has a timer for the
+smaller of its queue wait and remaining deadline, and in addition every completed
+request, and every submission that would otherwise be refused for a full queue,
+checks the head of each route's queue, including routes at their own active
+limit that cannot promote anything. Because every request of a route has the
+same queue wait and joins its queue in arrival order, an expired queue wait
+always reaches the head first, so this check fails every expired wait without
+scanning the queue: its cost is bounded by the number of routes with waiting
+requests plus the requests it expires. A late timer therefore delays a queue-wait
+expiry only until the next completion or refused submission, and an expired wait
+never holds a queue slot that a new request needs. A request whose own execution
+deadline is shorter than the queue wait of the request ahead of it is expired by
+its timer, or when it reaches the head.
+
 - Full active capacity with no available queue slot: **503**, then connection close.
 - Queue wait expires: **503**, then connection close; the handler is never invoked.
 - Request execution deadline expires while waiting: **504**, then connection close.

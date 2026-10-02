@@ -232,7 +232,21 @@ final class DefaultApplication implements Application {
             }
             response = Problems.response(failure, execution.requestId());
         }
-        return request.method().equals("HEAD") ? response.withoutBody() : response;
+        return request.method().equals("HEAD") ? head(response) : response;
+    }
+
+    /**
+     * Strips the body of a HEAD response. A successful response with content (2xx other than 204
+     * and 205) instead carries {@code Content-Length} set to the encoded length the body would
+     * have, which the transport sends in place of the bytes. A body the transport could not send
+     * is kept, so HEAD fails where GET would (a 500 over HTTP).
+     */
+    private static Response head(Response response) {
+        int status = response.status();
+        if (status < 200 || status > 299 || status == 204 || status == 205) { return response.withoutBody(); }
+        var bytes = ResponseSerialization.bodyBytes(response.body());
+        if (bytes == null) { return response; }
+        return response.withoutBody().withHeader("Content-Length", Integer.toString(bytes.length));
     }
 
     private static Response dispatch(Runtime published, Request request, ExecutionContext execution) throws Exception {

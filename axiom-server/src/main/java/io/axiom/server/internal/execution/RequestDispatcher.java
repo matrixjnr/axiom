@@ -108,7 +108,7 @@ public final class RequestDispatcher implements AutoCloseable {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(action, "action");
         var signals = new ArrayList<Runnable>();
-        Task<T> task;
+        Task<T> task = null;
         Throwable submissionFailure = null;
         synchronized (this) {
             if (closed || stopping) { rejected++; throw new RejectedExecutionException("Dispatcher closed"); }
@@ -119,37 +119,48 @@ public final class RequestDispatcher implements AutoCloseable {
             }
             if (bucket == null) { bucket = new Bucket(key, endpointPolicy); }
             boolean room = active < policy.maxActive() && bucket.active < endpointPolicy.maxActive();
-            if (!room && (queued >= policy.maxQueued() || bucket.waiting.size() >= endpointPolicy.maxQueued())) {
+            boolean full = !room && queueFull(bucket);
+            if (full) {
+                // Slots held by waits that already expired are reclaimed before refusing.
+                expireStaleHeads(signals);
+                full = queueFull(bucket);
+            }
+            if (full) {
                 rejected++;
-                throw new RejectedExecutionException("Request capacity unavailable");
-            }
-            buckets.put(key, bucket);
-            task = new Task<>(context, action, bucket);
-            tasks.add(task);
-            if (room) {
-                submissionFailure = activate(task, signals);
+                submissionFailure = new RejectedExecutionException("Request capacity unavailable");
             } else {
-                task.waiting = true;
-                task.queuedAt = clock.getAsLong();
-                task.queueBudget = Math.min(policy.queueTimeout().toNanos(), endpointPolicy.queueTimeout().toNanos());
-                task.sequence = sequence++;
-                bucket.enqueue(task);
-                queued++;
-                queuedBuckets.add(bucket);
-                try { schedule(task, Math.min(task.queueBudget, context.remainingTime().toNanos())); }
-                catch (RuntimeException | Error failure) {
-                    finish(task, null, failure instanceof RejectedExecutionException
-                    ? new DispatchRejectedException(failure) : failure, false, signals);
-                    submissionFailure = failure;
+                buckets.put(key, bucket);
+                task = new Task<>(context, action, bucket);
+                tasks.add(task);
+                if (room) {
+                    submissionFailure = activate(task, signals);
+                } else {
+                    task.waiting = true;
+                    task.queuedAt = clock.getAsLong();
+                    task.queueBudget = Math.min(policy.queueTimeout().toNanos(), endpointPolicy.queueTimeout().toNanos());
+                    task.sequence = sequence++;
+                    bucket.enqueue(task);
+                    queued++;
+                    queuedBuckets.add(bucket);
+                    try { schedule(task, Math.min(task.queueBudget, context.remainingTime().toNanos())); }
+                    catch (RuntimeException | Error failure) {
+                        finish(task, null, failure instanceof RejectedExecutionException
+                        ? new DispatchRejectedException(failure) : failure, false, signals);
+                        submissionFailure = failure;
+                    }
                 }
+                if (submissionFailure == null) { accepted++; }
+                else if (submissionFailure instanceof RejectedExecutionException) { rejected++; }
             }
-            if (submissionFailure == null) { accepted++; }
-            else if (submissionFailure instanceof RejectedExecutionException) { rejected++; }
         }
         publish(signals);
         if (submissionFailure instanceof RuntimeException failure) { throw failure; }
         if (submissionFailure instanceof Error failure) { throw failure; }
         return task;
+    }
+
+    private boolean queueFull(Bucket bucket) {
+        return queued >= policy.maxQueued() || bucket.waiting.size() >= bucket.policy.maxQueued();
     }
 
     /**
@@ -305,14 +316,37 @@ public final class RequestDispatcher implements AutoCloseable {
                 if (head == null || candidate.sequence < head.sequence) { head = candidate; }
             }
             if (head == null) { return; }
-            if (head.context.isExpired()) {
-                finish(head, null, new DeadlineExceededException(), false, signals);
-            } else if (clock.getAsLong() - head.queuedAt >= head.queueBudget) {
-                finish(head, null, new QueueTimeoutException(), false, signals);
-            } else {
-                activate(head, signals);
+            var expired = expiry(head, clock.getAsLong());
+            if (expired != null) { finish(head, null, expired, false, signals); }
+            else { activate(head, signals); }
+        }
+    }
+
+    /**
+     * Fails the expired heads of every endpoint queue, including endpoints at their own active
+     * limit, which {@link #drain} skips. The queue budget is the same for every request of an
+     * endpoint and arrival times are monotonic, so a queue-wait expiry always reaches the head
+     * first: removing expired heads until a live one is found removes every expired wait. Cost
+     * is bounded by queued endpoints plus the requests expired, never by queue length. A request
+     * whose own execution deadline is shorter than the head's remains its timer's to expire.
+     */
+    private void expireStaleHeads(List<Runnable> signals) {
+        if (queuedBuckets.isEmpty()) { return; }
+        long now = clock.getAsLong();
+        for (var bucket : List.copyOf(queuedBuckets)) {
+            while (!bucket.waiting.isEmpty()) {
+                var head = bucket.waiting.iterator().next();
+                var expired = expiry(head, now);
+                if (expired == null) { break; }
+                finish(head, null, expired, false, signals);
             }
         }
+    }
+
+    private static Throwable expiry(Task<?> task, long now) {
+        if (task.context.isExpired()) { return new DeadlineExceededException(); }
+        if (now - task.queuedAt >= task.queueBudget) { return new QueueTimeoutException(); }
+        return null;
     }
 
     private static void publish(List<Runnable> signals) { signals.forEach(Runnable::run); }
@@ -412,6 +446,7 @@ public final class RequestDispatcher implements AutoCloseable {
                 finish(this, value, failure, false, signals);
                 runner = null;
                 release(this);
+                expireStaleHeads(signals);
                 drain(signals);
             }
             publish(signals);

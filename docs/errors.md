@@ -30,7 +30,8 @@ Every framework and application error response uses an
 `type`, `title`, `detail` and `instance` are omitted; RFC 9457 treats a missing
 `type` as `about:blank`. The in-memory `app.handle`, `TestClient` and the HTTP
 listener produce identical bodies for the same failure. HEAD responses keep the
-status and headers without the body.
+status and headers without the body and, unlike successful HEAD responses, carry no
+`Content-Length`.
 
 ## Throwing errors
 
@@ -85,8 +86,9 @@ for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 
 | Status | When | Where |
 | --- | --- | --- |
-| 400 | Malformed request line or headers, invalid Host, rejected path, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked`, more than one Transfer-Encoding line | Listener |
+| 400 | Malformed request line or headers, invalid Host, rejected path or query, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked`, more than one Transfer-Encoding line | Listener |
 | 400 | Empty body or codec failure in `ctx.body` | Runtime |
+| 400 | Path capture that `ctx.pathDecoded` cannot decode safely (malformed UTF-8, or a decoded separator, backslash, NUL or dot segment); code `invalid_path_encoding` | Runtime |
 | 404 | No route matches the path | Runtime |
 | 405 | Route exists for other methods; `Allow` lists them | Runtime |
 | 406 | Accept excludes the codec response's media type, decided after the handler ran (see [negotiation](bodies.md#accept-negotiation-406)) | Runtime |

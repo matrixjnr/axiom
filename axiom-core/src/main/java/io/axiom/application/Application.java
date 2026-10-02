@@ -234,7 +234,10 @@ public interface Application extends AutoCloseable {
      * Selects the most specific complete path match (static, parameter, wildcard at the first
      * differing segment) that is registered for the request method; a more specific template
      * without that method does not hide a less specific one with it. HEAD uses an explicit
-     * HEAD route, or else the GET route of the same template, and suppresses response bodies.
+     * HEAD route, or else the GET route of the same template, and suppresses response bodies;
+     * a successful HEAD response (2xx other than 204 and 205) instead carries
+     * {@code Content-Length} set to the encoded length of the body it would have had, and keeps a
+     * body the HTTP transport could not send, so that HEAD fails where GET would.
      * Returns 404 for an unknown path, and 405 when no matching template has the method, with
      * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
      * Bodies over {@link #maxRequestBody()} receive 413. Unknown paths, method mismatches and

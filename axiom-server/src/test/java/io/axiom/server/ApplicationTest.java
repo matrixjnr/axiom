@@ -154,6 +154,9 @@ class ApplicationTest {
             assertThat(fallback.status()).isEqualTo(201);
             assertThat(fallback.body()).isNull();
             assertThat(fallback.headers()).containsEntry("content-type", "text/plain; charset=utf-8");
+            // The GET representation's encoded length, without its bytes.
+            assertThat(fallback.headers()).containsEntry("content-length", "13");
+            assertThat(response.headers()).containsEntry("content-length", "8");
             var mismatch = app.handle(new Request("HEAD", "/post-only"));
             assertThat(mismatch.status()).isEqualTo(405);
             assertThat(mismatch.headers()).containsEntry("allow", "POST");
