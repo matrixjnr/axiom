@@ -52,7 +52,13 @@ class HttpBodyTest {
 
     @Test void clientStillSendingAnOversizedBodyReadsThe413AndIsNotReset() throws Exception {
         try (var fixture = echo(16)) {
-            var wire = new Wire(fixture.listen());
+            fixture.app.start();
+            // A long linger keeps the test independent of how fast a loaded machine moves the upload.
+            var server = NettyServer.bind(fixture.app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                    NettyServer.SHUTDOWN_GRACE, Duration.ofSeconds(60));
+            fixture.servers.add(server);
+            var wire = new Wire(server);
+            // Below the discard cap, so the server never needs to cut the upload short.
             int length = 8 * 1024 * 1024;
             var piece = new byte[16 * 1024];
             // The head and the start of the body arrive together, so body bytes are unread when the 413 is sent.
@@ -80,6 +86,7 @@ class HttpBodyTest {
             } finally {
                 wire.close();
                 sender.join();
+                server.close();
             }
         }
     }

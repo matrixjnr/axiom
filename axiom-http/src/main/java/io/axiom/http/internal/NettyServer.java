@@ -47,11 +47,13 @@ final class NettyServer implements Server {
     private final AtomicBoolean closing = new AtomicBoolean();
     private final AtomicInteger connections = new AtomicInteger();
     private final Duration grace;
+    private final Duration linger;
     Channel listener;
     private InetSocketAddress address;
 
-    private NettyServer(AdmissionPolicy policy, Duration grace) {
+    private NettyServer(AdmissionPolicy policy, Duration grace, Duration linger) {
         this.grace = grace;
+        this.linger = linger;
         handlers = new RequestDispatcher(policy);
         stopped = CompletableFuture.allOf(handlers.termination().toCompletableFuture(),
                 completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
@@ -62,7 +64,13 @@ final class NettyServer implements Server {
     }
 
     static NettyServer bind(Application application, InetSocketAddress address, Duration grace) throws IOException {
-        var server = new NettyServer(application.admissionPolicy(), grace);
+        return bind(application, address, grace, HttpConnection.LINGER_TIMEOUT);
+    }
+
+    /** Binds with a non-default linger timeout; for tests that must tolerate a slow machine. */
+    static NettyServer bind(Application application, InetSocketAddress address, Duration grace, Duration linger)
+            throws IOException {
+        var server = new NettyServer(application.admissionPolicy(), grace, linger);
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
                     .channel(NioServerSocketChannel.class)
@@ -98,7 +106,8 @@ final class NettyServer implements Server {
         // The slot is released exactly once, by this listener, whether or not setup succeeds.
         channel.closeFuture().addListener(ignored -> connections.decrementAndGet());
         channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new RequestDecoder(decoderConfig()),
-                new HttpResponseEncoder(), new HttpConnection(application, handlers));
+                new HttpResponseEncoder(),
+                new HttpConnection(application, handlers, HttpConnection.REQUEST_HEAD_TIMEOUT, linger));
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */

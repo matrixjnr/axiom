@@ -78,6 +78,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final Application application;
     private final RequestDispatcher executor;
     private final long headTimeoutNanos;
+    private final long lingerNanos;
     private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
     private Exchange receiving;
     private boolean busy;
@@ -116,9 +117,15 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     HttpConnection(Application application, RequestDispatcher executor, Duration headTimeout) {
+        this(application, executor, headTimeout, LINGER_TIMEOUT);
+    }
+
+    /** Tests may shorten or lengthen the head and linger bounds; production uses the constants. */
+    HttpConnection(Application application, RequestDispatcher executor, Duration headTimeout, Duration lingerTimeout) {
         this.application = application;
         this.executor = executor;
         this.headTimeoutNanos = headTimeout.toNanos();
+        this.lingerNanos = lingerTimeout.toNanos();
     }
 
     /**
@@ -478,7 +485,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * Half-closes after a listener error response: the client reads the response and end of stream,
      * and input it is still sending is discarded rather than left unread, which would make the
      * operating system reset the connection and could destroy the response. The connection closes
-     * when the client closes its side, after {@link #LINGER_TIMEOUT}, after {@link #LINGER_MAX_INPUT}
+     * when the client closes its side, after the linger timeout ({@link #LINGER_TIMEOUT}), after {@link #LINGER_MAX_INPUT}
      * bytes, or on inactivity, whichever comes first.
      */
     private void linger(ChannelHandlerContext ctx) {
@@ -489,7 +496,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         }
         lingering = true;
         decoder.discard(LINGER_MAX_INPUT);
-        lingerTimer = ctx.executor().schedule(() -> { ctx.close(); }, LINGER_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
+        lingerTimer = ctx.executor().schedule(() -> { ctx.close(); }, lingerNanos, TimeUnit.NANOSECONDS);
         duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
         // Reading may have paused while an error waited for earlier responses.
         ctx.channel().config().setAutoRead(true);
