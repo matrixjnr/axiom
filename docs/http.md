@@ -88,10 +88,13 @@ eight-request bound above; the next queued handler starts after the previous
 write completes. The decoder limits request lines to 4 KiB (414 beyond) and headers to 8 KiB (431
 beyond). Request bodies are limited by `app.maxRequestBody` (1 MiB by default, at
 most 64 MiB): an oversized Content-Length gets 413 before the body is read, and a
-chunked body gets 413 as soon as its running total exceeds the limit. Bodies of
-requests waiting behind the active one plus the body being received are bounded at
-twice the limit per connection; beyond that the connection closes. Received
-buffers are released on completion, error, disconnect and shutdown.
+chunked body gets 413 as soon as its running total exceeds the limit. Per connection the listener holds at most the running request's body (`L`) plus
+the bodies of waiting pipelined requests and the body being received (`2 × L`
+together; beyond that the connection closes), so `3 × L` with
+`L = maxRequestBody`. These bounds are per connection and per listener, not
+global: 128 connections allow about `384 × L` per listener; see
+[request bodies](bodies.md#memory-per-connection). Body bytes are copied out of
+network buffers as they arrive, so no Netty buffer is retained across reads.
 Response bodies are limited to 1 MiB after encoding and response
 headers to 8 KiB; larger responses produce 500. Application allocations before
 returning a response are outside these limits. Connections close after 30 seconds
@@ -105,6 +108,22 @@ pipelined response is outstanding). Trickling bytes does not extend the bound.
 A request body must arrive before the request deadline, which starts when the head
 is parsed; otherwise the listener answers 408 and closes. A connection receiving
 body bytes is not idle, but one that stops sending mid-body for 30 seconds is.
+
+### Known limitations
+
+- **An error on a pipelined request aborts the connection.** When a later
+  pipelined request is malformed, too large, timed out while arriving, or otherwise
+  rejected by the listener while an earlier request is still running or queued, the
+  listener does not send an error out of order. It closes the connection instead:
+  the earlier request's handler is cancelled and interrupted (side effects it
+  already performed remain), its response is never sent, and any other queued
+  requests are dropped unanswered. The client sees the connection close.
+- **Error responses close without lingering.** Responses that end a connection
+  (400, 408, 413, 417 and the other listener errors) are written and the socket is
+  closed at once. If the client is still sending, for example the rest of an
+  oversized body, the operating system may answer the unread data with a TCP reset,
+  and the client can see a reset instead of the response. Clients that send
+  `Expect: 100-continue` and wait avoid this for 413.
 
 The default execution deadline is ten seconds, configurable before startup through
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.

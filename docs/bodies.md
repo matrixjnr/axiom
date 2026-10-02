@@ -40,11 +40,35 @@ lists and other characters receive **400**. A request with neither Content-Lengt
 nor Transfer-Encoding has an empty body (RFC 9112 section 6.3), whatever its method;
 the listener never answers 411.
 
-Each connection buffers at most one body being received plus the bodies of
-pipelined requests waiting behind the active one; together these are bounded at
-twice the limit, and exceeding that closes the connection. With the 128-connection
-limit and the default 1 MiB, a listener therefore buffers at most about 3 MiB per
-connection (active, waiting and receiving bodies).
+### Memory per connection
+
+With `L` = `maxRequestBody`, the request body bytes the listener holds for one
+connection are:
+
+| Held | Bound |
+| --- | --- |
+| Body of the request whose handler is running | `L` |
+| Bodies of pipelined requests waiting behind it, plus the body being received | `2 × L` together |
+
+so at most `3 × L` per connection (3 MiB at the default). A declared Content-Length
+is reserved in full against the `2 × L` share when its head arrives; a chunked
+body is counted as it arrives, and while its array doubles the old and new arrays
+briefly coexist. Exceeding the `2 × L` share closes the connection. Handler-side
+copies are additional: `ctx.body(...)` passes the codec a copy of the running body
+(up to `L`) and the decoded value lives until the handler drops it, and
+`Body.bytes()` copies on every call.
+
+These bounds are **per connection, not global**. A listener accepts up to 128
+connections, so its worst case is about `128 × 3 × L` (384 MiB at the default),
+and each additional listener has its own 128 connections. There is no
+process-wide body budget; size `L`, the request timeout and the heap together.
+
+## Known limitations
+
+An error on a pipelined request closes the connection and cancels the earlier
+in-flight handler, and error responses close the socket without lingering, so a
+client still sending a body may see a reset instead of the 413; see
+[HTTP known limitations](http.md#known-limitations).
 
 ## Timing
 
