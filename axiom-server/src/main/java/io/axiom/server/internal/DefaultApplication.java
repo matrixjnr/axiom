@@ -2,6 +2,9 @@ package io.axiom.server.internal;
 
 import io.axiom.application.Application;
 import io.axiom.context.Handler;
+import io.axiom.error.AxiomException;
+import io.axiom.error.NotAcceptableException;
+import io.axiom.error.PayloadTooLargeException;
 import io.axiom.execution.AdmissionPolicy;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
@@ -29,9 +32,16 @@ final class DefaultApplication implements Application {
      * volatile field and takes no lock; {@code router} is null once the application closes.
      */
     private record Runtime(CompiledRouter router, List<Route> routes, Set<Route> routeSet,
-                           Map<Route, AdmissionPolicy> routePolicies, AdmissionPolicy defaultPolicy) {
-        Runtime withoutRouter() { return new Runtime(null, routes, routeSet, routePolicies, defaultPolicy); }
+                           Map<Route, AdmissionPolicy> routePolicies, AdmissionPolicy defaultPolicy,
+                           Codecs codecs, int maxRequestBody) {
+        Runtime withoutRouter() {
+            return new Runtime(null, routes, routeSet, routePolicies, defaultPolicy, codecs, maxRequestBody);
+        }
     }
+
+    /** Largest configurable request body; bodies are buffered in memory before the handler runs. */
+    static final int MAX_REQUEST_BODY_LIMIT = 64 * 1024 * 1024;
+    private static final System.Logger LOG = System.getLogger(DefaultApplication.class.getName());
 
     // Configuration state; guarded by this until startup publishes a runtime snapshot.
     private final Map<Route, Handler> registrations = new LinkedHashMap<>();
@@ -40,6 +50,7 @@ final class DefaultApplication implements Application {
     private final List<Server> listeners = new ArrayList<>();
     private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
+    private volatile int maxRequestBody = 1024 * 1024;
     private volatile State state = State.CONFIGURING;
     private volatile Runtime runtime;
 
@@ -109,17 +120,19 @@ final class DefaultApplication implements Application {
             return this;
         }
         requireState(State.CONFIGURING);
+        var codecs = Codecs.discover();
         var router = CompiledRouter.compile(registrations);
-        runtime = snapshot(router);
+        runtime = snapshot(router, codecs);
         registrations.clear();
         shapes.clear();
         state = State.RUNNING;
         return this;
     }
 
-    private Runtime snapshot(CompiledRouter router) {
+    private Runtime snapshot(CompiledRouter router, Codecs codecs) {
         var routes = List.copyOf(registrations.keySet());
-        return new Runtime(router, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy);
+        return new Runtime(router, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
+                codecs, maxRequestBody);
     }
 
     @Override
@@ -135,6 +148,17 @@ final class DefaultApplication implements Application {
     }
 
     @Override public Duration requestTimeout() { return requestTimeout; }
+
+    @Override public synchronized Application maxRequestBody(int bytes) {
+        requireState(State.CONFIGURING);
+        if (bytes < 0 || bytes > MAX_REQUEST_BODY_LIMIT) {
+            throw new IllegalArgumentException("Request body limit must be between 0 and " + MAX_REQUEST_BODY_LIMIT + " bytes");
+        }
+        maxRequestBody = bytes;
+        return this;
+    }
+
+    @Override public int maxRequestBody() { return maxRequestBody; }
 
     @Override public synchronized Application admissionPolicy(AdmissionPolicy policy) {
         requireState(State.CONFIGURING);
@@ -180,12 +204,15 @@ final class DefaultApplication implements Application {
 
     /** Admission check for the request path: reads the published snapshot without locking. */
     private CompiledRouter acceptingRouter() {
+        return acceptingRuntime().router();
+    }
+
+    private Runtime acceptingRuntime() {
         var published = runtime;
-        var router = published == null ? null : published.router();
-        if (router == null) {
+        if (published == null || published.router() == null) {
             throw new IllegalStateException("Expected application state RUNNING but was " + state);
         }
-        return router;
+        return published;
     }
 
     @Override
@@ -193,23 +220,51 @@ final class DefaultApplication implements Application {
         Objects.requireNonNull(execution, "execution");
         Objects.requireNonNull(request, "request");
         // Admission ends here. User code never runs under the lifecycle lock.
-        var router = acceptingRouter();
+        var published = acceptingRuntime();
         if (execution.isExpired()) { throw new TimeoutException("Request deadline exceeded"); }
-        var match = router.match(request);
         Response response;
-        if (match == null) {
-            response = Response.of(404, "Not Found");
-        } else {
-            if (!match.methodAllowed()) {
-                response = Response.of(405, "Method Not Allowed")
-                        .withHeader("Allow", match.allow());
-            } else {
-                var context = new DefaultContext(request, match, execution);
-                var result = match.handler().handle(context);
-                response = result instanceof Response explicit ? explicit : context.response(result);
+        try {
+            response = dispatch(published, request, execution);
+        } catch (AxiomException failure) {
+            if (failure.status() >= 500) {
+                LOG.log(System.Logger.Level.WARNING, "Request " + execution.requestId() + " failed with "
+                        + failure.status() + " " + failure.code(), failure);
             }
+            response = Problems.response(failure, execution.requestId());
         }
         return request.method().equals("HEAD") ? response.withoutBody() : response;
+    }
+
+    private static Response dispatch(Runtime published, Request request, ExecutionContext execution) throws Exception {
+        if (request.body().length() > published.maxRequestBody()) { throw new PayloadTooLargeException(); }
+        var match = published.router().match(request);
+        if (match == null) { return Problems.response(404, execution.requestId()); }
+        if (!match.methodAllowed()) {
+            return Problems.response(405, execution.requestId()).withHeader("Allow", match.allow());
+        }
+        var context = new DefaultContext(request, match, execution, published.codecs());
+        var result = match.handler().handle(context);
+        return encode(published.codecs(), request, result instanceof Response explicit ? explicit : context.response(result));
+    }
+
+    /**
+     * Prepares a response whose Content-Type has an installed codec: checks the request's Accept
+     * header (406 when nothing matches) and encodes values other than String and byte[].
+     */
+    private static Response encode(Codecs codecs, Request request, Response response) {
+        var mediaType = Codecs.mediaType(response.headers().get("Content-Type"));
+        var codec = mediaType == null ? null : codecs.forMediaType(mediaType);
+        if (codec == null) { return response; }
+        if (!Codecs.acceptable(request.header("Accept").orElse(null), mediaType)) {
+            throw new NotAcceptableException();
+        }
+        var body = response.body();
+        if (body == null || body instanceof String || body instanceof byte[]) { return response; }
+        var encoded = Response.of(response.status(), codec.encode(body));
+        for (var header : response.headers().entrySet()) {
+            encoded = encoded.withHeader(header.getKey(), header.getValue());
+        }
+        return encoded;
     }
 
     @Override
@@ -219,7 +274,7 @@ final class DefaultApplication implements Application {
     public void close() {
         List<Server> owned;
         synchronized (this) {
-            runtime = runtime == null ? snapshot(null) : runtime.withoutRouter();
+            runtime = runtime == null ? snapshot(null, Codecs.of(List.of())) : runtime.withoutRouter();
             state = State.CLOSED;
             registrations.clear();
             shapes.clear();

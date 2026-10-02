@@ -132,9 +132,10 @@ public interface Application extends AutoCloseable {
      * Compiles routes, freezes registration, and enables in-memory execution without a listener.
      * Repeated calls while running are harmless. A compilation failure leaves registration
      * intact and the application in the configuring state.
+     * Startup also discovers body codecs once with {@link java.util.ServiceLoader}.
      * @return this application
      * @throws IllegalArgumentException if the route table cannot be compiled
-     * @throws IllegalStateException if closed
+     * @throws IllegalStateException if closed, or if two installed codecs declare the same media type
      */
     Application start();
 
@@ -151,6 +152,25 @@ public interface Application extends AutoCloseable {
      * @return request timeout
      */
     Duration requestTimeout();
+
+    /**
+     * Sets the largest accepted request body before startup. The default is 1 MiB (1,048,576
+     * bytes). Bodies are buffered in memory before the handler runs. Larger requests receive 413
+     * without invoking a handler: HTTP listeners reject a declared Content-Length before reading
+     * the body and stop reading a chunked body as soon as it exceeds the limit; in-memory calls
+     * and the test client check the body length. Zero rejects every non-empty body.
+     * @param bytes limit from zero to 64 MiB
+     * @return this application
+     * @throws IllegalArgumentException for a negative limit or one above 64 MiB
+     * @throws IllegalStateException after configuration has ended
+     */
+    Application maxRequestBody(int bytes);
+
+    /**
+     * Returns the configured request body limit.
+     * @return limit in bytes
+     */
+    int maxRequestBody();
 
     /**
      * Sets aggregate limits for each listener before startup. Defaults to reject(36).
@@ -217,7 +237,13 @@ public interface Application extends AutoCloseable {
      * HEAD route, or else the GET route of the same template, and suppresses response bodies.
      * Returns 404 for an unknown path, and 405 when no matching template has the method, with
      * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
-     * Handler exceptions propagate unchanged; this method is not a network error boundary.
+     * Bodies over {@link #maxRequestBody()} receive 413. Unknown paths, method mismatches and
+     * {@link io.axiom.error.AxiomException}s thrown by handlers or {@code Context.body} become
+     * {@code application/problem+json} responses with only status, code, request ID and
+     * violations. Responses whose Content-Type has an installed codec are checked against the
+     * request's Accept header (406 when nothing matches) and non-String, non-byte[] bodies are
+     * encoded by that codec. Other handler exceptions propagate unchanged; this method is not a
+     * network error boundary.
      *
      * @param request request to execute
      * @return mapped handler result
