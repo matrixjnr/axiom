@@ -1,6 +1,7 @@
 package io.axiom.server.internal;
 
 import io.axiom.context.Context;
+import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.routing.Route;
@@ -8,12 +9,14 @@ import java.util.Map;
 
 final class DefaultContext implements Context {
     private final Request request;
+    private final ExecutionContext execution;
     private final CompiledRouter.Match match;
     private int status = 200;
     private boolean explicitStatus;
 
-    DefaultContext(Request request, CompiledRouter.Match match) {
+    DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution) {
         this.request = request;
+        this.execution = execution;
         this.match = match;
     }
 
@@ -28,6 +31,8 @@ final class DefaultContext implements Context {
 
     @Override
     public Request request() { return request; }
+
+    @Override public ExecutionContext execution() { return execution; }
 
     @Override
     public Context status(int status) {

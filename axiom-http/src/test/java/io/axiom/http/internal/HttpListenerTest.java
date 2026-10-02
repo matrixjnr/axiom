@@ -3,19 +3,19 @@ package io.axiom.http.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.axiom.Axiom;
 import io.axiom.application.Application;
+import io.axiom.Axiom;
 import io.axiom.http.Response;
 import io.axiom.lifecycle.Server;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Map;
+import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -69,11 +69,13 @@ class HttpListenerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"exception", "object", "oversize", "header"})
+    @ValueSource(strings = {"exception", "object", "oversize", "header", "application-timeout", "application-cancel"})
     void mapsFailuresToSafeFinalResponse(String failure) throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.get("/", ctx -> switch (failure) {
                 case "exception" -> throw new IOException("secret");
+                case "application-timeout" -> throw new java.util.concurrent.TimeoutException("downstream secret");
+                case "application-cancel" -> throw new java.util.concurrent.CancellationException("application secret");
                 case "object" -> new Object();
                 case "oversize" -> new byte[1024 * 1024 + 1];
                 default -> Response.of(200, "ok").withHeader("X-Invalid", "\u2603");
@@ -141,7 +143,7 @@ class HttpListenerTest {
         var second = new AtomicBoolean();
         try (var fixture = new Fixture()) {
             fixture.app.get("/first", ctx -> {
-                assertThat(Thread.currentThread().getName()).startsWith("axiom-http-handler-");
+                assertThat(Thread.currentThread().isVirtual()).isTrue();
                 entered.countDown();
                 assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
                 return "first";
@@ -221,6 +223,97 @@ class HttpListenerTest {
                 }
                 assertThat(wires.getFirst().get("/").status()).isEqualTo(200);
             } finally {
+                for (var wire : wires) { wire.close(); }
+            }
+        }
+    }
+    @Test void assignsRequestIdsAndSharesExecutionMetadataWithHandler() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.requestTimeout(java.time.Duration.ofSeconds(5));
+            fixture.app.get("/", ctx -> {
+                assertThat(ctx.execution().remainingTime()).isPositive().isLessThanOrEqualTo(java.time.Duration.ofSeconds(5));
+                return Response.of(200, ctx.execution().requestId()).withHeader("X-Request-ID", "application-spoof");
+            });
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("GET / HTTP/1.1\r\nHost: a\r\nX-Request-ID: client-spoof\r\n\r\n");
+                var first = wire.read(false);
+                assertThat(first.headers()).containsEntry("X-Request-ID", first.text());
+                assertThat(java.util.UUID.fromString(first.text())).isNotNull();
+                assertThat(wire.get("/").text()).isNotEqualTo(first.text());
+            }
+        }
+    }
+
+    @Test void deadlineReturns504AndInterruptsHandlerWithoutASecondResponse() throws Exception {
+        var entered = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        var returned = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.requestTimeout(java.time.Duration.ofSeconds(1));
+            fixture.app.get("/slow", ctx -> {
+                entered.countDown();
+                try { new CountDownLatch(1).await(); }
+                catch (InterruptedException expected) { interrupted.countDown(); }
+                returned.countDown();
+                return "late response";
+            });
+            fixture.app.get("/fast", ctx -> "still serving");
+            var server = fixture.listen();
+            try (var wire = new Wire(server)) {
+                wire.write("GET /slow HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                var response = wire.read(false);
+                assertThat(response.status()).isEqualTo(504);
+                assertThat(response.text()).isEqualTo("Gateway Timeout");
+                assertThat(response.headers()).containsKey("X-Request-ID");
+                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(returned.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            }
+            try (var other = new Wire(server)) { assertThat(other.get("/fast").text()).isEqualTo("still serving"); }
+        }
+    }
+
+    @Test void timeoutClosesPipelineWithoutExecutingLaterRequests() throws Exception {
+        var entered = new CountDownLatch(1);
+        var later = new AtomicBoolean();
+        try (var fixture = new Fixture()) {
+            fixture.app.requestTimeout(java.time.Duration.ofSeconds(1));
+            fixture.app.get("/slow", ctx -> { entered.countDown(); new CountDownLatch(1).await(); return null; });
+            fixture.app.get("/later", ctx -> { later.set(true); return "later"; });
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("GET /slow HTTP/1.1\r\nHost: a\r\n\r\nGET /later HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(wire.read(false).status()).isEqualTo(504);
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+                assertThat(later).isFalse();
+            }
+        }
+    }
+
+    @Test void blockingMoreThanFourHandlersDoesNotQueueBehindPlatformWorkers() throws Exception {
+        var entered = new CountDownLatch(5);
+        var release = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/", ctx -> {
+                assertThat(Thread.currentThread().isVirtual()).isTrue();
+                entered.countDown();
+                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                return "ok";
+            });
+            var server = fixture.listen();
+            var wires = new java.util.ArrayList<Wire>();
+            try {
+                for (int i = 0; i < 5; i++) {
+                    var wire = new Wire(server);
+                    wires.add(wire);
+                    wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                }
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                release.countDown();
+                for (var wire : wires) { assertThat(wire.read(false).text()).isEqualTo("ok"); }
+            } finally {
+                release.countDown();
                 for (var wire : wires) { wire.close(); }
             }
         }
