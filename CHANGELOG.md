@@ -5,6 +5,7 @@
 - Add the `io.axiom:axiom` starter, Maven publication (binary, sources, Javadoc, POM, Gradle module metadata) with optional signing, and the BOM covering all published modules.
 - Add consumer compatibility builds (Gradle Kotlin, Gradle Groovy, Maven) behind `./gradlew compatibilityTest`, a scheduled compatibility workflow and a release workflow skeleton.
 - Enforce Gradle dependency verification and add a release guide.
+- Answer path captures that ctx.pathDecoded cannot decode with 400 invalid_path_encoding instead of 500.
 - Send the GET representation's Content-Length on successful HEAD responses.
 - Retain the request query and read decoded parameters with ctx.query(name) and ctx.queryAll(name).
 - Read bounded request bodies (Content-Length, chunked, Expect: 100-continue) with a configurable limit.

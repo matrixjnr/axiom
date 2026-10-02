@@ -97,8 +97,11 @@ class RouterTest {
             assertThat(app.handle(Request.get("/files/a%20b/c/")).body()).isEqualTo("a b/c/");
             assertThat(app.handle(Request.get("/files/")).body()).isEqualTo("");
             for (var invalid : new String[] {"/users/%FF", "/users/%C3", "/users/%C3%28", "/files/a/%ED%A0%80"}) {
-                assertThatIllegalArgumentException().as(invalid)
-                        .isThrownBy(() -> app.handle(Request.get(invalid)));
+                // A client error: a 400 problem response, not a propagated exception.
+                var response = app.handle(Request.get(invalid));
+                assertThat(response.status()).as(invalid).isEqualTo(400);
+                assertThat(new String((byte[]) response.body(), java.nio.charset.StandardCharsets.UTF_8))
+                        .contains("\"code\":\"invalid_path_encoding\"");
             }
         }
     }

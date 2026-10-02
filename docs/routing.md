@@ -102,8 +102,11 @@ Accepted paths are matched verbatim. No decoding, case folding, or redirects occ
 `ctx.path()` returns the request path. `ctx.route()` returns the stable route
 identity with its template. `ctx.path(name)` returns the raw capture and rejects
 undeclared names. `ctx.pathDecoded(name)` percent-decodes a capture once as strict
-UTF-8, segment by segment, and throws `IllegalArgumentException` for malformed UTF-8
-or for a segment that would decode to a `/`, backslash, NUL, `.` or `..`.
+UTF-8, segment by segment. Malformed UTF-8 (for example `/users/%FF`) or a segment
+that would decode to a `/`, backslash, NUL, `.` or `..` throws
+`BadRequestException` with code `invalid_path_encoding`, so the client receives a 400
+problem response that does not echo the capture; an undeclared name is still an
+`IllegalArgumentException` (a 500 over HTTP, because it is a handler bug).
 `Request` already rejects every path that could produce such a segment, so through
 an application only the UTF-8 check can fail; the other checks stay in the decoder
 deliberately, as defence in depth for `Context` implementations whose captures do

@@ -2,7 +2,10 @@ package io.axiom.context;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.axiom.error.AxiomException;
+import io.axiom.error.BadRequestException;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
@@ -24,13 +27,29 @@ class PathDecodedTest {
     @ValueSource(strings = {"a%2Fb", "a%2fb", "%2F", "a%5Cb", "a\\b", "a%00", "\u0000", ".", "..", "%2E", "%2e%2E",
             "a/%2E/b", "a/../b", "a/./b"})
     void rejectsCapturesThatDecodeToSeparatorsNulOrDotSegments(String raw) {
-        assertThatIllegalArgumentException().isThrownBy(() -> capture(raw).pathDecoded("value"));
+        assertRejected(raw);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"%", "a%", "a%4", "%zz", "%4g", "a/%2", "%FF", "%C3%28", "%ED%A0%80"})
     void rejectsMalformedEscapesAndUtf8(String raw) {
-        assertThatIllegalArgumentException().isThrownBy(() -> capture(raw).pathDecoded("value"));
+        assertRejected(raw);
+    }
+
+    @Test
+    void undeclaredNamesRemainProgrammingErrors() {
+        assertThatIllegalArgumentException().isThrownBy(() -> capture("a").pathDecoded("other"))
+                .isNotInstanceOf(AxiomException.class);
+    }
+
+    /** Every decoding failure is a client error (400) with a fixed code that never echoes the input. */
+    private static void assertRejected(String raw) {
+        assertThatThrownBy(() -> capture(raw).pathDecoded("value"))
+                .isInstanceOfSatisfying(BadRequestException.class, failure -> {
+                    assertThat(failure.status()).isEqualTo(400);
+                    assertThat(failure.code()).isEqualTo("invalid_path_encoding");
+                    assertThat(failure.getMessage()).isEqualTo("400 invalid_path_encoding");
+                });
     }
 
     @Test

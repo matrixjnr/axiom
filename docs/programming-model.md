@@ -47,7 +47,8 @@ registered. Automatic OPTIONS behavior is not enabled.
 `ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw
 capture; `ctx.pathParameters()` returns an immutable map in template order. Values
 are extracted when the route matches, without percent-decoding or normalization;
-`ctx.pathDecoded("id")` decodes one capture as strict UTF-8. Captures are untrusted input.
+`ctx.pathDecoded("id")` decodes one capture as strict UTF-8 and answers 400
+(`invalid_path_encoding`) for one it cannot decode safely. Captures are untrusted input.
 
 Query strings are not part of `Request.path()` and do not affect matching.
 `ctx.query("q")` returns the first decoded value as an `Optional`, like

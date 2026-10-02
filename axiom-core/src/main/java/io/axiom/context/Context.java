@@ -1,5 +1,6 @@
 package io.axiom.context;
 
+import io.axiom.error.BadRequestException;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
@@ -155,10 +156,14 @@ public interface Context {
      * raw {@code /} separators. Decoding fails rather than producing a {@code /}, backslash,
      * or NUL inside a segment, a {@code .} or {@code ..} segment, or malformed UTF-8.
      * The result is still untrusted client input.
+     * A capture that cannot be decoded safely is the client's error: the failure is a
+     * {@link BadRequestException} with code {@code invalid_path_encoding}, answered 400 like
+     * any other {@link io.axiom.error.AxiomException}; it never carries the capture.
      * @param name capture name declared in the route template
      * @return decoded capture
-     * @throws IllegalArgumentException if the name is not declared or the value cannot be
-     *         decoded safely
+     * @throws IllegalArgumentException if the name is not declared by the matched route
+     * @throws BadRequestException if the value is malformed UTF-8 or would decode to a
+     *         separator, NUL or dot segment
      */
     default String pathDecoded(String name) {
         var raw = path(name);
@@ -178,11 +183,13 @@ public interface Context {
         try {
             segment = PercentDecoding.decode(raw, start, end, false);
         } catch (IllegalArgumentException malformed) {
-            throw new IllegalArgumentException("Path capture is not valid percent-encoded UTF-8", malformed);
+            var failure = new BadRequestException("invalid_path_encoding");
+            failure.initCause(malformed); // For logs only; its message never contains the input.
+            throw failure;
         }
         if (segment.equals(".") || segment.equals("..") || segment.indexOf('/') >= 0
                 || segment.indexOf('\\') >= 0 || segment.indexOf('\0') >= 0) {
-            throw new IllegalArgumentException("Path capture decodes to a separator, NUL, or dot segment");
+            throw new BadRequestException("invalid_path_encoding");
         }
         return segment;
     }
