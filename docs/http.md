@@ -38,8 +38,9 @@ Responses always use HTTP/1.1. An HTTP/1.0 connection closes after each response
 unless the request sends `Connection: keep-alive`, which the response echoes.
 Paths that `Request` rejects (empty or dot segments, backslashes, malformed or
 encoded separators; see [routing rules](routing.md)) receive 400. Accepted raw paths
-retain their encoding; query strings are excluded from routing and are not yet
-exposed through the request API. Request headers are available to handlers, and
+retain their encoding. Query strings are excluded from routing, retained on the
+request and validated as described in [routing rules](routing.md#query-parameters);
+a malformed or oversized query also receives 400. Request headers are available to handlers, and
 request bodies are read up to the application's limit; see
 [request bodies](bodies.md). Responses support UTF-8 strings, byte arrays, empty
 bodies and values encoded by an installed codec. Unencodable body objects and
@@ -167,6 +168,5 @@ The default execution deadline is ten seconds, configurable before startup throu
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
-Other limits remain fixed. TLS, HTTP/2, streaming request bodies, query parameter
-APIs, observability integrations and a configurable shutdown grace period remain
+Other limits remain fixed. TLS, HTTP/2, streaming request bodies, observability integrations and a configurable shutdown grace period remain
 future work.

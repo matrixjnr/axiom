@@ -32,10 +32,13 @@ class RequestTest {
     }
 
     @Test
-    void parsesOriginFormTargetsOnceAndDiscardsTheQuery() {
+    void parsesOriginFormTargetsOnceAndRetainsTheRawQuery() {
         assertThat(Request.fromTarget("GET", "/a%20b")).isEqualTo(Request.get("/a%20b"));
-        assertThat(Request.fromTarget("GET", "/a?x=1&y=%2F/?z")).isEqualTo(Request.get("/a"));
+        var target = Request.fromTarget("GET", "/a?x=1&y=%2F/?z");
+        assertThat(target.path()).isEqualTo("/a");
+        assertThat(target.query()).isEqualTo("x=1&y=%2F/?z");
         assertThat(Request.fromTarget("POST", "/a?").path()).isEqualTo("/a");
+        assertThat(Request.fromTarget("POST", "/a?")).isEqualTo(new Request("POST", "/a"));
         for (var invalidQuery : new String[] {"/a?bad%zz", "/a?%2", "/a?x#frag", "/a?x y", "/a?\\"}) {
             assertThatIllegalArgumentException().as(invalidQuery)
                     .isThrownBy(() -> Request.fromTarget("GET", invalidQuery));
@@ -64,7 +67,9 @@ class RequestTest {
         var plain = new Request("POST", "/notes");
         assertThat(plain.headers()).isEmpty();
         assertThat(plain.body()).isSameAs(Body.empty());
-        assertThat(plain).isEqualTo(Request.fromTarget("POST", "/notes?x=1"));
+        assertThat(plain).isEqualTo(Request.fromTarget("POST", "/notes"));
+        assertThat(plain.query()).isEmpty();
+        assertThat(plain).isNotEqualTo(Request.fromTarget("POST", "/notes?x=1"));
         var full = plain.withHeaders(java.util.Map.of("Accept", "application/json"))
                 .withBody(Body.of("application/json", new byte[] {'{', '}'}));
         assertThat(full.header("accept")).contains("application/json");

@@ -46,8 +46,25 @@ registered. Automatic OPTIONS behavior is not enabled.
 `ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw
 capture; `ctx.pathParameters()` returns an immutable map in template order. Values
 are extracted when the route matches, without percent-decoding or normalization;
-`ctx.pathDecoded("id")` decodes one capture as strict UTF-8. Captures are untrusted input. Query strings
-are not part of `Request.path()`. See [routing rules](routing.md) for edge cases.
+`ctx.pathDecoded("id")` decodes one capture as strict UTF-8. Captures are untrusted input.
+
+Query strings are not part of `Request.path()` and do not affect matching.
+`ctx.query("q")` returns the first decoded value as an `Optional`, like
+`ctx.header(name)`, and `ctx.queryAll("tag")` every value in request order:
+
+```java
+app.get("/search", ctx -> {
+    var term = ctx.query("q").orElse("");
+    var tags = ctx.queryAll("tag");   // ?tag=a&tag=b -> [a, b]
+    return search(term, tags);
+});
+```
+
+Names and values are percent-decoded once as strict UTF-8 with `+` as a space.
+The raw query is `ctx.request().query()`. Malformed or oversized queries are
+rejected before routing, so lookups never fail; values are still untrusted input.
+There are no typed conversions, matching the path capture accessors. See
+[routing rules](routing.md) for edge cases and limits.
 
 ## Lifecycle and concurrency
 
@@ -133,7 +150,9 @@ dispatcher using the application's admission policies and request timeout, so
 overload (503) and deadline expiry (504) are testable; `submit(request)` returns a
 future for holding capacity from tests. `post`, `put` and `patch` take a content
 type and a `String` or `byte[]` body, so tests send raw JSON without a codec
-dependency. The body limit (413), routing errors and `AxiomException` mapping
+dependency. Their targets may include a query (`client.get("/search?q=a")`), split
+and validated by `Request.fromTarget` like the listener's; a target the listener
+would answer with 400 throws `IllegalArgumentException` instead. The body limit (413), routing errors and `AxiomException` mapping
 produce the same problem responses as a listener. Other handler exceptions
 propagate rather than becoming 500 responses. Response bodies the transport cannot
 send (anything other than `String` or `byte[]` after encoding, or over the size

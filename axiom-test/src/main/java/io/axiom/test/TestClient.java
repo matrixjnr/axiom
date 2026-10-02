@@ -29,7 +29,9 @@ import java.util.concurrent.RejectedExecutionException;
  * must be {@code null}, {@code String} or {@code byte[]} and within the transport size limits;
  * anything else fails the call with {@link IllegalStateException}, where the listener would answer
  * 500. Bodies are sent as raw bytes; this module installs no codec, so decoding uses whatever codec
- * the test's runtime classpath provides. Transport rules such as 414, 431, Expect handling,
+ * the test's runtime classpath provides. Request targets may carry a query and are split and
+ * validated by {@link Request#fromTarget(String, String)}, as the listener does; a target the
+ * listener would answer with 400 throws {@link IllegalArgumentException} instead. Transport rules such as 414, 431, Expect handling,
  * pipelining and keep-alive are not modeled. Limits apply per client, as they do per listener.
  */
 public final class TestClient implements AutoCloseable {
@@ -54,97 +56,99 @@ public final class TestClient implements AutoCloseable {
     }
 
     /**
-     * Executes a GET request for the supplied path.
+     * Executes a GET request for the supplied target.
      *
-     * @param path absolute raw path
+     * @param target absolute raw path, optionally followed by {@code ?} and a raw query
      * @return response
+     * @throws IllegalArgumentException for a path or query the listener would answer with 400,
+     *         validated as by {@link Request#fromTarget(String, String)}
      * @throws Exception if the handler fails
      */
-    public Response get(String path) throws Exception {
-        return execute(Request.get(path));
+    public Response get(String target) throws Exception {
+        return execute(Request.fromTarget("GET", target));
     }
 
     /**
      * Executes a POST request with a UTF-8 text body, for example raw JSON.
      *
-     * @param path absolute raw path
+     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
      * @param contentType Content-Type header value, or null to send none
      * @param body text encoded as UTF-8
      * @return response
      * @throws Exception if the handler fails
      */
-    public Response post(String path, String contentType, String body) throws Exception {
-        return send("POST", path, contentType, body.getBytes(StandardCharsets.UTF_8));
+    public Response post(String target, String contentType, String body) throws Exception {
+        return send("POST", target, contentType, body.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
      * Executes a POST request with a binary body.
      *
-     * @param path absolute raw path
+     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
      * @param contentType Content-Type header value, or null to send none
      * @param body content; copied
      * @return response
      * @throws Exception if the handler fails
      */
-    public Response post(String path, String contentType, byte[] body) throws Exception {
-        return send("POST", path, contentType, body);
+    public Response post(String target, String contentType, byte[] body) throws Exception {
+        return send("POST", target, contentType, body);
     }
 
     /**
      * Executes a PUT request with a UTF-8 text body.
      *
-     * @param path absolute raw path
+     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
      * @param contentType Content-Type header value, or null to send none
      * @param body text encoded as UTF-8
      * @return response
      * @throws Exception if the handler fails
      */
-    public Response put(String path, String contentType, String body) throws Exception {
-        return send("PUT", path, contentType, body.getBytes(StandardCharsets.UTF_8));
+    public Response put(String target, String contentType, String body) throws Exception {
+        return send("PUT", target, contentType, body.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
      * Executes a PUT request with a binary body.
      *
-     * @param path absolute raw path
+     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
      * @param contentType Content-Type header value, or null to send none
      * @param body content; copied
      * @return response
      * @throws Exception if the handler fails
      */
-    public Response put(String path, String contentType, byte[] body) throws Exception {
-        return send("PUT", path, contentType, body);
+    public Response put(String target, String contentType, byte[] body) throws Exception {
+        return send("PUT", target, contentType, body);
     }
 
     /**
      * Executes a PATCH request with a UTF-8 text body.
      *
-     * @param path absolute raw path
+     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
      * @param contentType Content-Type header value, or null to send none
      * @param body text encoded as UTF-8
      * @return response
      * @throws Exception if the handler fails
      */
-    public Response patch(String path, String contentType, String body) throws Exception {
-        return send("PATCH", path, contentType, body.getBytes(StandardCharsets.UTF_8));
+    public Response patch(String target, String contentType, String body) throws Exception {
+        return send("PATCH", target, contentType, body.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
      * Executes a PATCH request with a binary body.
      *
-     * @param path absolute raw path
+     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
      * @param contentType Content-Type header value, or null to send none
      * @param body content; copied
      * @return response
      * @throws Exception if the handler fails
      */
-    public Response patch(String path, String contentType, byte[] body) throws Exception {
-        return send("PATCH", path, contentType, body);
+    public Response patch(String target, String contentType, byte[] body) throws Exception {
+        return send("PATCH", target, contentType, body);
     }
 
-    private Response send(String method, String path, String contentType, byte[] body) throws Exception {
+    private Response send(String method, String target, String contentType, byte[] body) throws Exception {
         var headers = contentType == null ? Map.<String, String>of() : Map.of("Content-Type", contentType);
-        return execute(new Request(method, path, headers, Body.of(contentType, body)));
+        return execute(Request.fromTarget(method, target).withHeaders(headers).withBody(Body.of(contentType, body)));
     }
 
     /**

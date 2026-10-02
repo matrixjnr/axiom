@@ -118,6 +118,42 @@ containment check (for example, normalizing a `Path` and verifying its prefix).
 Typed parameter conversion is separate work; request body limits are described in
 [request bodies](bodies.md).
 
+## Query parameters
+
+The query is everything after the first `?` of the request target, without the
+`?`. It never takes part in routing. `Request.fromTarget` (used by the HTTP
+listener and `TestClient`) keeps it raw as `request.query()`; an absent and an
+empty query are both `""`, and the plain constructors create requests without one.
+A request is rejected with `IllegalArgumentException` (400 over HTTP, before
+routing) when its query
+
+- contains a character outside RFC 3986 query syntax (`pchar`, `/` and `?`; non-ASCII
+  characters other than controls and spaces are allowed), such as a space, `#`,
+  backslash or control character;
+- contains a malformed percent-escape such as `%zz` or a trailing `%`;
+- has a name or value that does not decode to well-formed UTF-8 (including overlong
+  forms, encoded surrogates and unpaired surrogates);
+- is longer than `Request.MAX_QUERY_LENGTH` (4096) characters or has more than
+  `Request.MAX_QUERY_PARAMETERS` (256) parameters.
+
+Over HTTP the 4 KiB request-line limit (414) is reached before the length limit;
+the length limit bounds requests built in memory. Rejection messages and error
+responses never contain the query, which may carry credentials, and
+`Request.toString()` omits it.
+
+The query is a list of `&`-separated `name=value` pairs. Empty pairs (`a=1&&b=2`,
+a trailing `&`) are ignored and not counted. A pair splits at its first `=`, so
+`a=b=c` has the value `b=c`, and a pair without `=` has the value `""`. Names and
+values are percent-decoded once as UTF-8: `%2541` is `%41`, not `A`. **`+` decodes
+to a space**, following the form encoding that HTML forms and `URLSearchParams`
+produce; send `%2B` for a literal plus. Names match exactly after decoding and are
+case-sensitive.
+
+`ctx.query(name)` returns the first value, `ctx.queryAll(name)` an immutable list
+of every value in order (empty when absent); `Request` has the same methods. Values
+are decoded on each call rather than cached, which the limits keep cheap. Typed
+conversion is left to the application, as for path captures.
+
 ## Implementation and verification
 
 Startup builds an immutable segment trie and a lookup table for fully static paths.
