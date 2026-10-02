@@ -44,10 +44,15 @@ public interface Context {
     }
 
     /**
-     * Sets the status for subsequent response mapping.
+     * Sets the status for subsequent response mapping. Statuses 204, 205, and 304 cannot carry
+     * a body: after setting one, mapping a non-null body (returning it from the handler or
+     * calling {@link #response(Object)} or {@link #text(String)}) fails with an
+     * {@link IllegalStateException} that names the route and status. Over HTTP that failure
+     * is a 500 like any other handler failure.
      *
      * @param status final HTTP status (200-599)
      * @return this context
+     * @throws IllegalArgumentException if the status is not a final status
      */
     Context status(int status);
 
@@ -141,6 +146,7 @@ public interface Context {
      * Null without an explicit status produces 204.
      * @param body returned body, or null
      * @return a response snapshot
+     * @throws IllegalStateException if the status set on this context cannot carry a body
      */
     Response response(Object body);
 

@@ -85,13 +85,18 @@ A handler returns an object or throws an exception:
 - `String`: status 200 by default, with `text/plain; charset=utf-8`.
 - `byte[]`: status 200 by default, with `application/octet-stream`; copied defensively.
 - `null`: status 204 unless a status was explicitly set on the context.
-- Other objects: retained as body values without serialization or copying.
+- Other objects: retained as body values without serialization or copying. In-memory
+  callers receive them unchanged; the HTTP transport answers them with 500 until a
+  codec layer exists.
 
 `ctx.status(201).text("created")` sets a status and returns a response snapshot.
 `ctx.noContent()` returns 204. An explicit `Response.of(status, body)` can use
 `withHeader(name, value)` to create a modified copy. Headers are immutable and
 case-insensitive, with one value per name; repeated headers are not modeled yet.
 Final statuses range from 200 through 599; 204, 205, and 304 reject non-null bodies.
+After `ctx.status(204)` (or 205, 304), returning or mapping a body fails with an
+`IllegalStateException` naming the route and status instead of a generic error.
+`Response` compares by value (status, case-insensitive headers, body; byte arrays by content).
 
 Handler exceptions propagate unchanged to in-memory callers. The HTTP transport
 maps exceptions and unsupported body objects to generic 500 responses.

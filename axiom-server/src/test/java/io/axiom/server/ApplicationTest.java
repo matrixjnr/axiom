@@ -163,6 +163,21 @@ class ApplicationTest {
     }
 
     @Test
+    void bodilessContextStatusesWithABodyFailWithTheRouteAndStatus() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/returned", ctx -> { ctx.status(204); return "body"; });
+            app.get("/text", ctx -> ctx.status(304).text("body"));
+            app.get("/empty", ctx -> { ctx.status(205); return null; });
+            app.start();
+            assertThatIllegalStateException().isThrownBy(() -> app.handle(Request.get("/returned")))
+                    .withMessageContaining("GET /returned").withMessageContaining("status 204");
+            assertThatIllegalStateException().isThrownBy(() -> app.handle(Request.get("/text")))
+                    .withMessageContaining("GET /text").withMessageContaining("status 304");
+            assertThat(app.handle(Request.get("/empty")).status()).isEqualTo(205);
+        }
+    }
+
+    @Test
     void propagatesHandlerFailuresAndLeavesTheApplicationUsable() throws Exception {
         var failure = new IOException("original failure");
         try (var app = Axiom.create()) {
