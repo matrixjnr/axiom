@@ -17,6 +17,10 @@ import java.util.regex.Pattern;
  * length and media type, never content.
  */
 public final class Body {
+    static {
+        io.axiom.internal.OwnedBodies.install(Body::new);
+    }
+
     private static final Body EMPTY = new Body(null, new byte[0]);
     private static final Pattern MEDIA_TYPE =
             Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+");

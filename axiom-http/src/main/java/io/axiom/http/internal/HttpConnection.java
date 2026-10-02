@@ -2,8 +2,8 @@ package io.axiom.http.internal;
 
 import io.axiom.application.Application;
 import io.axiom.execution.ExecutionContext;
-import io.axiom.http.Body;
 import io.axiom.http.HttpStatus;
+import io.axiom.internal.OwnedBodies;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
@@ -12,7 +12,6 @@ import io.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutExceptio
 import io.axiom.server.internal.Problems;
 import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
@@ -38,6 +37,7 @@ import java.time.Duration;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -71,17 +71,21 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
     private ScheduledFuture<?> headTimer;
-    // Body of the request being received; released on every exit path (see releaseBody).
-    private CompositeByteBuf bodyParts;
-    private long bodyLength;
+    // Body of the request being received, copied out of each Netty buffer as it arrives; the
+    // array is exactly the declared Content-Length, or grows by doubling (capped at the limit)
+    // for chunked bodies. Dropped on every exit path (see releaseBody).
+    private byte[] bodyBytes;
+    private boolean bodyChunked;
+    private long declaredLength;
+    private int bodyLength;
     private int bodyLimit;
     /** Body bytes of requests buffered in {@code pending}, bounded by twice the body limit. */
     private long queuedBodyBytes;
     /** An accepted {@code Expect: 100-continue} whose interim response is not yet written. */
     private boolean continuePending;
     private ScheduledFuture<?> bodyTimer;
-    /** Components merged into one buffer beyond this count, bounding per-chunk bookkeeping. */
-    private static final int MAX_BODY_COMPONENTS = 64;
+    /** First allocation for a chunked body; doubled as needed up to the body limit. */
+    private static final int INITIAL_CHUNKED_CAPACITY = 8192;
 
     HttpConnection(Application application, RequestDispatcher executor) {
         this(application, executor, REQUEST_HEAD_TIMEOUT);
@@ -120,7 +124,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Releases a partially received body and its deadline timer; idempotent. */
     private void releaseBody() {
-        if (bodyParts != null) { bodyParts.release(); bodyParts = null; }
+        bodyBytes = null;
         if (bodyTimer != null) { bodyTimer.cancel(false); bodyTimer = null; }
         bodyLength = 0;
         continuePending = false;
@@ -189,6 +193,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                     HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
         } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
         if (chunked || length > 0) {
+            bodyChunked = chunked;
+            declaredLength = length;
+            // Declared bodies are reserved in full against the per-connection bound up front.
+            if (!chunked && queuedBodyBytes + length > 2L * bodyLimit) { abort(ctx); return false; }
             var exchange = receiving;
             // A slow body counts against the request deadline that started with the head.
             bodyTimer = ctx.executor().schedule(() -> {
@@ -201,24 +209,39 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         return true;
     }
 
-    /** Accumulates body bytes without copying; false when the limit was exceeded and the connection is closing. */
+    /**
+     * Copies body bytes out of the Netty buffer, which the inbound handler releases on return.
+     * Returns false when the limit was exceeded and the connection is closing.
+     */
     private boolean receiveBody(ChannelHandlerContext ctx, ByteBuf content) {
         continuePending = false; // The client sent the body without waiting; no interim response is needed.
-        bodyLength += content.readableBytes();
-        if (bodyLength > bodyLimit) { fail(ctx, 413); return false; }
-        if (queuedBodyBytes + bodyLength > 2L * bodyLimit) { abort(ctx); return false; }
-        if (bodyParts == null) { bodyParts = ctx.alloc().compositeBuffer(MAX_BODY_COMPONENTS); }
-        bodyParts.addComponent(true, content.retain());
+        int readable = content.readableBytes();
+        long total = (long) bodyLength + readable;
+        if (total > bodyLimit) { fail(ctx, 413); return false; }
+        if (queuedBodyBytes + total > 2L * bodyLimit) { abort(ctx); return false; }
+        if (bodyBytes == null) {
+            bodyBytes = new byte[bodyChunked ? (int) Math.min(bodyLimit, Math.max(INITIAL_CHUNKED_CAPACITY, total))
+                    : (int) declaredLength];
+        }
+        if (total > bodyBytes.length) {
+            if (!bodyChunked) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
+            bodyBytes = Arrays.copyOf(bodyBytes, (int) Math.min(bodyLimit, Math.max(total, 2L * bodyBytes.length)));
+        }
+        content.readBytes(bodyBytes, bodyLength, readable);
+        bodyLength = (int) total;
         return true;
     }
 
     private void completeRequest(ChannelHandlerContext ctx) {
         if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { abort(ctx); return; }
         var exchange = receiving;
-        if (bodyParts != null) {
+        if (bodyBytes != null) {
+            if (bodyLength != bodyBytes.length && !bodyChunked) { fail(ctx, 400); return; }
             try {
-                // The body's single copy out of Netty buffers, which are released right after.
-                var body = Body.of(exchange.request().header("Content-Type").orElse(null), bodyParts.nioBuffers());
+                // The array is handed over, not copied again; a chunked body is trimmed once.
+                var bytes = bodyLength == bodyBytes.length ? bodyBytes : Arrays.copyOf(bodyBytes, bodyLength);
+                bodyBytes = null;
+                var body = OwnedBodies.adopt(exchange.request().header("Content-Type").orElse(null), bytes);
                 exchange = new Exchange(exchange.request().withBody(body), exchange.keepAlive(),
                         exchange.http10(), exchange.execution());
             } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
@@ -412,8 +435,6 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     private void abort(ChannelHandlerContext ctx) { closing = true; releaseBody(); ctx.close(); }
-
-    @Override public void handlerRemoved(ChannelHandlerContext ctx) { releaseBody(); }
 
     @Override public void channelInactive(ChannelHandlerContext ctx) {
         closing = true;

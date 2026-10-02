@@ -47,4 +47,15 @@ class BodyTest {
         assertThat(body).isNotEqualTo(Body.of("text/plain", body.bytes()));
         assertThat(body.toString()).doesNotContain("hunter2").contains("length=22", "application/json");
     }
+
+    @Test void adoptsTransportArraysWithoutCopyingWhileReadsStillCopy() {
+        var owned = new byte[] {1, 2, 3};
+        var body = io.axiom.internal.OwnedBodies.adopt("application/octet-stream", owned);
+        var read = body.bytes();
+        read[0] = 9;
+        assertThat(body.bytes()).containsExactly(1, 2, 3);
+        assertThat(body.mediaType()).contains("application/octet-stream");
+        org.assertj.core.api.Assertions.assertThatIllegalStateException()
+                .isThrownBy(() -> io.axiom.internal.OwnedBodies.install(Body::of));
+    }
 }

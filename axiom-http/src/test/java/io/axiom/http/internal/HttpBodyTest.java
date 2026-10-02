@@ -148,4 +148,38 @@ class HttpBodyTest {
             }
         }
     }
+
+    @Test void receivesOneByteChunksUpToTheLimitAndLargeDeclaredBodiesIntact() throws Exception {
+        int limit = 256 * 1024;
+        try (var fixture = new Fixture()) {
+            fixture.app.maxRequestBody(4 * 1024 * 1024);
+            fixture.app.post("/digest", ctx -> {
+                var digest = java.security.MessageDigest.getInstance("SHA-256");
+                return ctx.request().body().length() + ":" + java.util.HexFormat.of().formatHex(digest.digest(ctx.request().body().bytes()));
+            });
+            try (var wire = new Wire(fixture.listen())) {
+                wire.socket.setSoTimeout(30_000);
+                var chunked = new StringBuilder(limit * 6 + 128)
+                        .append("POST /digest HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n");
+                var expected = new byte[limit];
+                for (int i = 0; i < limit; i++) {
+                    expected[i] = (byte) ('a' + i % 26);
+                    chunked.append("1\r\n").append((char) expected[i]).append("\r\n");
+                }
+                long started = System.nanoTime();
+                wire.write(chunked.append("0\r\n\r\n").toString());
+                var reply = wire.read(false);
+                assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(20));
+                assertThat(reply.text()).isEqualTo(limit + ":" + java.util.HexFormat.of().formatHex(
+                        java.security.MessageDigest.getInstance("SHA-256").digest(expected)));
+
+                var large = new byte[4 * 1024 * 1024];
+                new java.util.Random(7).nextBytes(large);
+                wire.write("POST /digest HTTP/1.1\r\nHost: a\r\nContent-Length: " + large.length + "\r\n\r\n");
+                wire.socket.getOutputStream().write(large);
+                assertThat(wire.read(false).text()).isEqualTo(large.length + ":" + java.util.HexFormat.of().formatHex(
+                        java.security.MessageDigest.getInstance("SHA-256").digest(large)));
+            }
+        }
+    }
 }

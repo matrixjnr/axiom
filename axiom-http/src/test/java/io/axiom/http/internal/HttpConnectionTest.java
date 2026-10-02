@@ -385,7 +385,7 @@ class HttpConnectionTest {
         return new RequestDispatcher(1);
     }
 
-    @Test void disconnectMidBodyReleasesReceivedChunks() {
+    @Test void disconnectMidBodyLeavesNoReceivedChunkRetained() {
         var executor = executor();
         try (var app = Axiom.create()) {
             app.post("/", ctx -> { throw new AssertionError("incomplete body must not execute"); });
@@ -397,8 +397,10 @@ class HttpConnectionTest {
                 request.headers().set("Host", "localhost").set("Content-Length", "100");
                 chunk.retain(); // Observe the count after the handler's own reference is released.
                 channel.writeInbound(request, new io.netty.handler.codec.http.DefaultHttpContent(chunk));
-                assertThat(chunk.refCnt()).isEqualTo(2);
+                // Bytes are copied on arrival, so the connection holds no reference mid-body.
+                assertThat(chunk.refCnt()).isEqualTo(1);
                 channel.close();
+                assertThat(channel.isActive()).isFalse();
                 assertThat(chunk.refCnt()).isEqualTo(1);
             } finally {
                 chunk.release();
@@ -447,6 +449,67 @@ class HttpConnectionTest {
                 assertThat(channel.isActive()).isTrue();
                 channel.writeInbound(ascii("c"));
                 assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK").endsWith("received 3");
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    /** Counts every buffer the connection allocates, including composite consolidation. */
+    private static final class CountingAllocator extends io.netty.buffer.AbstractByteBufAllocator {
+        final java.util.concurrent.atomic.AtomicInteger allocations = new java.util.concurrent.atomic.AtomicInteger();
+        CountingAllocator() { super(false); }
+        @Override public boolean isDirectBufferPooled() { return false; }
+        @Override protected io.netty.buffer.ByteBuf newHeapBuffer(int initial, int max) {
+            allocations.incrementAndGet();
+            return new io.netty.buffer.UnpooledHeapByteBuf(this, initial, max);
+        }
+        @Override protected io.netty.buffer.ByteBuf newDirectBuffer(int initial, int max) {
+            allocations.incrementAndGet();
+            return new io.netty.buffer.UnpooledDirectByteBuf(this, initial, max);
+        }
+        @Override public io.netty.buffer.CompositeByteBuf compositeHeapBuffer(int maxComponents) {
+            allocations.incrementAndGet();
+            return super.compositeHeapBuffer(maxComponents);
+        }
+        @Override public io.netty.buffer.CompositeByteBuf compositeDirectBuffer(int maxComponents) {
+            allocations.incrementAndGet();
+            return super.compositeDirectBuffer(maxComponents);
+        }
+    }
+
+    @Test void tinyChunksAreCopiedOnArrivalWithoutNettyAccumulation() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.maxRequestBody(20_000);
+            app.post("/", ctx -> {
+                var bytes = ctx.request().body().bytes();
+                for (int i = 0; i < bytes.length; i++) {
+                    if (bytes[i] != (byte) ('a' + i % 26)) { return "corrupt at " + i; }
+                }
+                return "received " + bytes.length;
+            });
+            app.start();
+            var allocator = new CountingAllocator();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            channel.config().setAllocator(allocator);
+            try {
+                var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/");
+                request.headers().set("Host", "localhost").set("Transfer-Encoding", "chunked");
+                channel.writeInbound(request);
+                for (int i = 0; i < 20_000; i++) {
+                    var piece = io.netty.buffer.Unpooled.buffer(1).writeByte('a' + i % 26);
+                    channel.writeInbound(new io.netty.handler.codec.http.DefaultHttpContent(piece));
+                    assertThat(piece.refCnt()).isZero();
+                }
+                channel.writeInbound(LastHttpContent.EMPTY_LAST_CONTENT);
+                FullHttpResponse response = awaitResponse(channel);
+                try {
+                    assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("received 20000");
+                } finally { response.release(); }
+                // Only the response body is allocated from the channel allocator.
+                assertThat(allocator.allocations).hasValueLessThanOrEqualTo(1);
             } finally { channel.finishAndReleaseAll(); }
         } finally {
             executor.close();

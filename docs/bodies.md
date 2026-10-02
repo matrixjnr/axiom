@@ -67,8 +67,12 @@ requests never receive `100 Continue`.
 `Request.body()` is an immutable `Body`: its bytes are copied when it is created,
 `bytes()` returns a fresh copy, and `asReadOnlyBuffer()` gives a read-only view.
 Bodies are safe to share with other threads and their `toString` never shows
-content. The listener copies the received Netty buffers into the body once, when
-the last chunk arrives, and releases them immediately. The body keeps the request's
+content. The listener copies each received network buffer into a private array as
+it arrives and releases the buffer at once, so no Netty buffer outlives its read.
+For a declared Content-Length the array has exactly that size and is allocated when
+the first body byte arrives; for a chunked body it starts at 8 KiB and doubles, capped
+at the limit, and is trimmed once at the end. The finished array is handed to the
+`Body` without another copy. The body keeps the request's
 `Content-Type`; `mediaType()` and `charset()` parse it. Request headers are
 available through `ctx.header(name)` (one value per name; repeated fields are joined
 with `", "`). `Request.toString` omits header values.
