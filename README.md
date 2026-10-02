@@ -53,3 +53,8 @@ ownership is validated. No performance claims have been established.
 See the [programming model](docs/programming-model.md),
 [routing rules](docs/routing.md), [HTTP behavior and limits](docs/http.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
 [security](SECURITY.md). Licensed under Apache-2.0.
+
+## Support Axiom
+
+If Axiom is useful to you, [buy me a coffee via PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jonnysimiyu%40gmail.com&item_name=Axiom%20open-source%20development&currency_code=USD)
+to support its development. Choose any amount; payments go to `jonnysimiyu@gmail.com`.
