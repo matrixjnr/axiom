@@ -10,6 +10,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.MultiThreadIoEventLoopGroup;
+import io.netty.channel.WriteBufferWaterMark;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.nio.NioIoHandler;
 import io.netty.channel.socket.SocketChannel;
@@ -29,17 +30,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class NettyServer implements Server {
     /** How long close() lets in-flight exchanges finish before interrupting them. */
     static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(5);
+    /** Open connections per listener; further accepted connections close immediately. */
+    static final int MAX_CONNECTIONS = 128;
+    /** Pending-accept queue length requested from the operating system. */
+    static final int BACKLOG = 1024;
+    /** Per-connection outbound buffering at which the channel reports itself unwritable. */
+    static final WriteBufferWaterMark WATER_MARK = new WriteBufferWaterMark(32 * 1024, 128 * 1024);
+    private static final int IO_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors());
     private final MultiThreadIoEventLoopGroup acceptors = new MultiThreadIoEventLoopGroup(
             1, Thread.ofPlatform().name("axiom-http-accept-", 0).factory(), NioIoHandler.newFactory());
-    private final MultiThreadIoEventLoopGroup io = new MultiThreadIoEventLoopGroup(
-            2, Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());
+    final MultiThreadIoEventLoopGroup io = new MultiThreadIoEventLoopGroup(
+            IO_THREADS, Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());
     private final DefaultChannelGroup channels = new DefaultChannelGroup(io.next(), true);
     private final RequestDispatcher handlers;
     private final CompletableFuture<Void> stopped;
     private final AtomicBoolean closing = new AtomicBoolean();
     private final AtomicInteger connections = new AtomicInteger();
     private final Duration grace;
-    private Channel listener;
+    Channel listener;
     private InetSocketAddress address;
 
     private NettyServer(AdmissionPolicy policy, Duration grace) {
@@ -58,25 +66,11 @@ final class NettyServer implements Server {
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
                     .channel(NioServerSocketChannel.class)
+                    .option(ChannelOption.SO_BACKLOG, BACKLOG)
+                    .option(ChannelOption.SO_REUSEADDR, true)
                     .childOption(ChannelOption.TCP_NODELAY, true)
                     .childHandler(new ChannelInitializer<SocketChannel>() {
-                        @Override protected void initChannel(SocketChannel channel) {
-                            server.channels.add(channel);
-                            // close() sets the flag before draining the group, so a racing accept closes itself.
-                            if (server.closing.get()) { channel.close(); return; }
-                            if (server.connections.incrementAndGet() > 128) {
-                                server.connections.decrementAndGet();
-                                channel.close();
-                                return;
-                            }
-                            channel.closeFuture().addListener(ignored -> server.connections.decrementAndGet());
-                            var config = new HttpDecoderConfig().setMaxInitialLineLength(4096)
-                                    .setMaxHeaderSize(8192).setMaxChunkSize(8192)
-                                    .setValidateHeaders(true).setAllowDuplicateContentLengths(false)
-                                    .setStrictLineParsing(true).setUseRfc9112TransferEncoding(true);
-                            channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new HttpConnection.RequestBytes(),
-                                    new HttpServerCodec(config), new HttpConnection(application, server.handlers));
-                        }
+                        @Override protected void initChannel(SocketChannel channel) { server.accept(channel, application); }
                     });
             var bound = bootstrap.bind(address).awaitUninterruptibly();
             if (!bound.isSuccess()) { throw new IOException("Could not bind HTTP listener to " + address, bound.cause()); }
@@ -88,6 +82,27 @@ final class NettyServer implements Server {
             server.stopped.join();
             throw failure;
         }
+    }
+
+    /** Admits an accepted connection on its event loop, or closes it when closing or full. */
+    void accept(Channel channel, Application application) {
+        channel.config().setWriteBufferWaterMark(WATER_MARK);
+        channels.add(channel);
+        // close() sets the flag before draining the group, so a racing accept closes itself.
+        if (closing.get()) { channel.close(); return; }
+        if (connections.incrementAndGet() > MAX_CONNECTIONS) {
+            connections.decrementAndGet();
+            channel.close();
+            return;
+        }
+        // The slot is released exactly once, by this listener, whether or not setup succeeds.
+        channel.closeFuture().addListener(ignored -> connections.decrementAndGet());
+        var config = new HttpDecoderConfig().setMaxInitialLineLength(4096)
+                .setMaxHeaderSize(8192).setMaxChunkSize(8192)
+                .setValidateHeaders(true).setAllowDuplicateContentLengths(false)
+                .setStrictLineParsing(true).setUseRfc9112TransferEncoding(true);
+        channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new HttpConnection.RequestBytes(),
+                new HttpServerCodec(config), new HttpConnection(application, handlers));
     }
 
     @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }
