@@ -44,6 +44,7 @@ JSON notes API on the same port.
 - `axiom-test`: in-memory test client, sending raw request bodies
 - `axiom-starter`: published as `io.axiom:axiom`, the single dependency for applications
 - `axiom-bom`: aligned library versions
+- `integration-tests`: end-to-end JSON tests with the real codec, through `TestClient` and a live listener
 - `examples/hello`: runnable HTTP server and network smoke example
 - `examples/rest-api`: small JSON API with validation and error responses, and its tests
 - `benchmarks/http`: JMH routing and dispatch benchmarks

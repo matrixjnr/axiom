@@ -39,8 +39,7 @@ ignore file timestamps, use a stable entry order and normalized permissions, and
 Javadoc omits its generation timestamp, so repeated builds produce identical jars.
 
 `axiom-json` provides the JSON codec as a `BodyCodec` service; it has no public
-API package. Its tests exercise the codec directly; end-to-end JSON behavior over a
-listener and through `TestClient` is tested in `examples/rest-api`.
+API package. Its tests exercise the codec directly.
 
 Deferred: pinning GitHub Actions to full commit SHAs (workflow actions use major
 version tags; see docs/releasing.md).
@@ -114,3 +113,20 @@ are trust-on-first-use; signature verification is off. A modified checksum makes
 build fail. The standalone consumer projects in `compatibility/` are not covered.
 Dependency locking was evaluated and not enabled: versions are already exact
 through the catalog and the Netty and Jackson BOMs, and checksums pin the contents.
+
+## Integration tests
+
+Server, HTTP and test-client tests use small stand-in codecs, because those modules
+may not depend on `axiom-json`. The `integration-tests` module is where the real
+Jackson codec meets them: it runs one JSON contract (round trips, strictness
+failures, limits, 400/406/413/415 problem documents and their shape, charset
+handling) twice, through `TestClient` and over a live listener on a raw socket.
+
+The module is deliberately listed in the boundary rules as **test-only**: it has no
+production sources, may declare only test-scope dependencies (`axiom-test` to compile
+against, `axiom-http` and `axiom-json` at test runtime, so tests see only Axiom's API
+as an application would), and no other module may depend on it. Adding it therefore
+does not loosen any production rule: core, server and the test client still cannot
+depend on a codec or on Jackson. Its tests run in `check` and finish in a few
+seconds; `examples/rest-api` remains a usage example with its own tests. The module
+is not published and the BOM does not constrain it.

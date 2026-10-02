@@ -18,8 +18,12 @@ abstract class CheckModuleBoundaries : DefaultTask() {
             "axiom-json" to setOf("axiom-core"),
             // The test client stays codec-neutral: tests send raw bodies and never need a serializer.
             "axiom-test" to setOf("axiom-core", "axiom-server", "axiom-http"),
-            "axiom-starter" to setOf("axiom-core", "axiom-server", "axiom-http", "axiom-json")
+            "axiom-starter" to setOf("axiom-core", "axiom-server", "axiom-http", "axiom-json"),
+            // Black-box tests of the real codec over TestClient and a listener. Test-only: it has
+            // no production code, and no module may depend on it.
+            "integration-tests" to setOf("axiom-core", "axiom-http", "axiom-json", "axiom-test")
         )
+        val testOnlyModules = setOf("integration-tests")
         // Third-party production dependencies are confined to the module that adapts them.
         val externalGroups = mapOf(
             "axiom-http" to setOf("io.netty"),
@@ -34,6 +38,12 @@ abstract class CheckModuleBoundaries : DefaultTask() {
             val target = parts[1]
             if (parts[0] == "project" && target !in allowed.keys) {
                 throw GradleException("Dependency on unlisted module: $module -> $target")
+            }
+            if (module in testOnlyModules && !parts[2].startsWith("test")) {
+                throw GradleException("Test-only module '$module' may declare only test dependencies: $target (${parts[2]})")
+            }
+            if (parts[0] == "project" && target in testOnlyModules) {
+                throw GradleException("No module may depend on test-only module: $module -> $target")
             }
             if (parts[0] == "project" && target !in moduleAllowed) {
                 throw GradleException("Forbidden module dependency: $module -> $target")
