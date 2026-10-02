@@ -121,11 +121,39 @@ class HttpListenerTest {
         }
     }
 
-    @Test void rejectsExpectationAndOldProtocolAndExcessiveHeaders() throws Exception {
+    @Test void servesHttp10WithHttp11ResponsesAndClosesUnlessKeptAlive() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/", ctx -> "old");
+            var server = fixture.listen();
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.0\r\n\r\n");
+                var response = wire.read(false);
+                assertThat(response.status()).isEqualTo(200);
+                assertThat(response.text()).isEqualTo("old");
+                assertThat(response.headers()).containsEntry("connection", "close");
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            }
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.0\r\nHost: a\r\nConnection: keep-alive\r\n\r\n");
+                var response = wire.read(false);
+                assertThat(response.headers()).containsEntry("connection", "keep-alive");
+                wire.write("GET / HTTP/1.0\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).text()).isEqualTo("old");
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            }
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.0\r\nHost: a/b\r\n\r\n");
+                assertThat(wire.read(false).status()).isEqualTo(400);
+            }
+        }
+    }
+
+    @Test void rejectsExpectationAndUnknownProtocolAndExcessiveHeaders() throws Exception {
         try (var fixture = new Fixture()) {
             var server = fixture.listen();
             for (var entry : Map.of(
-                    "GET / HTTP/1.0\r\n\r\n", 505,
+                    "GET / HTTP/1.2\r\nHost: a\r\n\r\n", 505,
+                    "GET / HTTP/2.0\r\nHost: a\r\n\r\n", 505,
                     "CONNECT localhost:443 HTTP/1.1\r\nHost: localhost\r\n\r\n", 501,
                     "POST / HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\n\r\n", 417,
                     "GET / HTTP/1.1\r\nHost: a\r\nX-Large: " + "x".repeat(9000) + "\r\n\r\n", 400

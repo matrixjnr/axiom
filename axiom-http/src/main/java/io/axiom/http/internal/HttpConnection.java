@@ -109,8 +109,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (!message.decoderResult().isSuccess()) { fail(ctx, 400); return; }
         if (message instanceof HttpRequest request) {
             if (receiving != null) { fail(ctx, 400); return; }
-            if (!request.protocolVersion().equals(HttpVersion.HTTP_1_1)) { fail(ctx, 505); return; }
-            if (!validHost(request)) { fail(ctx, 400); return; }
+            boolean http10 = request.protocolVersion().equals(HttpVersion.HTTP_1_0);
+            if (!http10 && !request.protocolVersion().equals(HttpVersion.HTTP_1_1)) { fail(ctx, 505); return; }
+            if (!validHost(request, http10)) { fail(ctx, 400); return; }
             if (request.headers().contains(HttpHeaderNames.EXPECT)) { fail(ctx, 417); return; }
             if (request.method().name().equals("CONNECT") || request.headers().contains(HttpHeaderNames.UPGRADE)) { fail(ctx, 501); return; }
             try {
@@ -122,7 +123,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 if (!target.startsWith("/") || target.indexOf('#') >= 0) { fail(ctx, 400); return; }
                 var uri = URI.create("http://axiom.invalid" + target);
                 receiving = new Exchange(new Request(request.method().name(), uri.getRawPath()),
-                        HttpUtil.isKeepAlive(request), ExecutionContext.create(application.requestTimeout()));
+                        HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
             } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
         }
         if (message instanceof HttpContent content) {
@@ -137,8 +138,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         }
     }
 
-    private static boolean validHost(HttpRequest request) {
+    /** HTTP/1.1 requires exactly one Host; HTTP/1.0 may omit it but must not send an invalid one. */
+    private static boolean validHost(HttpRequest request, boolean http10) {
         var hosts = request.headers().getAll(HttpHeaderNames.HOST);
+        if (http10 && hosts.isEmpty()) { return true; }
         if (hosts.size() != 1 || hosts.getFirst().isEmpty()) { return false; }
         try {
             var host = URI.create("http://" + hosts.getFirst());
@@ -245,6 +248,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             message.headers().set("X-Request-ID", exchange.execution().requestId());
             boolean keepAlive = exchange.keepAlive() && !response.close() && !draining;
             HttpUtil.setKeepAlive(message, keepAlive);
+            // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
+            if (keepAlive && exchange.http10()) { message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive"); }
             if (!keepAlive) { closing = true; pending.clear(); }
             ctx.writeAndFlush(message).addListener(future -> {
                 active = null;
@@ -266,7 +271,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private void fail(ChannelHandlerContext ctx, int status) {
         // Never send an error ahead of an earlier pipelined response.
         if (busy || !pending.isEmpty()) { abort(ctx); return; }
-        send(ctx, new Exchange(Request.get("/"), false, ExecutionContext.create(application.requestTimeout())), error(status));
+        send(ctx, new Exchange(Request.get("/"), false, false, ExecutionContext.create(application.requestTimeout())), error(status));
     }
 
     private void abort(ChannelHandlerContext ctx) { closing = true; ctx.close(); }
@@ -288,6 +293,6 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) { abort(ctx); }
 
-    private record Exchange(Request request, boolean keepAlive, ExecutionContext execution) { }
+    private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) { }
     private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close) { }
 }

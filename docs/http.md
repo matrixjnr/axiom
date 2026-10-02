@@ -29,7 +29,10 @@ multiple transport providers fail before startup. Closed applications cannot bin
 
 ## Wire behavior
 
-The listener accepts HTTP/1.1 origin-form requests with exactly one valid Host.
+The listener accepts HTTP/1.1 origin-form requests with exactly one valid Host,
+and HTTP/1.0 requests, whose Host is optional but validated when present.
+Responses always use HTTP/1.1. An HTTP/1.0 connection closes after each response
+unless the request sends `Connection: keep-alive`, which the response echoes.
 Raw paths retain encoding and repeated slashes; query strings are excluded from
 routing and are not yet exposed through the request API. Responses support UTF-8
 strings, byte arrays, and empty bodies. Unsupported body objects and handler
@@ -44,7 +47,7 @@ omit Content-Length; 205 uses zero. Keep-alive and pipelining are supported, wit
 one active handler per connection and responses in request order.
 
 Request bodies, transfer-coded requests, CONNECT and upgrades return 501 and close.
-Expect requests return 417; older HTTP versions return 505. Malformed requests
+Expect requests return 417; other HTTP versions return 505. Malformed requests
 return 400 when no earlier response is outstanding; otherwise the connection
 closes to avoid sending an error ahead of an earlier pipelined response.
 
