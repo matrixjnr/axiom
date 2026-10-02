@@ -11,27 +11,14 @@ abstract class CheckModuleBoundaries : DefaultTask() {
 
     @TaskAction
     fun check() {
-        val allowed = mapOf(
-            "axiom-core" to emptySet(),
-            "axiom-server" to setOf("axiom-core"),
-            "axiom-http" to setOf("axiom-core", "axiom-server"),
-            "axiom-json" to setOf("axiom-core"),
-            // The test client stays codec-neutral: tests send raw bodies and never need a serializer.
-            "axiom-test" to setOf("axiom-core", "axiom-server", "axiom-http"),
-            "axiom-starter" to setOf("axiom-core", "axiom-server", "axiom-http", "axiom-json"),
-            // Black-box tests of the real codec over TestClient and a listener. Test-only: it has
-            // no production code, and no module may depend on it.
-            "integration-tests" to setOf("axiom-core", "axiom-http", "axiom-json", "axiom-test"),
-            "axiom-validation" to setOf("axiom-core"),
-            "axiom-validation-jakarta" to setOf("axiom-core", "axiom-validation")
-        )
+        val allowed = ModuleBoundaries.allowed
         // Project dependencies a module may use in test configurations only, for end-to-end tests
         // through the test client. Unlike integration-tests, these modules also have production code.
         val testScopeOnly = mapOf(
             "axiom-validation" to setOf("axiom-test"),
             "axiom-validation-jakarta" to setOf("axiom-test")
         )
-        val testOnlyModules = setOf("integration-tests")
+        val testOnlyModules = ModuleBoundaries.testOnlyModules
         // Third-party production dependencies are confined to the module that adapts them.
         val externalGroups = mapOf(
             "axiom-http" to setOf("io.netty"),

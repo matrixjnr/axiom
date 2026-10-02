@@ -1,4 +1,7 @@
-plugins { base }
+plugins {
+    base
+    id("axiom.publication-coverage")
+}
 
 val modules = subprojects.filter { it.buildFile.isFile }
 tasks.named("check") { dependsOn(modules.map { "${it.path}:check" }) }

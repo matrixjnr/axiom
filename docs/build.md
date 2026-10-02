@@ -49,6 +49,14 @@ client consumers receive core through `api`. HTTP uses server through
 uses it through `implementation` to admit requests through the same dispatcher. Neither exposes server on consumer compile classpaths.
 The server depends on core; core has no reverse dependency on the runtime.
 
+`checkPublicationCoverage` (root project, part of `check`) compares three sets: the
+library modules that apply the publish convention, the project constraints in
+`axiom-bom`, and the keys of the allowed-dependency map in
+`build-logic/.../ModuleBoundaries.kt` (test-only modules excluded). Any difference
+fails the build and names the module and the file to update. To see it fire, remove
+a `api(project(...))` line from `axiom-bom/build.gradle.kts` or a module from the map
+and run `./gradlew checkPublicationCoverage`.
+
 ## Hygiene and deferred items
 
 Compilation runs with `-Xlint:all -Werror`; the build is warning-free. Archives
