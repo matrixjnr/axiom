@@ -80,8 +80,9 @@ Response bodies are limited to 1 MiB after encoding and response
 headers to 8 KiB; larger responses produce 500. Application allocations before
 returning a response are outside these limits. Connections close after 30 seconds
 without network read/write activity, including idle keep-alive connections and a
-response write stalled by a client that stopped reading. A running handler is not
-interrupted by inactivity; its execution deadline bounds it instead.
+response write stalled by a client that stopped reading. A request waiting for
+admission or a running handler is not interrupted by inactivity; its queue wait
+and execution deadline bound it instead.
 A request head must arrive within ten seconds of its first byte; otherwise the
 listener answers 408 Request Timeout and closes (or just closes when an earlier
 pipelined response is outstanding). Trickling bytes does not extend the bound.

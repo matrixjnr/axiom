@@ -62,7 +62,8 @@ Application-thrown rejection or timeout exceptions remain 500 application failur
 The per-connection pipeline buffer is separate: only its front request is eligible
 for admission. Pipeline order and the eight-request connection bound still apply.
 The 128-connection limit can cap useful HTTP admission capacity below configured
-values. Queued responses remain subject to the network inactivity timeout.
+values. The network inactivity timeout does not close a connection whose request
+is waiting; the queue wait and execution deadline bound it instead.
 
 ## Ownership and shutdown
 

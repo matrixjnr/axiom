@@ -46,9 +46,11 @@ Application-thrown timeout exceptions remain application failures (500).
 Completion and timeout compete for one terminal outcome. Completion checks the
 monotonic deadline even if the timer thread is delayed. The budget ends when the
 prepared response wins completion; it does not bound subsequent socket writes.
-The existing 30-second network inactivity timeout also applies and can close a
-connection earlier than a longer configured execution budget. Header receipt,
-body upload and slow response delivery do not have absolute deadlines yet.
+The 30-second network inactivity timeout does not close a connection while its
+request waits for admission or runs; the queue wait and this budget bound it
+instead. It still closes idle connections and stalled response writes. A request
+head must complete within ten seconds of its first byte. Body upload and slow
+response delivery do not have absolute deadlines yet.
 
 ## Capacity and cancellation
 

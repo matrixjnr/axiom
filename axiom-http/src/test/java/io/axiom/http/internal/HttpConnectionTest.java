@@ -154,6 +154,39 @@ class HttpConnectionTest {
         }
     }
 
+    @Test void idleEventDoesNotAbortRequestWaitingForAdmission() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var policy = new io.axiom.execution.AdmissionPolicy(1, 1, Duration.ofSeconds(30));
+        var executor = new RequestDispatcher(policy);
+        try (var app = Axiom.create()) {
+            executor.submit(ExecutionContext.create(Duration.ofSeconds(10)), () -> {
+                entered.countDown();
+                try { release.await(); } catch (InterruptedException expected) { Thread.currentThread().interrupt(); }
+                return null;
+            });
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            app.admissionPolicy(policy);
+            app.get("/", ctx -> "promoted");
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            try {
+                request(channel);
+                assertThat(executor.snapshot().queued()).isEqualTo(1);
+                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                assertThat(channel.isActive()).isTrue();
+                release.countDown();
+                FullHttpResponse response = awaitResponse(channel);
+                try { assertThat(response.status().code()).isEqualTo(200); }
+                finally { response.release(); }
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            release.countDown();
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     @Test void incompleteRequestHeadTimesOutWith408EvenWhenBytesTrickle() {
         var executor = executor();
         try (var app = Axiom.create()) {
