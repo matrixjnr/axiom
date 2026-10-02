@@ -300,7 +300,7 @@ class HttpPipelineErrorTest {
     private static ByteBuf ascii(String text) { return Unpooled.copiedBuffer(text, StandardCharsets.US_ASCII); }
 
     /** Runs tasks posted by handler threads and collects the output until the channel closes. */
-    private static List<Reply> repliesUntilClosed(EmbeddedChannel channel) {
+    static List<Reply> repliesUntilClosed(EmbeddedChannel channel) {
         var bytes = new java.io.ByteArrayOutputStream();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (true) {
@@ -318,7 +318,7 @@ class HttpPipelineErrorTest {
         return parse(bytes.toString(StandardCharsets.ISO_8859_1));
     }
 
-    private static List<Reply> parse(String text) {
+    static List<Reply> parse(String text) {
         var replies = new ArrayList<Reply>();
         int at = 0;
         while (at < text.length()) {

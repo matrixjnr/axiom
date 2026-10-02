@@ -91,9 +91,12 @@ of a body.
 A request with `Expect: 100-continue` whose headers are otherwise acceptable and
 whose declared length is within the limit receives an interim `100 Continue`, then
 the body is read. If earlier pipelined responses are still outstanding, the interim
-response waits for them. A request whose declared length exceeds the limit gets
-413 instead and the connection closes; any other expectation gets **417**. HTTP/1.0
-requests never receive `100 Continue`.
+response waits until they have been written, so it never overtakes them; if the
+client sends the body without waiting, no interim response is sent. A request whose
+declared length exceeds the limit gets 413 instead and the connection closes; any
+other expectation gets **417**. Either rejection is sent without an interim response
+and, on a busy connection, after the earlier responses. HTTP/1.0 requests never
+receive `100 Continue`.
 
 ## Body ownership
 
