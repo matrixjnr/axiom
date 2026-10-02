@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +36,7 @@ final class DefaultApplication implements Application {
     // Configuration state; guarded by this until startup publishes a runtime snapshot.
     private final Map<Route, Handler> registrations = new LinkedHashMap<>();
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
+    private final Map<String, Route> shapes = new HashMap<>();
     private final List<Server> listeners = new ArrayList<>();
     private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
@@ -71,10 +73,25 @@ final class DefaultApplication implements Application {
         requireState(State.CONFIGURING);
         Objects.requireNonNull(handler, "handler");
         var route = new Route(method, path);
-        if (registrations.putIfAbsent(route, handler) != null) {
+        if (registrations.containsKey(route)) {
             throw new IllegalArgumentException("Duplicate route: " + method + " " + path);
         }
+        var previous = shapes.putIfAbsent(method + " " + shape(path), route);
+        if (previous != null) {
+            throw new IllegalArgumentException("Ambiguous routes for " + method + ": "
+                    + previous.path() + " and " + path);
+        }
+        registrations.put(route, handler);
         return route;
+    }
+
+    /** Template shape with capture names erased; templates of equal shape match the same paths. */
+    private static String shape(String path) {
+        var shape = new StringBuilder(path.length());
+        for (var segment : path.substring(1).split("/", -1)) {
+            shape.append('/').append(segment.startsWith(":") ? ":" : segment.startsWith("*") ? "*" : segment);
+        }
+        return shape.toString();
     }
 
     @Override
@@ -95,6 +112,7 @@ final class DefaultApplication implements Application {
         var router = CompiledRouter.compile(registrations);
         runtime = snapshot(router);
         registrations.clear();
+        shapes.clear();
         state = State.RUNNING;
         return this;
     }
@@ -204,6 +222,7 @@ final class DefaultApplication implements Application {
             runtime = runtime == null ? snapshot(null) : runtime.withoutRouter();
             state = State.CLOSED;
             registrations.clear();
+            shapes.clear();
             routePolicies.clear();
             owned = List.copyOf(listeners);
             listeners.clear();

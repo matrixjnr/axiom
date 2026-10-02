@@ -24,8 +24,8 @@ app.get("/files/*path", ctx -> ctx.path("path"));
 `get`, `post`, `put`, `patch`, `delete`, `head`, and `options` delegate to `route`.
 A `Route` is an immutable identity; `routes()` returns an immutable snapshot in
 registration order. Duplicate method/template pairs fail without replacing a handler.
-At startup, equally shaped templates for the same method also fail, regardless of
-capture names. No partially compiled router is published on failure.
+Equally shaped templates for the same method also fail at registration, regardless
+of capture names. No partially compiled router is published on failure.
 
 Matching is case-sensitive and preserves the raw path. Paths with empty or dot
 segments, backslashes, NUL, malformed percent-escapes, or encoded dots, slashes,

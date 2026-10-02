@@ -53,24 +53,25 @@ HEAD responses suppress bodies for successful matches and routing errors.
 
 ## Conflicts and startup
 
-Identical method/template pairs fail at registration. Distinct templates with the
-same method and path shape fail when `start()` compiles the table:
+Identical method/template pairs fail at registration. So do distinct templates
+with the same method and path shape, meaning they differ only in capture names:
 
 ```text
 GET /users/:id
-GET /users/:name
+GET /users/:name   -> IllegalArgumentException: Ambiguous routes for GET: /users/:id and /users/:name
 ```
 
-The error names both routes. Equivalent wildcard templates follow the same rule.
+The error names both routes, and the first registration stays in place.
+Equivalent wildcard templates (`/files/*path`, `/files/*rest`) follow the same rule.
 Static/parameter/wildcard overlaps with defined precedence are allowed.
 
 Different methods can use different capture names on the same shape. For example,
 `GET /users/:id` and `PUT /users/:name` share the path node while each handler sees
 its own declared capture names. Names belong to endpoints, not shared trie edges.
 
-Compilation is atomic with respect to lifecycle changes. On failure, the application
-stays `CONFIGURING`, registrations remain intact, and execution is unavailable.
-Close it and create an application with corrected routes. Successful startup freezes
+Compilation is atomic with respect to lifecycle changes. Should it fail, the
+application stays `CONFIGURING`, registrations remain intact, and execution is
+unavailable. Successful startup freezes
 the table. Shutdown preserves the existing rule: accepted requests may finish.
 
 ## Raw paths and ownership

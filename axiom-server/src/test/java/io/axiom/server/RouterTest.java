@@ -2,7 +2,6 @@ package io.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
-import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.axiom.Axiom;
@@ -200,17 +199,17 @@ class RouterTest {
     @ParameterizedTest
     @CsvSource({"/users/:id,/users/:name", "/:a/:b,/:x/:y", "/files/*path,/files/*rest",
             "/:id/*tail,/:name/*rest"})
-    void rejectsEquivalentTemplatesAtStartupWithoutPublishingPartialState(String first, String second) {
+    void rejectsEquivalentTemplatesAtRegistration(String first, String second) throws Exception {
         try (var app = Axiom.create()) {
-            app.get(first, ctx -> "first");
-            app.get(second, ctx -> "second");
-            assertThatIllegalArgumentException().isThrownBy(app::start)
+            var kept = app.get(first, ctx -> "first");
+            assertThatIllegalArgumentException().isThrownBy(() -> app.get(second, ctx -> "second"))
                     .withMessageContaining("Ambiguous routes for GET").withMessageContaining(first)
                     .withMessageContaining(second);
             assertThat(app.state()).isEqualTo(Application.State.CONFIGURING);
-            assertThat(app.routes()).hasSize(2);
-            assertThatIllegalStateException().isThrownBy(() -> app.handle(Request.get("/users/1")));
-            assertThatIllegalArgumentException().isThrownBy(app::start);
+            assertThat(app.routes()).containsExactly(kept);
+            app.post(second, ctx -> "other method");
+            app.start();
+            assertThat(app.resolve(Request.get(first.replace(":", "x").replace("*", "y")))).contains(kept);
         }
     }
 
