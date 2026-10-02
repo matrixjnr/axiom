@@ -194,12 +194,15 @@ class HttpBodyTest {
         int limit = 256 * 1024;
         try (var fixture = new Fixture()) {
             fixture.app.maxRequestBody(4 * 1024 * 1024);
+            // Each one-byte chunk is a tracked buffer under paranoid leak detection, so this takes
+            // seconds even unloaded; the default ten-second deadline made it fail with 408 under load.
+            fixture.app.requestTimeout(Duration.ofMinutes(2));
             fixture.app.post("/digest", ctx -> {
                 var digest = java.security.MessageDigest.getInstance("SHA-256");
                 return ctx.request().body().length() + ":" + java.util.HexFormat.of().formatHex(digest.digest(ctx.request().body().bytes()));
             });
             try (var wire = new Wire(fixture.listen())) {
-                wire.socket.setSoTimeout(30_000);
+                wire.socket.setSoTimeout(120_000);
                 var chunked = new StringBuilder(limit * 6 + 128)
                         .append("POST /digest HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n");
                 var expected = new byte[limit];
@@ -210,7 +213,9 @@ class HttpBodyTest {
                 long started = System.nanoTime();
                 wire.write(chunked.append("0\r\n\r\n").toString());
                 var reply = wire.read(false);
-                assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(20));
+                // Only a coarse guard against pathological per-chunk cost; copy counts are checked
+                // deterministically by HttpConnectionTest.tinyChunksAreCopiedOnArrivalWithoutNettyAccumulation.
+                assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(100));
                 assertThat(reply.text()).isEqualTo(limit + ":" + java.util.HexFormat.of().formatHex(
                         java.security.MessageDigest.getInstance("SHA-256").digest(expected)));
 
