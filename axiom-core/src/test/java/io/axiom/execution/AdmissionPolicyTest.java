@@ -15,4 +15,11 @@ class AdmissionPolicyTest {
         assertThatThrownBy(() -> new AdmissionPolicy(1, 1, Duration.ofDays(2))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new AdmissionPolicy(1, 1, null)).isInstanceOf(NullPointerException.class);
     }
+
+    @Test void capsQueueCapacity() {
+        assertThat(new AdmissionPolicy(1, AdmissionPolicy.MAX_QUEUED_LIMIT, Duration.ofSeconds(1)).maxQueued())
+                .isEqualTo(100_000);
+        assertThatThrownBy(() -> new AdmissionPolicy(1, 100_001, Duration.ofSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
