@@ -35,10 +35,11 @@ import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.axiom.codec.spi.BodyCodec;
 import io.axiom.error.DecodeException;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
@@ -46,6 +47,7 @@ import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -220,7 +222,12 @@ public final class JacksonBodyCodec implements BodyCodec {
     @Override public Set<String> mediaTypes() { return Set.of("application/json"); }
 
     @Override public <T> T decode(byte[] content, Class<T> type) {
-        try (var parser = mapper.createParser(reader(content))) {
+        return decode(ByteBuffer.wrap(content), type);
+    }
+
+    /** Reads the view through a stream, so the content is never copied as a whole. */
+    @Override public <T> T decode(ByteBuffer content, Class<T> type) {
+        try (var parser = mapper.createParser(reader(content.duplicate()))) {
             if (parser.nextToken() == null) { throw new DecodeException("empty_body"); }
             T value = mapper.readValue(parser, type);
             // The mapper does not check for trailing tokens; reading one here gives it its own code.
@@ -238,13 +245,36 @@ public final class JacksonBodyCodec implements BodyCodec {
      * Reads the content as strict UTF-8. RFC 8259 lets parsers ignore a UTF-8 byte order mark;
      * other encodings are not detected.
      */
-    private static Reader reader(byte[] content) {
+    private static Reader reader(ByteBuffer content) {
         var decoder = StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT);
-        int start = content.length >= 3 && (content[0] & 0xff) == 0xef && (content[1] & 0xff) == 0xbb
-                && (content[2] & 0xff) == 0xbf ? 3 : 0;
-        return new InputStreamReader(new ByteArrayInputStream(content, start, content.length - start), decoder);
+        int at = content.position();
+        if (content.remaining() >= 3 && (content.get(at) & 0xff) == 0xef && (content.get(at + 1) & 0xff) == 0xbb
+                && (content.get(at + 2) & 0xff) == 0xbf) {
+            content.position(at + 3);
+        }
+        return new InputStreamReader(new BufferInputStream(content), decoder);
+    }
+
+    /** Streams a buffer's remaining bytes, advancing its position. */
+    private static final class BufferInputStream extends InputStream {
+        private final ByteBuffer buffer;
+
+        BufferInputStream(ByteBuffer buffer) { this.buffer = buffer; }
+
+        @Override public int read() { return buffer.hasRemaining() ? buffer.get() & 0xff : -1; }
+
+        @Override public int read(byte[] target, int offset, int length) {
+            Objects.checkFromIndexSize(offset, length, target.length);
+            if (length == 0) { return 0; }
+            if (!buffer.hasRemaining()) { return -1; }
+            int count = Math.min(length, buffer.remaining());
+            buffer.get(target, offset, count);
+            return count;
+        }
+
+        @Override public int available() { return buffer.remaining(); }
     }
 
     /**
@@ -254,7 +284,7 @@ public final class JacksonBodyCodec implements BodyCodec {
      * first token-level problem precisely. Failures that the scan does not reproduce, such as an
      * integer too large for its field, are value mismatches.
      */
-    private DecodeException classify(IOException failure, byte[] content) {
+    private DecodeException classify(IOException failure, ByteBuffer content) {
         if (causedBy(failure, StreamConstraintsException.class)) { return new DecodeException("limit_exceeded"); }
         if (causedBy(failure, StreamReadException.class) || causedBy(failure, CharacterCodingException.class)) {
             var tokenFailure = scan(content);
@@ -283,9 +313,9 @@ public final class JacksonBodyCodec implements BodyCodec {
      * Reads every token of the content, with duplicate keys detected here rather than by the
      * parser, and returns the first token-level failure, or null when the token stream is valid.
      */
-    private DecodeException scan(byte[] content) {
+    private DecodeException scan(ByteBuffer content) {
         var names = new ArrayDeque<Set<String>>();
-        try (var parser = scanFactory.createParser(reader(content))) {
+        try (var parser = scanFactory.createParser(reader(content.duplicate()))) {
             for (var token = parser.nextToken(); token != null; token = parser.nextToken()) {
                 switch (token) {
                     case START_OBJECT -> names.push(new HashSet<>());

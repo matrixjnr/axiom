@@ -51,7 +51,8 @@ final class DefaultContext implements Context {
         }
         var codec = codecs.forMediaType(mediaType.get());
         if (codec == null) { throw new UnsupportedMediaTypeException(); }
-        var value = codec.decode(body.bytes(), type);
+        // A read-only view: the codec reads the request's bytes without another copy.
+        var value = codec.decode(body.asReadOnlyBuffer(), type);
         if (value == null) { throw new DecodeException("null_body"); }
         return value;
     }

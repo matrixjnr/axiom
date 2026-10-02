@@ -141,6 +141,30 @@ class JacksonBodyCodecTest {
         assertDecodeFailure(utf16WithBom, Item.class, "invalid_encoding", null);
     }
 
+    @Test void decodesFromAReadOnlyViewWithoutCopyingIt() {
+        var threads = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+        org.junit.jupiter.api.Assumptions.assumeTrue(threads.isThreadAllocatedMemorySupported()
+                && threads.isThreadAllocatedMemoryEnabled());
+        int padding = 8 * 1024 * 1024;
+        var content = new byte[padding + 64];
+        java.util.Arrays.fill(content, (byte) ' ');
+        var json = utf8("xx{\"name\":\"view\",\"quantity\":3}");
+        System.arraycopy(json, 0, content, 0, json.length);
+        var view = java.nio.ByteBuffer.wrap(content).position(2).asReadOnlyBuffer();
+        codec.decode(view.duplicate(), Item.class); // Loads and links the decoding path before measuring.
+
+        long before = threads.getCurrentThreadAllocatedBytes();
+        var item = codec.decode(view, Item.class);
+        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+
+        assertThat(item).isEqualTo(new Item("view", 3));
+        assertThat(allocated).as("bytes allocated while decoding a %d-byte body", content.length).isLessThan(padding / 8);
+        assertDecodeFailure(utf8("xx{\"name\":\"a\",\"name\":\"b\",\"quantity\":1}"), Item.class, "malformed_json", null);
+        assertThatThrownBy(() -> codec.decode(java.nio.ByteBuffer.wrap(utf8("xx{\"name\":\"a\",\"name\":\"b\",\"quantity\":1}"))
+                .position(2).asReadOnlyBuffer(), Item.class))
+                .isInstanceOfSatisfying(DecodeException.class, failure -> assertThat(failure.code()).isEqualTo("duplicate_field"));
+    }
+
     @Test void reportsUnencodableAndUndecodableTypesAsServerErrors() {
         assertThatIllegalStateException().isThrownBy(() -> codec.encode(new Object()));
         assertThatIllegalStateException().isThrownBy(() -> codec.decode(utf8("{}"), Runnable.class));

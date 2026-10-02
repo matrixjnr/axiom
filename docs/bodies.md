@@ -54,9 +54,10 @@ so at most `3 × L` per connection (3 MiB at the default). A declared Content-Le
 is reserved in full against the `2 × L` share when its head arrives; a chunked
 body is counted as it arrives, and while its array doubles the old and new arrays
 briefly coexist. Exceeding the `2 × L` share closes the connection. Handler-side
-copies are additional: `ctx.body(...)` passes the codec a copy of the running body
-(up to `L`) and the decoded value lives until the handler drops it, and
-`Body.bytes()` copies on every call.
+memory is additional: `ctx.body(...)` passes the codec a read-only view of the
+running body, so the JSON codec reads it without a copy, but a codec that implements
+only the array method receives one copy (up to `L`); the decoded value lives until
+the handler drops it, and `Body.bytes()` copies on every call.
 
 These bounds are **per connection, not global**. A listener accepts up to 128
 connections, so its worst case is about `128 × 3 × L` (384 MiB at the default),
@@ -229,3 +230,9 @@ during `start()`; two codecs declaring the same media type fail startup with
 `IllegalStateException` and the application stays configurable. Codecs are shared
 across requests and must be thread-safe. See [errors](errors.md) for how failures
 reach clients.
+
+The runtime decodes through `decode(ByteBuffer, Class)`, passing a read-only view of
+the request body that the codec must not retain. Its default implementation copies
+the bytes once and calls `decode(byte[], Class)`, so codecs written against the array
+method keep working; codecs that can stream from a buffer override it to avoid the
+copy, as the JSON codec does.
