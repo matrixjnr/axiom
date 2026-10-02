@@ -8,6 +8,15 @@ public class PayloadTooLargeException extends AxiomException {
 
     /** Creates the exception with code {@code content_too_large}. */
     public PayloadTooLargeException() {
-        super(413, "content_too_large");
+        this("content_too_large");
+    }
+
+    /**
+     * Creates the exception with a specific safe code.
+     *
+     * @param code machine-readable code
+     */
+    public PayloadTooLargeException(String code) {
+        super(413, code);
     }
 }

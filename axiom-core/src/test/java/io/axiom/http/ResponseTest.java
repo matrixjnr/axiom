@@ -87,4 +87,25 @@ class ResponseTest {
         assertThat(head.headers()).isEqualTo(response.headers());
         assertThat(response.body()).isEqualTo("hello");
     }
+
+    @org.junit.jupiter.api.Test
+    void buildsRedirectsAndLocationsWithoutHeaderInjection() {
+        for (int status : new int[] {301, 302, 303, 307, 308}) {
+            var redirect = Response.redirect(status, "/next?x=1");
+            org.assertj.core.api.Assertions.assertThat(redirect.status()).isEqualTo(status);
+            org.assertj.core.api.Assertions.assertThat(redirect.body()).isNull();
+            org.assertj.core.api.Assertions.assertThat(redirect.headers()).containsEntry("Location", "/next?x=1");
+        }
+        var created = Response.of(201, "{}").withLocation("https://example.com/items/1");
+        org.assertj.core.api.Assertions.assertThat(created.headers()).containsEntry("location", "https://example.com/items/1");
+        for (int status : new int[] {200, 304, 300, 400}) {
+            org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+                    .isThrownBy(() -> Response.redirect(status, "/"));
+        }
+        for (var location : new String[] {"", "/a\r\nSet-Cookie: x=1", "/a\nb", "/a b", "/\"quoted\"", "/<x>",
+                "/a\\b", "/caf\u00e9", "/bad%zz", "/" + "x".repeat(2048)}) {
+            org.assertj.core.api.Assertions.assertThatIllegalArgumentException().as(location)
+                    .isThrownBy(() -> Response.redirect(302, location));
+        }
+    }
 }

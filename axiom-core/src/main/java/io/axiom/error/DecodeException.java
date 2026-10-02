@@ -9,7 +9,7 @@ import java.util.Optional;
  * Codecs report only a safe code and, when known, the declared property path; parser messages
  * and input fragments are never carried.
  */
-public class DecodeException extends AxiomException {
+public class DecodeException extends BadRequestException {
     @Serial private static final long serialVersionUID = 1L;
     /** Optional property path; null when unknown. */
     private final String field;
@@ -31,7 +31,7 @@ public class DecodeException extends AxiomException {
      * @throws IllegalArgumentException if the field is not a safe property path
      */
     public DecodeException(String code, String field) {
-        super(400, code);
+        super(code);
         if (field != null) { new Violation(field, code); }
         this.field = field;
     }

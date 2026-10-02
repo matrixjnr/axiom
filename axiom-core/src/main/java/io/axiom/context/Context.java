@@ -216,6 +216,19 @@ public interface Context {
     }
 
     /**
+     * Returns a redirect without a body. Use {@link Response#withLocation(String)} for 201
+     * Created, for example {@code ctx.status(201).json(item).withLocation("/items/" + id)}.
+     *
+     * @param status 301, 302, 303, 307 or 308
+     * @param location target URI reference, validated against header injection
+     * @return redirect response
+     * @throws IllegalArgumentException for another status or an invalid location
+     */
+    default Response redirect(int status, String location) {
+        return Response.redirect(status, location);
+    }
+
+    /**
      * Returns a 204 response with no body.
      *
      * @return a 204 response with no body
