@@ -61,18 +61,18 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     static final int MAX_PIPELINED = 8;
     /**
-     * Input read and dropped after a listener error, so a client disconnect is still noticed while
-     * earlier pipelined requests finish. Beyond it, reading pauses until the connection closes.
+     * Input read and dropped, never buffered, after a listener error (while earlier pipelined
+     * requests finish, and again while lingering). Reading continues so that a client disconnect is
+     * noticed and cancels the running handler. A client that sends more is treated as abusive: the
+     * connection closes at once, cancelling any running handler.
      */
-    static final int MAX_DISCARDED_INPUT = 1024 * 1024;
+    static final int MAX_DISCARDED_INPUT = 16 * 1024 * 1024;
     /**
      * After a listener error response the output is shut down and input is read and discarded for
      * at most this long before the connection closes, so a client still sending (for example the
      * rest of a rejected body) reads the response instead of a reset.
      */
     static final Duration LINGER_TIMEOUT = Duration.ofSeconds(2);
-    /** Input discarded while lingering; a client sending more is closed at once. */
-    static final int LINGER_MAX_INPUT = 16 * 1024 * 1024;
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
@@ -485,7 +485,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * Half-closes after a listener error response: the client reads the response and end of stream,
      * and input it is still sending is discarded rather than left unread, which would make the
      * operating system reset the connection and could destroy the response. The connection closes
-     * when the client closes its side, after the linger timeout ({@link #LINGER_TIMEOUT}), after {@link #LINGER_MAX_INPUT}
+     * when the client closes its side, after the linger timeout ({@link #LINGER_TIMEOUT}), after {@link #MAX_DISCARDED_INPUT}
      * bytes, or on inactivity, whichever comes first.
      */
     private void linger(ChannelHandlerContext ctx) {
@@ -495,11 +495,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             return;
         }
         lingering = true;
-        decoder.discard(LINGER_MAX_INPUT);
+        decoder.discard(MAX_DISCARDED_INPUT);
         lingerTimer = ctx.executor().schedule(() -> { ctx.close(); }, lingerNanos, TimeUnit.NANOSECONDS);
         duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
-        // Reading may have paused while an error waited for earlier responses.
-        ctx.channel().config().setAutoRead(true);
     }
 
     private void sendError(ChannelHandlerContext ctx, int status) {
@@ -531,10 +529,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // A running handler is bounded by its own deadline, so inactivity is ignored only while it
         // executes; idle connections and stalled response writes still close.
         if (event == RequestDecoder.DECODED) { inputDecoded(ctx); }
-        // Pausing keeps a client that keeps sending after an error from occupying the event loop.
-        else if (event == RequestDecoder.DISCARD_LIMIT) {
-            if (lingering) { ctx.close(); } else { ctx.channel().config().setAutoRead(false); }
-        }
+        // Closing keeps a client that keeps sending after an error from occupying the event loop.
+        else if (event == RequestDecoder.DISCARD_LIMIT) { abort(ctx); }
         else if (event instanceof IdleStateEvent) { if (active == null) { abort(ctx); } }
         else { super.userEventTriggered(ctx, event); }
     }

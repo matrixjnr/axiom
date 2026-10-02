@@ -95,11 +95,11 @@ earlier requests on the connection are running or queued:
 
 Responses arrive in request order, so the client can match each one to its request;
 the rejected request and those after it, which receive no response of their own,
-were not executed. Up to 1 MiB of input is
-discarded this way; beyond it the listener stops reading until the connection closes.
-While input is still read, a client disconnect cancels and interrupts the running
-handler as usual; once reading has stopped, a disconnect is noticed only when a
-write fails. If an earlier response itself closes the connection (a listener 5xx, a
+were not executed. Input keeps being read and discarded, never buffered, so a client
+disconnect still cancels and interrupts the running handler. A client that sends
+more than 16 MiB after the error is treated as abusive: the connection closes at
+once, the running handler is cancelled and interrupted, and no further responses are
+sent. If an earlier response itself closes the connection (a listener 5xx, a
 handler's `Connection: close`, or listener shutdown, which sends the running response
 with `Connection: close`), that response is the last one and the pending error is
 not sent. The 30-second inactivity timeout does not interrupt the running handler,

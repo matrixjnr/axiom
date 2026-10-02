@@ -81,7 +81,7 @@ class HttpLingerTest {
             channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
             assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
             var piece = new byte[1024 * 1024];
-            for (int sent = 0; sent < HttpConnection.LINGER_MAX_INPUT; sent += piece.length) {
+            for (int sent = 0; sent < HttpConnection.MAX_DISCARDED_INPUT; sent += piece.length) {
                 channel.writeInbound(Unpooled.wrappedBuffer(piece));
                 assertThat(channel.isActive()).isTrue();
             }
@@ -101,7 +101,7 @@ class HttpLingerTest {
         } finally { channel.finishAndReleaseAll(); }
     }
 
-    @Test void pipelinedErrorLingersAfterTheEarlierResponsesAndResumesPausedReading() throws Exception {
+    @Test void pipelinedErrorLingersAfterTheEarlierResponses() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         app.get("/slow", ctx -> { entered.countDown(); release.await(); return "slow"; });
@@ -109,9 +109,7 @@ class HttpLingerTest {
         try {
             channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\nGARBAGE\r\n\r\n"));
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-            // Enough input after the error to pause reading while the handler runs.
-            channel.writeInbound(Unpooled.wrappedBuffer(new byte[HttpConnection.MAX_DISCARDED_INPUT + 1]));
-            assertThat(channel.config().isAutoRead()).isFalse();
+            channel.writeInbound(Unpooled.wrappedBuffer(new byte[1024 * 1024]));
             release.countDown();
             var text = new StringBuilder();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -124,7 +122,6 @@ class HttpLingerTest {
             text.append(outbound(channel));
             assertThat(text.toString()).startsWith("HTTP/1.1 200 OK").contains("\r\n\r\nslowHTTP/1.1 400 ");
             assertThat(channel.isActive()).isTrue();
-            assertThat(channel.config().isAutoRead()).isTrue();
             channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             channel.runScheduledPendingTasks();
             assertThat(channel.isActive()).isFalse();

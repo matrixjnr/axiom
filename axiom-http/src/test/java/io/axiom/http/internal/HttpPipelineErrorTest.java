@@ -200,22 +200,38 @@ class HttpPipelineErrorTest {
         } finally { channel.finishAndReleaseAll(); }
     }
 
-    @Test void inputBeyondTheDiscardLimitPausesReadingButEarlierWorkCompletes() throws Exception {
+    @Test void inputBeyondTheDiscardLimitClosesAndCancelsTheRunningHandler() throws Exception {
         var channel = wireChannel();
         try {
             channel.writeInbound(ascii(SLOW + "GARBAGE\r\n\r\n"));
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-            var junk = new byte[64 * 1024];
-            for (int sent = 0; sent <= HttpConnection.MAX_DISCARDED_INPUT; sent += junk.length) {
-                assertThat(channel.config().isAutoRead()).isTrue();
+            var junk = new byte[1024 * 1024];
+            // Up to the limit, input keeps being read and dropped so that a disconnect is noticed.
+            for (int sent = 0; sent < HttpConnection.MAX_DISCARDED_INPUT; sent += junk.length) {
                 channel.writeInbound(Unpooled.wrappedBuffer(junk));
+                assertThat(channel.config().isAutoRead()).isTrue();
+                assertThat(channel.isActive()).isTrue();
             }
-            assertThat(channel.config().isAutoRead()).isFalse();
-            assertThat(channel.isActive()).isTrue();
-            release.countDown();
-            assertThat(repliesUntilClosed(channel)).extracting(Reply::status).containsExactly(200, 400);
-            assertThat(interrupted).isFalse();
+            // A client that keeps sending beyond it is treated as abusive: the connection closes.
+            channel.writeInbound(Unpooled.wrappedBuffer(new byte[1]));
+            assertThat(channel.isActive()).isFalse();
+            awaitInterrupted();
         } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test void overTheNetworkADisconnectAfterMuchDiscardedInputStillInterruptsTheHandler() throws Exception {
+        app.start();
+        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0));
+        try {
+            var wire = new Wire(server);
+            wire.write(SLOW + "GARBAGE\r\n\r\n");
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            // Several megabytes of input after the error, then a disconnect.
+            var junk = new byte[64 * 1024];
+            for (int sent = 0; sent < 3 * 1024 * 1024; sent += junk.length) { wire.socket.getOutputStream().write(junk); }
+            wire.close();
+            awaitInterrupted();
+        } finally { stop(server); }
     }
 
     @Test void drainSendsTheRunningResponseWithCloseAndDropsTheWaitingError() throws Exception {
