@@ -56,7 +56,8 @@ virtual-thread tasks with no waiting queue.
 Aggregate and route limits are configurable through `app.admissionPolicy(...)`;
 see [admission and bounded queues](admission.md).
 User handlers never execute on I/O threads. Full execution capacity produces 503
-and closes that connection. Connections are
+and closes that connection. So does any failure to start a request, including a
+pipelined request reached after the application has closed. Connections are
 limited to 128; additional connections close immediately without consuming a
 slot. The listening socket requests a 1024-entry accept backlog and sets
 SO_REUSEADDR so a restart can rebind while old connections linger in TIME_WAIT.

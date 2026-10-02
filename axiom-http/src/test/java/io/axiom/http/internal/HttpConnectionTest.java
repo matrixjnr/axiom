@@ -201,6 +201,81 @@ class HttpConnectionTest {
         finally { first.release(); }
     }
 
+    @Test void pipelinedRequestAfterApplicationCloseAnswers503() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var executor = executor();
+        var app = Axiom.create();
+        try {
+            app.get("/", ctx -> { entered.countDown(); release.await(); return "first"; });
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            try {
+                request(channel);
+                request(channel);
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                app.close();
+                release.countDown();
+                assertResponses(channel, 200, 503);
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            app.close();
+            release.countDown();
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void dispatchFailureFromWriteListenerAnswers503() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var failing = new java.util.concurrent.atomic.AtomicBoolean();
+        var executor = executor();
+        try (var real = Axiom.create()) {
+            real.get("/", ctx -> { entered.countDown(); release.await(); return "first"; });
+            real.start();
+            var app = failingAfter(real, failing);
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            try {
+                request(channel);
+                request(channel);
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                failing.set(true);
+                release.countDown();
+                assertResponses(channel, 200, 503);
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            release.countDown();
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void assertResponses(EmbeddedChannel channel, int first, int second) throws InterruptedException {
+        FullHttpResponse response = awaitResponse(channel);
+        try { assertThat(response.status().code()).isEqualTo(first); } finally { response.release(); }
+        response = awaitResponse(channel);
+        try {
+            assertThat(response.status().code()).isEqualTo(second);
+            assertThat(response.headers().get("Connection")).isEqualTo("close");
+        } finally { response.release(); }
+        assertThat(channel.isActive()).isFalse();
+    }
+
+    /** Delegates to a running application, but every lifecycle query fails once {@code failing} is set. */
+    private static io.axiom.application.Application failingAfter(io.axiom.application.Application app,
+            java.util.concurrent.atomic.AtomicBoolean failing) {
+        return (io.axiom.application.Application) java.lang.reflect.Proxy.newProxyInstance(
+                HttpConnectionTest.class.getClassLoader(), new Class<?>[] {io.axiom.application.Application.class},
+                (proxy, method, args) -> {
+                    if (failing.get() && !method.getName().equals("requestTimeout")) {
+                        throw new IllegalStateException("broken application");
+                    }
+                    try { return method.invoke(app, args); }
+                    catch (java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                });
+    }
+
     /** Runs tasks posted from handler threads until a response is written; bounded by the handler's progress. */
     private static <T> T awaitResponse(EmbeddedChannel channel) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

@@ -157,6 +157,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         var exchange = pending.removeFirst();
         if (exchange.execution().isExpired()) { send(ctx, exchange, error(504)); return; }
         try {
+            // A closed application or dispatcher cannot run the request; answer instead of
+            // leaving the connection busy. This also runs from a write listener, where an
+            // escaping exception would be swallowed.
+            if (application.state() != Application.State.RUNNING) { throw new RejectedExecutionException("Application closed"); }
             var route = application.resolve(exchange.request());
             var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
             active = executor.submit(route.<Object>map(value -> value).orElse(UNMATCHED),
@@ -186,8 +190,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                     });
                 } catch (RejectedExecutionException stopped) { /* Channel shutdown owns cleanup. */ }
             });
-        } catch (RejectedExecutionException overloaded) {
-            active = null;
+        } catch (RuntimeException unavailable) {
+            if (!(unavailable instanceof RejectedExecutionException)) {
+                LOG.log(System.Logger.Level.WARNING,
+                        "HTTP request " + exchange.execution().requestId() + " could not be dispatched", unavailable);
+            }
+            if (active != null) { active.cancel(); active = null; }
             send(ctx, exchange, error(503));
         }
     }
