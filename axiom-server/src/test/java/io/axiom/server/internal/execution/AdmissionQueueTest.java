@@ -254,6 +254,26 @@ class AdmissionQueueTest {
         }
     }
 
+    @Test void stopAdmissionFailsQueuedWorkAndLetsActiveWorkFinish() {
+        try (var f = new Fixture(policy(1, 2))) {
+            var ran = new AtomicBoolean();
+            var active = f.dispatcher.submit(context(), () -> "active");
+            var queued = f.dispatcher.submit(context(), () -> { ran.set(true); return null; });
+            f.dispatcher.stopAdmission();
+            assertThat(f.dispatcher.snapshot().queued()).isZero();
+            assertThatThrownBy(() -> queued.result().toCompletableFuture().join())
+                    .hasCauseInstanceOf(RequestDispatcher.DispatchRejectedException.class);
+            assertThatThrownBy(() -> f.dispatcher.submit(context(), () -> null))
+                    .isInstanceOf(RejectedExecutionException.class);
+            assertThat(f.dispatcher.snapshot().rejected()).isEqualTo(1);
+            f.workers.run(0);
+            assertThat(active.result().toCompletableFuture().join()).isEqualTo("active");
+            assertThat(f.dispatcher.snapshot().active()).isZero();
+            assertThat(f.workers.tasks).isEmpty();
+            assertThat(ran).isFalse();
+        }
+    }
+
     @Test void ignoredInterruptCannotPromoteQueuedWorkPrematurely() throws Exception {
         var entered = new CountDownLatch(1);
         var interrupted = new CountDownLatch(1);

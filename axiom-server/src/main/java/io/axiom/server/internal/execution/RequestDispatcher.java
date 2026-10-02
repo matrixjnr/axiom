@@ -42,6 +42,7 @@ public final class RequestDispatcher implements AutoCloseable {
     private long accepted;
     private long rejected;
     private long queueTimeouts;
+    private boolean stopping;
     private boolean closed;
 
     /**
@@ -110,7 +111,7 @@ public final class RequestDispatcher implements AutoCloseable {
         Task<T> task;
         Throwable submissionFailure = null;
         synchronized (this) {
-            if (closed) { rejected++; throw new RejectedExecutionException("Dispatcher closed"); }
+            if (closed || stopping) { rejected++; throw new RejectedExecutionException("Dispatcher closed"); }
             var bucket = buckets.get(key);
             if (bucket != null && !bucket.policy.equals(endpointPolicy)) {
                 // A caller bug, not overload: reported as IllegalArgumentException and not counted as rejected.
@@ -167,6 +168,26 @@ public final class RequestDispatcher implements AutoCloseable {
      * @return completion after executors stop
      */
     public CompletionStage<Void> termination() { return stopped.minimalCompletionStage(); }
+
+    /**
+     * Stops admission without interrupting running work, for a graceful drain. Later submissions are
+     * rejected and queued work fails with {@link DispatchRejectedException}, so it is never promoted.
+     * Active work keeps its capacity until it exits or {@link #close()} cancels it.
+     */
+    public void stopAdmission() {
+        var signals = new ArrayList<Runnable>();
+        synchronized (this) {
+            if (closed || stopping) { return; }
+            stopping = true;
+            for (var task : List.copyOf(tasks)) {
+                if (task.waiting) {
+                    finish(task, null, new DispatchRejectedException(
+                            new RejectedExecutionException("Dispatcher stopping")), false, signals);
+                }
+            }
+        }
+        publish(signals);
+    }
 
     /** Stops admission, cancels active and queued work, and asynchronously joins owned executors. */
     @Override public void close() {
@@ -276,7 +297,7 @@ public final class RequestDispatcher implements AutoCloseable {
         // Oldest eligible request wins. Only the head of each endpoint FIFO is a candidate, and
         // endpoints at their own limit are skipped, so cost is bounded by queued endpoints
         // rather than queued requests, and a blocked endpoint does not hold up unrelated work.
-        while (!closed && active < policy.maxActive()) {
+        while (!closed && !stopping && active < policy.maxActive()) {
             Task<?> head = null;
             for (var bucket : queuedBuckets) {
                 if (bucket.active >= bucket.policy.maxActive()) { continue; }
@@ -311,7 +332,7 @@ public final class RequestDispatcher implements AutoCloseable {
         private DeadlineExceededException() { super("Request deadline exceeded"); }
     }
 
-    /** Executor or scheduler rejected framework-owned submission. */
+    /** Executor or scheduler rejected framework-owned submission, or admission stopped while it waited. */
     public static final class DispatchRejectedException extends RejectedExecutionException {
         private static final long serialVersionUID = 1L;
         private DispatchRejectedException(Throwable cause) { super("Request submission rejected", cause); }

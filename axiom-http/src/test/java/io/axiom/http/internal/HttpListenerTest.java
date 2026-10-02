@@ -121,11 +121,62 @@ class HttpListenerTest {
         }
     }
 
-    @Test void rejectsExpectationAndOldProtocolAndExcessiveHeaders() throws Exception {
+    @Test void everyResponseCarriesAnHttpDate() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/", ctx -> "ok");
+            var server = fixture.listen();
+            var before = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+            try (var wire = new Wire(server)) {
+                assertDate(wire.get("/"), before);
+                assertDate(wire.get("/missing"), before);
+            }
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.1\r\n\r\n");
+                assertDate(wire.read(false), before);
+            }
+        }
+    }
+
+    private static void assertDate(Reply reply, java.time.Instant notBefore) {
+        var date = java.time.ZonedDateTime.parse(reply.headers().get("Date"),
+                java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+        assertThat(date).isBetween(notBefore, java.time.Instant.now());
+        assertThat(reply.headers().get("Date")).endsWith(" GMT");
+    }
+
+    @Test void servesHttp10WithHttp11ResponsesAndClosesUnlessKeptAlive() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/", ctx -> "old");
+            var server = fixture.listen();
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.0\r\n\r\n");
+                var response = wire.read(false);
+                assertThat(response.status()).isEqualTo(200);
+                assertThat(response.text()).isEqualTo("old");
+                assertThat(response.headers()).containsEntry("connection", "close");
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            }
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.0\r\nHost: a\r\nConnection: keep-alive\r\n\r\n");
+                var response = wire.read(false);
+                assertThat(response.headers()).containsEntry("connection", "keep-alive");
+                wire.write("GET / HTTP/1.0\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).text()).isEqualTo("old");
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            }
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.0\r\nHost: a/b\r\n\r\n");
+                assertThat(wire.read(false).status()).isEqualTo(400);
+            }
+        }
+    }
+
+    @Test void rejectsExpectationAndUnknownProtocolAndExcessiveHeaders() throws Exception {
         try (var fixture = new Fixture()) {
             var server = fixture.listen();
             for (var entry : Map.of(
-                    "GET / HTTP/1.0\r\n\r\n", 505,
+                    "GET / HTTP/1.2\r\nHost: a\r\n\r\n", 505,
+                    "GET / HTTP/2.0\r\nHost: a\r\n\r\n", 505,
                     "CONNECT localhost:443 HTTP/1.1\r\nHost: localhost\r\n\r\n", 501,
                     "POST / HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\n\r\n", 417,
                     "GET / HTTP/1.1\r\nHost: a\r\nX-Large: " + "x".repeat(9000) + "\r\n\r\n", 400
@@ -184,11 +235,124 @@ class HttpListenerTest {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 fixture.app.close();
-                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
-                second.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                // The handler ignores the drain, so it is interrupted once the grace period ends.
+                long grace = NettyServer.SHUTDOWN_GRACE.toSeconds();
+                assertThat(interrupted.await(grace + 5, TimeUnit.SECONDS)).isTrue();
+                second.termination().toCompletableFuture().get(grace + 5, TimeUnit.SECONDS);
                 assertThat(second.isOpen()).isFalse();
             }
             assertThatThrownBy(() -> fixture.app.listen(0)).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test void closeLetsInFlightRequestFinishAndClosesIdleConnections() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/", ctx -> {
+                entered.countDown();
+                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                return "finished";
+            });
+            var server = fixture.listen();
+            try (var busy = new Wire(server); var idle = new Wire(server)) {
+                assertThat(idle.get("/missing").status()).isEqualTo(404);
+                busy.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                server.close();
+                assertThat(server.isOpen()).isFalse();
+                assertThat(idle.socket.getInputStream().read()).isEqualTo(-1);
+                assertThat(server.termination().toCompletableFuture()).isNotDone();
+                release.countDown();
+                var response = busy.read(false);
+                assertThat(response.status()).isEqualTo(200);
+                assertThat(response.text()).isEqualTo("finished");
+                assertThat(response.headers()).containsEntry("connection", "close");
+                assertThat(busy.socket.getInputStream().read()).isEqualTo(-1);
+                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                assertThatThrownBy(() -> new Wire(server)).isInstanceOf(IOException.class);
+            } finally { release.countDown(); }
+        }
+    }
+
+    @Test void closeAnswersQueuedRequestsWithoutPromotingThem() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.admissionPolicy(new io.axiom.execution.AdmissionPolicy(1, 1, java.time.Duration.ofSeconds(30)));
+            fixture.app.get("/", ctx -> {
+                calls.incrementAndGet();
+                entered.countDown();
+                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                return "finished";
+            });
+            var server = fixture.listen();
+            try (var running = new Wire(server); var waiting = new Wire(server)) {
+                running.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                waiting.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (server.admission().queued() == 0) {
+                    assertThat(System.nanoTime()).isLessThan(deadline);
+                    Thread.onSpinWait();
+                }
+                server.close();
+                var rejected = waiting.read(false);
+                assertThat(rejected.status()).isEqualTo(503);
+                assertThat(rejected.headers()).containsEntry("connection", "close");
+                assertThat(waiting.socket.getInputStream().read()).isEqualTo(-1);
+                release.countDown();
+                var response = running.read(false);
+                assertThat(response.status()).isEqualTo(200);
+                assertThat(response.headers()).containsEntry("connection", "close");
+                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                assertThat(calls).hasValue(1);
+            } finally { release.countDown(); }
+        }
+    }
+
+    @Test void closeInterruptsHandlersThatOutliveTheGracePeriod() throws Exception {
+        var entered = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> {
+                entered.countDown();
+                try { new CountDownLatch(1).await(); }
+                catch (InterruptedException expected) { interrupted.countDown(); Thread.currentThread().interrupt(); }
+                return "late";
+            });
+            app.start();
+            var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                    java.time.Duration.ofMillis(100));
+            try (var wire = new Wire(server)) {
+                wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                server.close();
+                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            } finally { server.close(); }
+        }
+    }
+
+    @Test void clientDisconnectInterruptsRunningHandler() throws Exception {
+        var entered = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.requestTimeout(java.time.Duration.ofHours(1));
+            fixture.app.get("/", ctx -> {
+                entered.countDown();
+                try { new CountDownLatch(1).await(); }
+                catch (InterruptedException expected) { interrupted.countDown(); Thread.currentThread().interrupt(); }
+                return "abandoned";
+            });
+            var server = fixture.listen();
+            var wire = new Wire(server);
+            wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            wire.close();
+            assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
         }
     }
 

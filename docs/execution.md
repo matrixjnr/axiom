@@ -46,9 +46,11 @@ Application-thrown timeout exceptions remain application failures (500).
 Completion and timeout compete for one terminal outcome. Completion checks the
 monotonic deadline even if the timer thread is delayed. The budget ends when the
 prepared response wins completion; it does not bound subsequent socket writes.
-The existing 30-second network inactivity timeout also applies and can close a
-connection earlier than a longer configured execution budget. Header receipt,
-body upload and slow response delivery do not have absolute deadlines yet.
+The 30-second network inactivity timeout does not close a connection while its
+request waits for admission or runs; the queue wait and this budget bound it
+instead. It still closes idle connections and stalled response writes. A request
+head must complete within ten seconds of its first byte. Body upload and slow
+response delivery do not have absolute deadlines yet.
 
 ## Capacity and cancellation
 
@@ -65,10 +67,10 @@ or cancelled. A handler that ignores interruption continues occupying capacity;
 its late value is discarded. A timeout cannot roll back application side effects
 or stop tasks the application launches independently.
 
-Closing a connection cancels its active execution. Reads remain paused while a
-response is outstanding, so a remote disconnect may only be observed when reads
-resume or the inactivity timer closes the channel. Closing a listener stops
-admission, cancels all its executions and timers, and closes connections.
+Closing a connection cancels its active execution. Reads continue while a
+handler runs, so a remote disconnect cancels it promptly. Closing a listener stops
+admission and fails waiting requests with 503, lets active executions finish
+within a grace period, then cancels what remains and closes connections.
 `Server.termination()` completes after its executors and transport stop. Close is
 idempotent and nonblocking, including inside a handler; termination may wait
 indefinitely for code that refuses interruption.

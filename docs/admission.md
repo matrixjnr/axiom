@@ -62,7 +62,8 @@ Application-thrown rejection or timeout exceptions remain 500 application failur
 The per-connection pipeline buffer is separate: only its front request is eligible
 for admission. Pipeline order and the eight-request connection bound still apply.
 The 128-connection limit can cap useful HTTP admission capacity below configured
-values. Queued responses remain subject to the network inactivity timeout.
+values. The network inactivity timeout does not close a connection whose request
+is waiting; the queue wait and execution deadline bound it instead.
 
 ## Ownership and shutdown
 
@@ -72,10 +73,12 @@ active capacity until the request action exits. Code that ignores interruption
 cannot cause a queued request to be promoted early. Cancelled or timed-out
 requests have one terminal outcome; late handler results are discarded.
 
-Closing a listener stops admission and cancels both waiting and active requests.
-Shutdown never promotes waiting work. Listener termination still waits for active
-code to exit. See [execution and deadlines](execution.md) for interruption and
-remote disconnect limitations.
+Closing a listener stops admission at once: new requests are rejected and waiting
+requests are answered 503 and their connections closed; the handler is never
+invoked. Shutdown never promotes waiting work. Active requests get the listener's
+drain grace period (see [HTTP listeners](http.md)), after which they are cancelled.
+Listener termination still waits for active code to exit. See
+[execution and deadlines](execution.md) for interruption.
 
 ## Observation
 
