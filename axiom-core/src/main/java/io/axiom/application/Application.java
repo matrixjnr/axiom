@@ -246,8 +246,10 @@ public interface Application extends AutoCloseable {
 
     /**
      * Permanently rejects new requests. Already accepted requests may finish.
-     * Idempotent and nonblocking. Owned listeners close connections and interrupt network handlers.
-     * In-memory handlers are not interrupted. Await each listener's termination to join shutdown.
+     * Idempotent and nonblocking. Each owned listener starts the graceful drain described by
+     * {@link Server#close()}: queued requests are answered 503, running network handlers get a
+     * grace period before they are interrupted. In-memory handlers are not interrupted.
+     * Await each listener's termination to join shutdown.
      */
     @Override
     void close();
