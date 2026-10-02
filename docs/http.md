@@ -69,6 +69,9 @@ headers to 8 KiB; larger responses produce 500. Application allocations before
 returning a response are outside these limits. Idle keep-alive connections close
 after 30 seconds without network read/write activity. A running handler is not
 interrupted by inactivity; its execution deadline bounds it instead.
+A request head must arrive within ten seconds of its first byte; otherwise the
+listener answers 408 Request Timeout and closes (or just closes when an earlier
+pipelined response is outstanding). Trickling bytes does not extend the bound.
 
 The default execution deadline is ten seconds, configurable before startup through
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.

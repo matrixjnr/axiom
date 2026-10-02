@@ -132,6 +132,75 @@ class HttpConnectionTest {
         }
     }
 
+    @Test void incompleteRequestHeadTimesOutWith408EvenWhenBytesTrickle() {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> "ok");
+            app.start();
+            var timeout = Duration.ofSeconds(10);
+            var channel = wireChannel(app, executor, timeout);
+            try {
+                channel.writeInbound(ascii("GET / HTTP/1.1\r\n"));
+                for (int i = 0; i < 9; i++) {
+                    channel.advanceTimeBy(1, TimeUnit.SECONDS);
+                    channel.runScheduledPendingTasks();
+                    channel.writeInbound(ascii("X"));
+                    assertThat(channel.isActive()).isTrue();
+                }
+                channel.advanceTimeBy(1, TimeUnit.SECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(outbound(channel)).startsWith("HTTP/1.1 408 Request Timeout");
+                assertThat(channel.isActive()).isFalse();
+            } finally { channel.finishAndReleaseAll(); }
+        } finally { executor.close(); }
+    }
+
+    @Test void completedRequestHeadCancelsTheReadDeadline() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> "ok");
+            app.start();
+            var channel = wireChannel(app, executor, Duration.ofSeconds(10));
+            try {
+                channel.writeInbound(ascii("GET / HTTP/1.1\r\nHost: a\r\n\r\n"));
+                assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK");
+                channel.advanceTimeBy(1, TimeUnit.MINUTES);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                assertThat(channel.<Object>readOutbound()).isNull();
+            } finally { channel.finishAndReleaseAll(); }
+        } finally { executor.close(); }
+    }
+
+    private static EmbeddedChannel wireChannel(io.axiom.application.Application app, RequestDispatcher executor,
+            Duration headTimeout) {
+        var channel = new EmbeddedChannel();
+        channel.freezeTime();
+        channel.pipeline().addLast(new HttpConnection.RequestBytes(),
+                new io.netty.handler.codec.http.HttpServerCodec(),
+                new HttpConnection(app, executor, headTimeout));
+        return channel;
+    }
+
+    private static io.netty.buffer.ByteBuf ascii(String text) {
+        return io.netty.buffer.Unpooled.copiedBuffer(text, java.nio.charset.StandardCharsets.US_ASCII);
+    }
+
+    private static String outbound(EmbeddedChannel channel) {
+        var text = new StringBuilder();
+        for (io.netty.buffer.ByteBuf buffer; (buffer = channel.readOutbound()) != null;) {
+            text.append(buffer.toString(java.nio.charset.StandardCharsets.US_ASCII));
+            buffer.release();
+        }
+        return text.toString();
+    }
+
+    private static String awaitOutbound(EmbeddedChannel channel) throws InterruptedException {
+        io.netty.buffer.ByteBuf first = awaitResponse(channel);
+        try { return first.toString(java.nio.charset.StandardCharsets.US_ASCII) + outbound(channel); }
+        finally { first.release(); }
+    }
+
     /** Runs tasks posted from handler threads until a response is written; bounded by the handler's progress. */
     private static <T> T awaitResponse(EmbeddedChannel channel) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

@@ -8,7 +8,9 @@ import io.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededExce
 import io.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
 import io.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
 import io.axiom.server.internal.execution.RequestDispatcher;
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
@@ -23,6 +25,9 @@ import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.timeout.IdleStateEvent;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.Locale;
@@ -34,6 +39,8 @@ import java.util.concurrent.RejectedExecutionException;
 final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static final System.Logger LOG = System.getLogger(HttpConnection.class.getName());
     private static final Object UNMATCHED = new Object();
+    /** Bound from a request's first byte until its head is complete; a slower client receives 408. */
+    static final Duration REQUEST_HEAD_TIMEOUT = Duration.ofSeconds(10);
     private static final int MAX_RESPONSE = 1024 * 1024;
     /** Outstanding requests per connection, including the active one; more closes the connection. */
     static final int MAX_PIPELINED = 8;
@@ -41,6 +48,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
     private final RequestDispatcher executor;
+    private final long headTimeoutNanos;
     private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
     private Exchange receiving;
     private boolean busy;
@@ -48,10 +56,40 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private boolean draining;
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
+    private ScheduledFuture<?> headTimer;
 
     HttpConnection(Application application, RequestDispatcher executor) {
+        this(application, executor, REQUEST_HEAD_TIMEOUT);
+    }
+
+    HttpConnection(Application application, RequestDispatcher executor, Duration headTimeout) {
         this.application = application;
         this.executor = executor;
+        this.headTimeoutNanos = headTimeout.toNanos();
+    }
+
+    /**
+     * Placed before the HTTP codec; signals raw request bytes so a request's read deadline starts at
+     * its first byte rather than when its headers are complete.
+     */
+    static final class RequestBytes extends ChannelInboundHandlerAdapter {
+        static final Object EVENT = new Object();
+        @Override public void channelRead(ChannelHandlerContext ctx, Object message) {
+            if (message instanceof ByteBuf buffer && buffer.isReadable()) { ctx.fireUserEventTriggered(EVENT); }
+            ctx.fireChannelRead(message);
+        }
+    }
+
+    private void requestBytes(ChannelHandlerContext ctx) {
+        if (closing || headTimer != null) { return; }
+        headTimer = ctx.executor().schedule(() -> {
+            headTimer = null;
+            if (!closing) { fail(ctx, 408); }
+        }, headTimeoutNanos, TimeUnit.NANOSECONDS);
+    }
+
+    private void requestComplete() {
+        if (headTimer != null) { headTimer.cancel(false); headTimer = null; }
     }
 
     @Override public void handlerAdded(ChannelHandlerContext ctx) { context = ctx; }
@@ -91,6 +129,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             if (receiving == null || content.content().isReadable()) { fail(ctx, 400); return; }
             if (message instanceof LastHttpContent) {
                 if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { abort(ctx); return; }
+                requestComplete();
                 pending.addLast(receiving);
                 receiving = null;
                 dispatch(ctx);
@@ -226,6 +265,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override public void channelInactive(ChannelHandlerContext ctx) {
         closing = true;
+        requestComplete();
         receiving = null;
         pending.clear();
         if (active != null) { active.cancel(); active = null; }
@@ -233,7 +273,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
         // Idle means no exchange is in progress; a running handler is bounded by its own deadline.
-        if (event instanceof IdleStateEvent) { if (!busy) { abort(ctx); } }
+        if (event == RequestBytes.EVENT) { requestBytes(ctx); }
+        else if (event instanceof IdleStateEvent) { if (!busy) { abort(ctx); } }
         else { super.userEventTriggered(ctx, event); }
     }
 

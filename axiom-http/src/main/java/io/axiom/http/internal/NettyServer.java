@@ -74,7 +74,7 @@ final class NettyServer implements Server {
                                     .setMaxHeaderSize(8192).setMaxChunkSize(8192)
                                     .setValidateHeaders(true).setAllowDuplicateContentLengths(false)
                                     .setStrictLineParsing(true).setUseRfc9112TransferEncoding(true);
-                            channel.pipeline().addLast(new IdleStateHandler(0, 0, 30),
+                            channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new HttpConnection.RequestBytes(),
                                     new HttpServerCodec(config), new HttpConnection(application, server.handlers));
                         }
                     });
