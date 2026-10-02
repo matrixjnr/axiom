@@ -18,24 +18,34 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.ServiceLoader;
 import java.util.concurrent.TimeoutException;
 
 final class DefaultApplication implements Application {
+    /**
+     * Immutable configuration published at startup. The request path reads it through one
+     * volatile field and takes no lock; {@code router} is null once the application closes.
+     */
+    private record Runtime(CompiledRouter router, List<Route> routes, Set<Route> routeSet,
+                           Map<Route, AdmissionPolicy> routePolicies, AdmissionPolicy defaultPolicy) {
+        Runtime withoutRouter() { return new Runtime(null, routes, routeSet, routePolicies, defaultPolicy); }
+    }
+
+    // Configuration state; guarded by this until startup publishes a runtime snapshot.
     private final Map<Route, Handler> registrations = new LinkedHashMap<>();
-    private CompiledRouter router;
-    private AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
-    private List<Route> frozenRoutes = List.of();
-    private java.util.Set<Route> frozenRouteSet = java.util.Set.of();
+    private final List<Server> listeners = new ArrayList<>();
+    private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
     private volatile State state = State.CONFIGURING;
-    private final List<Server> listeners = new ArrayList<>();
+    private volatile Runtime runtime;
 
     @Override
-    public synchronized Server listen(InetSocketAddress address) throws IOException {
+    public Server listen(InetSocketAddress address) throws IOException {
         Objects.requireNonNull(address, "address");
         if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+        // Provider discovery and binding can block; neither runs under the lifecycle lock.
         var providers = ServiceLoader.load(HttpTransportProvider.class).iterator();
         if (!providers.hasNext()) {
             throw new IllegalStateException("No HTTP transport provider; add axiom-http");
@@ -44,9 +54,16 @@ final class DefaultApplication implements Application {
         if (providers.hasNext()) { throw new IllegalStateException("Multiple HTTP transport providers"); }
         start();
         var server = provider.bind(this, address);
-        listeners.removeIf(listener -> listener.termination().toCompletableFuture().isDone());
-        listeners.add(server);
-        return server;
+        synchronized (this) {
+            if (state != State.CLOSED) {
+                listeners.removeIf(listener -> listener.termination().toCompletableFuture().isDone());
+                listeners.add(server);
+                return server;
+            }
+        }
+        // The application closed while binding; it must not leave an unowned listener behind.
+        server.close();
+        throw new IllegalStateException("Application closed while the listener was binding");
     }
 
     @Override
@@ -61,8 +78,12 @@ final class DefaultApplication implements Application {
     }
 
     @Override
-    public synchronized List<Route> routes() {
-        return state == State.CONFIGURING ? List.copyOf(registrations.keySet()) : frozenRoutes;
+    public List<Route> routes() {
+        var published = runtime;
+        if (published != null) { return published.routes(); }
+        synchronized (this) {
+            return runtime != null ? runtime.routes() : List.copyOf(registrations.keySet());
+        }
     }
 
     @Override
@@ -71,12 +92,16 @@ final class DefaultApplication implements Application {
             return this;
         }
         requireState(State.CONFIGURING);
-        router = CompiledRouter.compile(registrations);
-        frozenRoutes = List.copyOf(registrations.keySet());
-        frozenRouteSet = java.util.Set.copyOf(frozenRoutes);
+        var router = CompiledRouter.compile(registrations);
+        runtime = snapshot(router);
         registrations.clear();
         state = State.RUNNING;
         return this;
+    }
+
+    private Runtime snapshot(CompiledRouter router) {
+        var routes = List.copyOf(registrations.keySet());
+        return new Runtime(router, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy);
     }
 
     @Override
@@ -99,50 +124,60 @@ final class DefaultApplication implements Application {
         return this;
     }
 
-    @Override public synchronized AdmissionPolicy admissionPolicy() { return admissionPolicy; }
+    @Override public AdmissionPolicy admissionPolicy() { return admissionPolicy; }
 
     @Override public synchronized Application admissionPolicy(Route route, AdmissionPolicy policy) {
         requireState(State.CONFIGURING);
-        requireRegistered(route);
+        Objects.requireNonNull(route, "route");
+        if (!registrations.containsKey(route)) { throw notRegistered(route); }
         routePolicies.put(route, Objects.requireNonNull(policy, "policy"));
         return this;
     }
 
-    @Override public synchronized AdmissionPolicy admissionPolicy(Route route) {
-        requireRegistered(route);
-        return routePolicies.getOrDefault(route, admissionPolicy);
+    @Override public AdmissionPolicy admissionPolicy(Route route) {
+        Objects.requireNonNull(route, "route");
+        var published = runtime;
+        if (published == null) {
+            synchronized (this) {
+                published = runtime;
+                if (published == null) {
+                    if (!registrations.containsKey(route)) { throw notRegistered(route); }
+                    return routePolicies.getOrDefault(route, admissionPolicy);
+                }
+            }
+        }
+        if (!published.routeSet().contains(route)) { throw notRegistered(route); }
+        return published.routePolicies().getOrDefault(route, published.defaultPolicy());
     }
 
     @Override public Optional<Route> resolve(Request request) {
         Objects.requireNonNull(request, "request");
-        CompiledRouter acceptedRouter;
-        synchronized (this) {
-            requireState(State.RUNNING);
-            acceptedRouter = router;
-        }
-        var match = acceptedRouter.match(request);
+        var match = acceptingRouter().match(request);
         return match == null || !match.methodAllowed() ? Optional.empty() : Optional.of(match.route());
     }
 
-    private void requireRegistered(Route route) {
-        Objects.requireNonNull(route, "route");
-        if (!(state == State.CONFIGURING ? registrations.containsKey(route) : frozenRouteSet.contains(route))) {
-            throw new IllegalArgumentException("Route is not registered: " + route);
+    private static IllegalArgumentException notRegistered(Route route) {
+        return new IllegalArgumentException("Route is not registered: " + route);
+    }
+
+    /** Admission check for the request path: reads the published snapshot without locking. */
+    private CompiledRouter acceptingRouter() {
+        var published = runtime;
+        var router = published == null ? null : published.router();
+        if (router == null) {
+            throw new IllegalStateException("Expected application state RUNNING but was " + state);
         }
+        return router;
     }
 
     @Override
     public Response handle(Request request, ExecutionContext execution) throws Exception {
         Objects.requireNonNull(execution, "execution");
         Objects.requireNonNull(request, "request");
-        CompiledRouter acceptedRouter;
-        synchronized (this) {
-            requireState(State.RUNNING);
-            // Admission ends here. Never hold the lifecycle lock while invoking user code.
-            acceptedRouter = router;
-        }
+        // Admission ends here. User code never runs under the lifecycle lock.
+        var router = acceptingRouter();
         if (execution.isExpired()) { throw new TimeoutException("Request deadline exceeded"); }
-        var match = acceptedRouter.match(request);
+        var match = router.match(request);
         Response response;
         if (match == null) {
             response = Response.of(404, "Not Found");
@@ -166,13 +201,10 @@ final class DefaultApplication implements Application {
     public void close() {
         List<Server> owned;
         synchronized (this) {
-            if (state == State.CONFIGURING) {
-                frozenRoutes = List.copyOf(registrations.keySet());
-                frozenRouteSet = java.util.Set.copyOf(frozenRoutes);
-            }
+            runtime = runtime == null ? snapshot(null) : runtime.withoutRouter();
             state = State.CLOSED;
             registrations.clear();
-            router = null;
+            routePolicies.clear();
             owned = List.copyOf(listeners);
             listeners.clear();
         }

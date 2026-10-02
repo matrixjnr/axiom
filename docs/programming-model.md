@@ -53,8 +53,12 @@ are not part of `Request.path()`. See [routing rules](routing.md) for edge cases
 - `close()` enters `CLOSED` permanently, releases registered handler references,
   and rejects new requests. It is safe to call repeatedly or before startup.
 
-Registration, startup, and shutdown are serialized. Request acceptance occurs
-under the lifecycle lock, which is released before invoking application code.
+Registration, startup, and shutdown are serialized by a lifecycle lock. Startup
+publishes one immutable snapshot of the router, frozen routes, and admission
+policies; request acceptance, `resolve`, and `admissionPolicy(route)` read it
+without taking the lock. `listen` discovers the transport and binds outside the
+lock; if the application closes meanwhile, the new listener is closed and `listen`
+throws `IllegalStateException`.
 Handlers can run concurrently and each invocation receives a fresh context.
 Shared business objects must provide their own thread safety.
 
