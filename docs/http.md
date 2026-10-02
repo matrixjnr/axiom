@@ -56,24 +56,25 @@ closes to avoid sending an error ahead of an earlier pipelined response.
 
 Each listener owns one acceptor thread, one I/O thread per available processor
 (at least two), a deadline scheduler and a dispatcher that defaults to 36 active
-virtual-thread tasks with no waiting queue.
-Aggregate and route limits are configurable through `app.admissionPolicy(...)`;
-see [admission and bounded queues](admission.md).
-User handlers never execute on I/O threads. Full execution capacity produces 503
-and closes that connection. So does any failure to start a request, including a
-pipelined request reached after the application has closed. Connections are
-limited to 128; additional connections close immediately without consuming a
-slot. The listening socket requests a 1024-entry accept backlog and sets
-SO_REUSEADDR so a restart can rebind while old connections linger in TIME_WAIT.
-Connections use TCP_NODELAY and a 32/128 KiB write-buffer water mark. A connection holds at
-most eight outstanding requests. Pipeline overflow closes the connection.
+virtual-thread tasks with no waiting queue. Aggregate and route limits are
+configurable through `app.admissionPolicy(...)`; see
+[admission and bounded queues](admission.md). User handlers never execute on I/O
+threads. Full execution capacity with no free queue slot, or an expired queue
+wait, produces 503 and closes that connection. So does any other failure to start
+a request, including a pipelined request reached after the application has
+closed. Connections are limited to 128; additional connections close immediately
+without consuming a slot. The listening socket requests a 1024-entry accept
+backlog and sets SO_REUSEADDR so a restart can rebind while old connections
+linger in TIME_WAIT. Connections use TCP_NODELAY and a 32/128 KiB write-buffer
+water mark. A connection holds at most eight outstanding requests. Pipeline
+overflow closes the connection.
 
 Reads continue while a handler runs, so a client disconnect (including a
 half-close after sending the request) cancels and interrupts the active handler
 and drops queued requests. Pipelined requests are buffered only up to the
 eight-request bound above; the next queued handler starts after the previous
-write completes. The decoder limits request lines to 4 KiB and
-headers to 8 KiB. Response bodies are limited to 1 MiB after encoding and response
+write completes. The decoder limits request lines to 4 KiB and headers to 8 KiB.
+Response bodies are limited to 1 MiB after encoding and response
 headers to 8 KiB; larger responses produce 500. Application allocations before
 returning a response are outside these limits. Connections close after 30 seconds
 without network read/write activity, including idle keep-alive connections and a
