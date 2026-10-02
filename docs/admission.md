@@ -32,7 +32,8 @@ smaller of the aggregate and route queue timeouts.
 
 **Limits apply independently to each listener**, including listeners sharing one
 application. They are not a budget shared across listeners, processes or hosts.
-Direct `handle` calls and `TestClient` remain synchronous and bypass admission.
+Direct `handle` calls remain synchronous and bypass admission. `TestClient` applies
+the policies through its own dispatcher.
 `app.resolve(request)` exposes the compiled route identity for adapters; it
 requires a running application and returns empty for 404/405. Those requests
 share a default bucket and still consume aggregate capacity when dispatched.

@@ -75,8 +75,11 @@ indefinitely for code that refuses interruption.
 
 ## Synchronous execution
 
-`app.handle(request)` and `TestClient` still execute on the calling thread and
-propagate handler exceptions. Each direct invocation gets fresh metadata using
+`app.handle(request)` still executes on the calling thread and propagates handler
+exceptions. `TestClient` instead runs each request through a private dispatcher
+(virtual thread, application admission policy and timeout), returns 503/504
+responses for admission and deadline failures, and still propagates handler
+exceptions. Each direct invocation gets fresh metadata using
 the configured budget. The adapter overload `handle(request, execution)` accepts
 explicit metadata and rejects an already expired context with `TimeoutException`.
 These synchronous paths do not schedule cancellation or interrupt caller-owned
