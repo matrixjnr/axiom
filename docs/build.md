@@ -14,8 +14,21 @@ type appears in an Axiom API, and applications add `axiom-json` with `runtimeOnl
 The 2.x line was chosen because its package names and exceptions are stable across
 the ecosystem; moving to Jackson 3 would only change `axiom-json` internals.
 Telemetry dependencies will be selected when their implementations land.
-JPMS and stress suites are later work. The BOM constrains all six published libraries
-(core, server, http, json, test and the starter).
+JPMS and stress suites are later work. The BOM constrains all eight published libraries
+(core, server, http, json, test, the starter, validation and validation-jakarta).
+
+Validation uses Hibernate Validator 9.1 (the Jakarta Validation 3.1 reference
+implementation, actively maintained, Java 17+, with container-element constraints and
+validation of record components) and `jakarta.validation-api` 3.1, both as `implementation`
+dependencies of `axiom-validation-jakarta` only. Applications declare
+`jakarta.validation-api` themselves to annotate their types; no Jakarta or Hibernate
+type appears in an Axiom API. Expression Language (`jakarta.el`) is deliberately not
+a dependency: the adapter never interpolates messages (see [validation](validation.md)).
+Hibernate Validator brings `jboss-logging` and `classmate` transitively. The
+annotation-free `axiom-validation` module has no external dependencies. Both
+validation modules are published and constrained by the BOM, but the starter does not
+include them: validation is opt-in, so an application adds `axiom-validation` (or
+`axiom-validation-jakarta`, which brings it) next to the starter.
 
 Module checks enforce dependency direction across production, annotation processor
 and test configurations, fail with a clear message for modules missing from the
@@ -25,6 +38,10 @@ module that adapts them: Netty (`io.netty`) to `axiom-http`, Jackson
 client may not depend on `axiom-json`; tests send raw bodies. Public signature tests scan the exported core and test-client
 classes, including generic types, to reject implementation and third-party types.
 These run as part of `check` alongside behavior and lifecycle tests.
+Jakarta Validation and Hibernate Validator (`jakarta.validation`, `org.hibernate.validator`)
+are confined to `axiom-validation-jakarta`, which depends on `axiom-validation`, which
+depends on core only. Both validation modules may use `axiom-test` in test configurations
+only, for end-to-end tests; a signature test keeps provider types out of their public API.
 
 Core discovers the default runtime through a JDK service provider. HTTP and test
 client consumers receive core through `api`. HTTP uses server through
@@ -62,8 +79,8 @@ at 0.1.0-SNAPSHOT (Netty 4.2.18.Final, Jackson 2.22.3):
 - Axiom jar sizes in bytes: core 49,793; server 44,337; http 24,685; json 15,163;
   starter 261 (total 134,239). Third-party jars total 6,135,959 bytes: Netty
   3,574,454 and Jackson 2,561,505.
-- No other libraries (logging, annotation, or test libraries) are on the runtime
-  classpath.
+- No other libraries (logging, annotation, validation or test libraries) are on the
+  runtime classpath. The validation modules are deliberately not part of the starter.
 
 ## Publication
 
@@ -71,7 +88,7 @@ Every library module applies the `axiom.publish` convention (through
 `axiom.java-library`); the BOM applies it directly. Each publishes a binary jar, a
 sources jar, a Javadoc jar, a POM (name, description, URL, Apache-2.0 license, SCM,
 issue tracker, developer) and Gradle module metadata. The BOM is a `java-platform`
-that constrains the six published modules. Archives stay reproducible.
+that constrains the eight published library modules. Archives stay reproducible.
 
 Targets: `build/compat-repo` (a file repository used by the compatibility tests) and,
 only when `axiom.publish.url` is given, one remote repository whose credentials come

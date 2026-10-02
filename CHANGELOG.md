@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add opt-in validation modules: annotation-free rules in axiom-validation and a Jakarta Validation adapter in axiom-validation-jakarta, reported as 422 field violations.
 - Add the `io.axiom:axiom` starter, Maven publication (binary, sources, Javadoc, POM, Gradle module metadata) with optional signing, and the BOM covering all published modules.
 - Add consumer compatibility builds (Gradle Kotlin, Gradle Groovy, Maven) behind `./gradlew compatibilityTest`, a scheduled compatibility workflow and a release workflow skeleton.
 - Enforce Gradle dependency verification and add a release guide.

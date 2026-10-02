@@ -10,6 +10,8 @@ val descriptions = mapOf(
     "axiom-http" to "Axiom HTTP/1.1 transport.",
     "axiom-json" to "Axiom strict JSON codec built on Jackson.",
     "axiom-test" to "Axiom in-memory test client that runs requests through the real dispatcher.",
+    "axiom-validation" to "Axiom validator interface and annotation-free rules reported as 422 field violations.",
+    "axiom-validation-jakarta" to "Axiom adapter running Jakarta Validation constraints through Hibernate Validator.",
     "axiom-bom" to "Axiom bill of materials aligning the versions of all Axiom modules."
 )
 val repositoryUrl = "https://github.com/matrixjnr/axiom"

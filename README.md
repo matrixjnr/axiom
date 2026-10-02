@@ -43,6 +43,8 @@ JSON notes API on the same port.
 - `axiom-json`: strict JSON codec built on Jackson, added on the runtime classpath
 - `axiom-test`: in-memory test client, sending raw request bodies
 - `axiom-starter`: published as `io.axiom:axiom`, the single dependency for applications
+- `axiom-validation`: validator interface and annotation-free rules reported as 422 field violations ([validation](docs/validation.md))
+- `axiom-validation-jakarta`: Jakarta Validation annotations through Hibernate Validator, kept behind the validator interface
 - `axiom-bom`: aligned library versions
 - `integration-tests`: end-to-end JSON tests with the real codec, through `TestClient` and a live listener
 - `examples/hello`: runnable HTTP server and network smoke example
@@ -101,6 +103,10 @@ Maven:
   </dependency>
 </dependencies>
 ```
+
+Validation is opt-in and not part of the starter: add `io.axiom:axiom-validation`, or
+`io.axiom:axiom-validation-jakarta` for Jakarta annotations, alongside it (versions come
+from the BOM). See [validation](docs/validation.md).
 
 Consumer builds against locally published artifacts are exercised by
 `./gradlew compatibilityTest`.
