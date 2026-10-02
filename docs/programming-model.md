@@ -44,7 +44,7 @@ registered. Automatic OPTIONS behavior is not enabled.
 
 `ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw
 capture; `ctx.pathParameters()` returns an immutable map in template order. Values
-are materialized on access, without percent-decoding or normalization;
+are extracted when the route matches, without percent-decoding or normalization;
 `ctx.pathDecoded("id")` decodes one capture as strict UTF-8. Captures are untrusted input. Query strings
 are not part of `Request.path()`. See [routing rules](routing.md) for edge cases.
 
@@ -61,7 +61,10 @@ policies; request acceptance, `resolve`, and `admissionPolicy(route)` read it
 without taking the lock. `listen` discovers the transport and binds outside the
 lock; if the application closes meanwhile, the new listener is closed and `listen`
 throws `IllegalStateException`.
-Handlers can run concurrently and each invocation receives a fresh context.
+Handlers can run concurrently and each invocation receives a fresh context. A
+context is thread-confined: use it only on the handler's thread and only until the
+handler returns; pass `ctx.execution()`, `ctx.request()`, or extracted values to
+other tasks instead.
 Shared business objects must provide their own thread safety.
 
 Close does not wait for accepted requests. In-memory calls may complete after

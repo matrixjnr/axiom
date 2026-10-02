@@ -131,17 +131,30 @@ final class CompiledRouter {
         return endpoint;
     }
 
-    /** Request-owned match; capture strings and the complete map are materialized on demand. */
+    /**
+     * Immutable match result. Captures are extracted into an unmodifiable map when the match is
+     * created, so a match holds no lazily initialized state and is safe to publish to any thread.
+     */
     static final class Match {
         private final Endpoint endpoint;
         private final String allow;
-        private final Segments segments;
-        private Map<String, String> parameters;
+        private final Map<String, String> parameters;
 
         private Match(Endpoint endpoint, String allow, Segments segments) {
             this.endpoint = endpoint;
             this.allow = allow;
-            this.segments = segments;
+            this.parameters = endpoint == null || endpoint.captures().isEmpty()
+                    ? Map.of() : captures(endpoint, segments);
+        }
+
+        private static Map<String, String> captures(Endpoint endpoint, Segments segments) {
+            var values = new LinkedHashMap<String, String>();
+            for (var capture : endpoint.captures()) {
+                values.put(capture.name(), capture.wildcard()
+                        ? segments.path.substring(segments.starts[capture.index()])
+                        : segments.value(capture.index()));
+            }
+            return Collections.unmodifiableMap(values);
         }
 
         boolean methodAllowed() { return endpoint != null; }
@@ -150,32 +163,12 @@ final class CompiledRouter {
         Route route() { return endpoint.route(); }
 
         String parameter(String name) {
-            Objects.requireNonNull(name, "name");
-            if (parameters != null && parameters.containsKey(name)) { return parameters.get(name); }
-            for (var capture : endpoint.captures()) {
-                if (capture.name().equals(name)) { return captureValue(capture); }
-            }
-            throw new IllegalArgumentException("Unknown path parameter: " + name);
+            var value = parameters.get(Objects.requireNonNull(name, "name"));
+            if (value == null) { throw new IllegalArgumentException("Unknown path parameter: " + name); }
+            return value;
         }
 
-        Map<String, String> parameters() {
-            if (parameters == null) {
-                if (endpoint.captures().isEmpty()) {
-                    parameters = Map.of();
-                } else {
-                    var values = new LinkedHashMap<String, String>();
-                    for (var capture : endpoint.captures()) { values.put(capture.name(), captureValue(capture)); }
-                    parameters = Collections.unmodifiableMap(values);
-                }
-            }
-            return parameters;
-        }
-
-        private String captureValue(Capture capture) {
-            return capture.wildcard()
-                    ? segments.path.substring(segments.starts[capture.index()])
-                    : segments.value(capture.index());
-        }
+        Map<String, String> parameters() { return parameters; }
     }
 
     private record Capture(String name, int index, boolean wildcard) {}

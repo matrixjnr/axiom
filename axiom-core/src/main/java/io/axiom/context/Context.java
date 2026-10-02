@@ -11,7 +11,15 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-/** Request-scoped response settings. A context must not be shared across threads. */
+/**
+ * Request-scoped view and response settings for one handler invocation.
+ * <p>
+ * A context is <em>thread-confined</em>: use it only on the thread that invoked the handler
+ * and only until the handler returns. It holds mutable response settings ({@link #status(int)})
+ * without synchronization and must not be shared with, or retained by, other threads.
+ * To hand work to application tasks, pass the immutable {@link #execution()} and
+ * {@link #request()} values or the extracted captures instead.
+ */
 public interface Context {
     /**
      * Returns the immutable request metadata.
@@ -134,7 +142,8 @@ public interface Context {
     }
 
     /**
-     * Returns all captures in template order, materializing them on first access.
+     * Returns all raw captures in template order. The map is extracted when the route
+     * matches and is immutable, so it may be shared with other threads.
      * @return immutable parameter map; empty for a static route
      */
     Map<String, String> pathParameters();

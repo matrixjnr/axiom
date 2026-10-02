@@ -101,8 +101,10 @@ undeclared names. `ctx.pathDecoded(name)` percent-decodes a capture once as stri
 UTF-8, segment by segment, and throws `IllegalArgumentException` for malformed UTF-8
 or for a segment that would decode to a `/`, backslash, NUL, `.` or `..`.
 `ctx.pathParameters()` returns an immutable map of raw captures in declaration order.
-Capture strings and maps are created when requested and belong to that request's
-context. Static matches need no capture-boundary arrays or per-request parameter maps.
+Captures are extracted into that map once, when a dynamic route matches; the match
+holds no lazily initialized state. Fully static matches allocate no capture
+boundaries or parameter maps. The `Context` itself is thread-confined to the
+handler invocation; the captured values and map may be passed to other threads.
 
 All captures are untrusted client input. A wildcard remainder spans several
 segments and contains `/`; the rules above keep `..` and encoded separators out of
