@@ -7,12 +7,8 @@ import io.axiom.Axiom;
 import io.axiom.application.Application;
 import io.axiom.http.Response;
 import io.axiom.lifecycle.Server;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -117,11 +113,9 @@ class HttpListenerTest {
         }
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"Content-Length: 1", "Transfer-Encoding: chunked", "Upgrade: websocket"})
-    void rejectsUnsupportedBodiesAndUpgrades(String header) throws Exception {
+    @Test void rejectsUpgrades() throws Exception {
         try (var fixture = new Fixture(); var wire = new Wire(fixture.listen())) {
-            wire.write("POST / HTTP/1.1\r\nHost: localhost\r\n" + header + "\r\n\r\n");
+            wire.write("GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n\r\n");
             assertThat(wire.read(false).status()).isEqualTo(501);
         }
     }
@@ -183,7 +177,7 @@ class HttpListenerTest {
                     "GET / HTTP/1.2\r\nHost: a\r\n\r\n", 505,
                     "GET / HTTP/2.0\r\nHost: a\r\n\r\n", 505,
                     "CONNECT localhost:443 HTTP/1.1\r\nHost: localhost\r\n\r\n", 501,
-                    "POST / HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\n\r\n", 417,
+                    "POST / HTTP/1.1\r\nHost: a\r\nExpect: 200-ok\r\nContent-Length: 1\r\n\r\n", 417,
                     "GET / HTTP/1.1\r\nHost: a\r\nX-Large: " + "x".repeat(9000) + "\r\n\r\n", 400
             ).entrySet()) {
                 try (var wire = new Wire(server)) {
@@ -543,57 +537,5 @@ class HttpListenerTest {
                 assertThat(first.read(false).text()).isEqualTo("done");
             } finally { release.countDown(); }
         }
-    }
-    private static final class Fixture implements AutoCloseable {
-        final Application app = Axiom.create();
-        final java.util.List<Server> servers = new java.util.ArrayList<>();
-        Server listen() throws IOException { var server = app.listen(0); servers.add(server); return server; }
-        @Override public void close() {
-            app.close();
-            for (var server : servers) { server.termination().toCompletableFuture().orTimeout(10, TimeUnit.SECONDS).join(); }
-        }
-    }
-
-    private static final class Wire implements AutoCloseable {
-        final Socket socket = new Socket();
-        Wire(Server server) throws IOException {
-            socket.connect(server.localAddress(), 5000);
-            socket.setSoTimeout(5000);
-        }
-        void write(String text) throws IOException {
-            socket.getOutputStream().write(text.getBytes(StandardCharsets.US_ASCII));
-            socket.getOutputStream().flush();
-        }
-        Reply get(String path) throws IOException {
-            write("GET " + path + " HTTP/1.1\r\nHost: localhost\r\n\r\n");
-            return read(false);
-        }
-        Reply read(boolean head) throws IOException {
-            String status = line();
-            if (!status.startsWith("HTTP/1.1 ")) { throw new IOException("Unexpected status: " + status); }
-            int code = Integer.parseInt(status.split(" ")[1]);
-            var headers = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-            for (String line; !(line = line()).isEmpty();) {
-                int colon = line.indexOf(':');
-                headers.put(line.substring(0, colon), line.substring(colon + 1).trim());
-            }
-            int length = head ? 0 : Integer.parseInt(headers.getOrDefault("Content-Length", "0"));
-            var bytes = socket.getInputStream().readNBytes(length);
-            if (bytes.length != length) { throw new IOException("Truncated body"); }
-            return new Reply(code, headers, bytes);
-        }
-        String line() throws IOException {
-            var bytes = new ByteArrayOutputStream();
-            for (int value; (value = socket.getInputStream().read()) != -1;) {
-                if (value == '\n') { return bytes.toString(StandardCharsets.US_ASCII).replace("\r", ""); }
-                bytes.write(value);
-                if (bytes.size() > 16384) { throw new IOException("Unbounded line"); }
-            }
-            throw new IOException("Unexpected EOF");
-        }
-        @Override public void close() throws IOException { socket.close(); }
-    }
-    private record Reply(int status, Map<String, String> headers, byte[] body) {
-        String text() { return new String(body, StandardCharsets.UTF_8); }
     }
 }

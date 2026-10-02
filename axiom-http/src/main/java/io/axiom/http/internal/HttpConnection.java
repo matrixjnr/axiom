@@ -2,6 +2,7 @@ package io.axiom.http.internal;
 
 import io.axiom.application.Application;
 import io.axiom.execution.ExecutionContext;
+import io.axiom.http.Body;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
@@ -9,6 +10,7 @@ import io.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedExce
 import io.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
 import io.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
@@ -21,6 +23,7 @@ import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpUtil;
+import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.timeout.IdleStateEvent;
@@ -36,6 +39,7 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.RejectedExecutionException;
 
 /** All mutable connection state belongs to the channel's event loop. */
@@ -60,6 +64,17 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
     private ScheduledFuture<?> headTimer;
+    // Body of the request being received; released on every exit path (see releaseBody).
+    private CompositeByteBuf bodyParts;
+    private long bodyLength;
+    private int bodyLimit;
+    /** Body bytes of requests buffered in {@code pending}, bounded by twice the body limit. */
+    private long queuedBodyBytes;
+    /** An accepted {@code Expect: 100-continue} whose interim response is not yet written. */
+    private boolean continuePending;
+    private ScheduledFuture<?> bodyTimer;
+    /** Components merged into one buffer beyond this count, bounding per-chunk bookkeeping. */
+    private static final int MAX_BODY_COMPONENTS = 64;
 
     HttpConnection(Application application, RequestDispatcher executor) {
         this(application, executor, REQUEST_HEAD_TIMEOUT);
@@ -84,15 +99,24 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     private void requestBytes(ChannelHandlerContext ctx) {
-        if (closing || headTimer != null) { return; }
+        // Body bytes are bounded by the request deadline, not the head timeout.
+        if (closing || headTimer != null || receiving != null) { return; }
         headTimer = ctx.executor().schedule(() -> {
             headTimer = null;
             if (!closing) { fail(ctx, 408); }
         }, headTimeoutNanos, TimeUnit.NANOSECONDS);
     }
 
-    private void requestComplete() {
+    private void headComplete() {
         if (headTimer != null) { headTimer.cancel(false); headTimer = null; }
+    }
+
+    /** Releases a partially received body and its deadline timer; idempotent. */
+    private void releaseBody() {
+        if (bodyParts != null) { bodyParts.release(); bodyParts = null; }
+        if (bodyTimer != null) { bodyTimer.cancel(false); bodyTimer = null; }
+        bodyLength = 0;
+        continuePending = false;
     }
 
     @Override public void handlerAdded(ChannelHandlerContext ctx) { context = ctx; }
@@ -112,31 +136,100 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (!message.decoderResult().isSuccess()) { fail(ctx, 400); return; }
         if (message instanceof HttpRequest request) {
             if (receiving != null) { fail(ctx, 400); return; }
-            boolean http10 = request.protocolVersion().equals(HttpVersion.HTTP_1_0);
-            if (!http10 && !request.protocolVersion().equals(HttpVersion.HTTP_1_1)) { fail(ctx, 505); return; }
-            if (!validHost(request, http10)) { fail(ctx, 400); return; }
-            if (request.headers().contains(HttpHeaderNames.EXPECT)) { fail(ctx, 417); return; }
-            if (request.method().name().equals("CONNECT") || request.headers().contains(HttpHeaderNames.UPGRADE)) { fail(ctx, 501); return; }
-            try {
-                if (request.headers().contains(HttpHeaderNames.TRANSFER_ENCODING)
-                        || HttpUtil.getContentLength(request, 0) != 0) {
-                    fail(ctx, 501); return;
-                }
-                // Validates the path and query in one pass; any rejection is a 400.
-                receiving = new Exchange(Request.fromTarget(request.method().name(), request.uri()),
-                        HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
-            } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
+            headComplete();
+            if (!accept(ctx, request)) { return; }
         }
         if (message instanceof HttpContent content) {
-            if (receiving == null || content.content().isReadable()) { fail(ctx, 400); return; }
-            if (message instanceof LastHttpContent) {
-                if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { abort(ctx); return; }
-                requestComplete();
-                pending.addLast(receiving);
-                receiving = null;
-                dispatch(ctx);
-            }
+            if (receiving == null) { fail(ctx, 400); return; }
+            if (content.content().isReadable() && !receiveBody(ctx, content.content())) { return; }
+            if (message instanceof LastHttpContent) { completeRequest(ctx); }
         }
+    }
+
+    /** Validates a request head and starts receiving it; false when a response or close has been issued. */
+    private boolean accept(ChannelHandlerContext ctx, HttpRequest request) {
+        boolean http10 = request.protocolVersion().equals(HttpVersion.HTTP_1_0);
+        if (!http10 && !request.protocolVersion().equals(HttpVersion.HTTP_1_1)) { fail(ctx, 505); return false; }
+        if (!validHost(request, http10)) { fail(ctx, 400); return false; }
+        if (request.method().name().equals("CONNECT") || request.headers().contains(HttpHeaderNames.UPGRADE)) {
+            fail(ctx, 501); return false;
+        }
+        var headers = request.headers();
+        boolean chunked = headers.contains(HttpHeaderNames.TRANSFER_ENCODING);
+        long length;
+        try {
+            if (chunked && headers.contains(HttpHeaderNames.CONTENT_LENGTH)) { fail(ctx, 400); return false; }
+            if (chunked && !headers.get(HttpHeaderNames.TRANSFER_ENCODING).trim()
+                    .equalsIgnoreCase(HttpHeaderValues.CHUNKED.toString())) {
+                fail(ctx, 501); return false;
+            }
+            length = chunked ? -1 : HttpUtil.getContentLength(request, 0L);
+        } catch (NumberFormatException invalid) { fail(ctx, 400); return false; }
+        bodyLimit = application.maxRequestBody();
+        // Rejected before any body byte is read; the connection closes after the response.
+        if (length > bodyLimit) { fail(ctx, 413); return false; }
+        var expect = headers.getAll(HttpHeaderNames.EXPECT);
+        if (!expect.isEmpty() && (expect.size() != 1 || !expect.getFirst().trim().equalsIgnoreCase("100-continue"))) {
+            fail(ctx, 417); return false;
+        }
+        var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        for (var header : headers) { fields.merge(header.getKey(), header.getValue(), (first, next) -> first + ", " + next); }
+        try {
+            // Validates the path and query in one pass; any rejection is a 400.
+            receiving = new Exchange(Request.fromTarget(request.method().name(), request.uri()).withHeaders(fields),
+                    HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
+        } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
+        if (chunked || length > 0) {
+            var exchange = receiving;
+            // A slow body counts against the request deadline that started with the head.
+            bodyTimer = ctx.executor().schedule(() -> {
+                bodyTimer = null;
+                if (!closing && receiving == exchange) { fail(ctx, 408); }
+            }, exchange.execution().remainingTime().toNanos(), TimeUnit.NANOSECONDS);
+            continuePending = !expect.isEmpty() && !http10; // HTTP/1.0 clients do not expect 100.
+            sendContinue(ctx);
+        }
+        return true;
+    }
+
+    /** Accumulates body bytes without copying; false when the limit was exceeded and the connection is closing. */
+    private boolean receiveBody(ChannelHandlerContext ctx, ByteBuf content) {
+        continuePending = false; // The client sent the body without waiting; no interim response is needed.
+        bodyLength += content.readableBytes();
+        if (bodyLength > bodyLimit) { fail(ctx, 413); return false; }
+        if (queuedBodyBytes + bodyLength > 2L * bodyLimit) { abort(ctx); return false; }
+        if (bodyParts == null) { bodyParts = ctx.alloc().compositeBuffer(MAX_BODY_COMPONENTS); }
+        bodyParts.addComponent(true, content.retain());
+        return true;
+    }
+
+    private void completeRequest(ChannelHandlerContext ctx) {
+        if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { abort(ctx); return; }
+        var exchange = receiving;
+        if (bodyParts != null) {
+            try {
+                // The body's single copy out of Netty buffers, which are released right after.
+                var body = Body.of(exchange.request().header("Content-Type").orElse(null), bodyParts.nioBuffers());
+                exchange = new Exchange(exchange.request().withBody(body), exchange.keepAlive(),
+                        exchange.http10(), exchange.execution());
+            } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
+            queuedBodyBytes += bodyLength;
+        }
+        releaseBody();
+        pending.addLast(exchange);
+        receiving = null;
+        dispatch(ctx);
+    }
+
+    /**
+     * Writes {@code 100 Continue} for the request being received once every earlier response
+     * has been written, so the interim response never overtakes a pipelined final response.
+     */
+    private void sendContinue(ChannelHandlerContext ctx) {
+        if (!continuePending || busy || !pending.isEmpty() || closing) { return; }
+        continuePending = false;
+        ctx.writeAndFlush(new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE,
+                Unpooled.EMPTY_BUFFER)).addListener(future -> { if (!future.isSuccess()) { abort(ctx); } });
     }
 
     /** HTTP/1.1 requires exactly one Host; HTTP/1.0 may omit it but must not send an invalid one. */
@@ -159,6 +252,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // pipeline bound below keeps buffered requests finite.
         busy = true;
         var exchange = pending.removeFirst();
+        queuedBodyBytes -= exchange.request().body().length();
         if (exchange.execution().isExpired()) { send(ctx, exchange, error(504)); return; }
         try {
             // A closed application or dispatcher cannot run the request; answer instead of
@@ -259,13 +353,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             HttpUtil.setKeepAlive(message, keepAlive);
             // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
             if (keepAlive && exchange.http10()) { message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive"); }
-            if (!keepAlive) { closing = true; pending.clear(); }
+            if (!keepAlive) { closing = true; pending.clear(); queuedBodyBytes = 0; releaseBody(); }
             owned = null;
             ctx.writeAndFlush(message).addListener(future -> {
                 active = null;
                 if (!future.isSuccess() || !keepAlive || draining) { ctx.close(); return; }
                 busy = false;
                 dispatch(ctx);
+                sendContinue(ctx);
             });
         } catch (RuntimeException failure) {
             if (owned != null) { owned.release(); }
@@ -295,13 +390,17 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         send(ctx, new Exchange(Request.get("/"), false, false, ExecutionContext.create(application.requestTimeout())), error(status));
     }
 
-    private void abort(ChannelHandlerContext ctx) { closing = true; ctx.close(); }
+    private void abort(ChannelHandlerContext ctx) { closing = true; releaseBody(); ctx.close(); }
+
+    @Override public void handlerRemoved(ChannelHandlerContext ctx) { releaseBody(); }
 
     @Override public void channelInactive(ChannelHandlerContext ctx) {
         closing = true;
-        requestComplete();
+        headComplete();
+        releaseBody();
         receiving = null;
         pending.clear();
+        queuedBodyBytes = 0;
         if (active != null) { active.cancel(); active = null; }
     }
 

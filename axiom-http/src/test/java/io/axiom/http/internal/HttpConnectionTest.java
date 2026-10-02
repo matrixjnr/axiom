@@ -384,4 +384,73 @@ class HttpConnectionTest {
     private static RequestDispatcher executor() {
         return new RequestDispatcher(1);
     }
+
+    @Test void disconnectMidBodyReleasesReceivedChunks() {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.post("/", ctx -> { throw new AssertionError("incomplete body must not execute"); });
+            app.start();
+            var channel = new EmbeddedChannel(new HttpConnection(app, executor));
+            var chunk = io.netty.buffer.Unpooled.copiedBuffer("partial", java.nio.charset.StandardCharsets.US_ASCII);
+            try {
+                var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/");
+                request.headers().set("Host", "localhost").set("Content-Length", "100");
+                chunk.retain(); // Observe the count after the handler's own reference is released.
+                channel.writeInbound(request, new io.netty.handler.codec.http.DefaultHttpContent(chunk));
+                assertThat(chunk.refCnt()).isEqualTo(2);
+                channel.close();
+                assertThat(chunk.refCnt()).isEqualTo(1);
+            } finally {
+                chunk.release();
+                channel.finishAndReleaseAll();
+            }
+        } finally { executor.close(); }
+    }
+
+    @Test void bodyStillArrivingWhenTheDeadlineExpiresIsAnswered408() {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.requestTimeout(Duration.ofSeconds(5));
+            app.post("/", ctx -> { throw new AssertionError("must not execute"); });
+            app.start();
+            var channel = wireChannel(app, executor, Duration.ofSeconds(10));
+            try {
+                channel.writeInbound(ascii("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nab"));
+                for (int i = 0; i < 4; i++) {
+                    channel.advanceTimeBy(1, TimeUnit.SECONDS);
+                    channel.runScheduledPendingTasks();
+                    channel.writeInbound(ascii("c"));
+                    assertThat(channel.isActive()).isTrue();
+                }
+                channel.advanceTimeBy(1, TimeUnit.SECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(outbound(channel)).startsWith("HTTP/1.1 408 Request Timeout");
+                assertThat(channel.isActive()).isFalse();
+            } finally { channel.finishAndReleaseAll(); }
+        } finally { executor.close(); }
+    }
+
+    @Test void bodyBytesDoNotStartTheRequestHeadTimeout() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.requestTimeout(Duration.ofMinutes(5));
+            app.post("/", ctx -> "received " + ctx.request().body().length());
+            app.start();
+            var channel = wireChannel(app, executor, Duration.ofSeconds(10));
+            try {
+                channel.writeInbound(ascii("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\na"));
+                channel.advanceTimeBy(30, TimeUnit.SECONDS);
+                channel.runScheduledPendingTasks();
+                channel.writeInbound(ascii("b"));
+                channel.advanceTimeBy(30, TimeUnit.SECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                channel.writeInbound(ascii("c"));
+                assertThat(awaitOutbound(channel)).startsWith("HTTP/1.1 200 OK").endsWith("received 3");
+            } finally { channel.finishAndReleaseAll(); }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
 }
