@@ -10,3 +10,8 @@ dependencies {
     testRuntimeOnly(project(":axiom-http"))
     testRuntimeOnly(project(":axiom-json"))
 }
+
+tasks.test {
+    // Keeps the large-body cases from competing for CPU with the listener's own timing-sensitive tests.
+    mustRunAfter(":axiom-http:test")
+}
