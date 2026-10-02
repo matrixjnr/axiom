@@ -16,7 +16,13 @@ abstract class CheckModuleBoundaries : DefaultTask() {
             "axiom-server" to setOf("axiom-core"),
             "axiom-http" to setOf("axiom-core", "axiom-server"),
             "axiom-json" to setOf("axiom-core"),
-            "axiom-test" to setOf("axiom-core", "axiom-server", "axiom-http", "axiom-json")
+            // The test client stays codec-neutral: tests send raw bodies and never need a serializer.
+            "axiom-test" to setOf("axiom-core", "axiom-server", "axiom-http")
+        )
+        // Third-party production dependencies are confined to the module that adapts them.
+        val externalGroups = mapOf(
+            "axiom-http" to setOf("io.netty"),
+            "axiom-json" to setOf("com.fasterxml.jackson", "com.fasterxml.jackson.core")
         )
         val module = moduleName.get()
         val moduleAllowed = allowed[module]
@@ -33,6 +39,10 @@ abstract class CheckModuleBoundaries : DefaultTask() {
             }
             if (parts[0] == "external" && module == "axiom-core" && !parts[2].startsWith("test")) {
                 throw GradleException("Core must remain free of external production dependencies: $target")
+            }
+            if (parts[0] == "external" && !parts[2].startsWith("test")
+                && target.substringBefore(':') !in externalGroups[module].orEmpty()) {
+                throw GradleException("External production dependency outside its adapter module: $module -> $target")
             }
             if (parts[2] == "api" && parts[0] == "external") {
                 throw GradleException("External public API dependency needs an architecture decision: $module -> $target")

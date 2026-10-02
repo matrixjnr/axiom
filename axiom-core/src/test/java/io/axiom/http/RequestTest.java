@@ -58,4 +58,32 @@ class RequestTest {
         assertThatNullPointerException().isThrownBy(() -> new Request(null, "/"));
         assertThatNullPointerException().isThrownBy(() -> Request.get(null));
     }
+
+    @Test
+    void keepsTwoArgumentConstructionAndAddsHeadersAndBody() {
+        var plain = new Request("POST", "/notes");
+        assertThat(plain.headers()).isEmpty();
+        assertThat(plain.body()).isSameAs(Body.empty());
+        assertThat(plain).isEqualTo(Request.fromTarget("POST", "/notes?x=1"));
+        var full = plain.withHeaders(java.util.Map.of("Accept", "application/json"))
+                .withBody(Body.of("application/json", new byte[] {'{', '}'}));
+        assertThat(full.header("accept")).contains("application/json");
+        assertThat(full.header("missing")).isEmpty();
+        assertThat(full.body().length()).isEqualTo(2);
+        assertThat(full).isNotEqualTo(plain);
+        assertThatThrownBy(() -> full.headers().put("x", "y")).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> new Request("GET", "/../x", java.util.Map.of(), Body.empty()))
+                .isInstanceOf(InvalidRequestPathException.class);
+    }
+
+    @Test
+    void rejectsUnsafeHeadersAndHidesValuesFromDescriptions() {
+        for (var invalid : java.util.List.of(java.util.Map.of("Bad Name", "x"), java.util.Map.of("X", "a\r\nb"),
+                java.util.Map.of("X", "1", "x", "2"))) {
+            assertThatIllegalArgumentException().isThrownBy(() -> Request.get("/").withHeaders(invalid));
+        }
+        var request = Request.get("/").withHeaders(java.util.Map.of("Authorization", "Bearer secret-token"))
+                .withBody(Body.of("text/plain", "password".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertThat(request.toString()).contains("Authorization").doesNotContain("secret-token", "password");
+    }
 }

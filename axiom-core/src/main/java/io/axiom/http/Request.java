@@ -1,6 +1,10 @@
 package io.axiom.http;
 
+import java.util.Collections;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 /**
@@ -8,15 +12,34 @@ import java.util.regex.Pattern;
  * case, trailing slashes, and percent-encoding are preserved and nothing is decoded.
  * Paths that could address a different resource after normalization or decoding are
  * rejected instead of normalized; see {@link #Request(String, String)}.
- * Query strings, fragments, request bodies, and headers are not modeled yet.
+ * Query strings and fragments are not modeled yet.
+ * <p>
+ * Headers are an immutable, case-insensitive map with one value per name; transports join
+ * repeated fields with {@code ", "}. The {@link Body} carries the content and its Content-Type.
+ * {@link #toString()} omits header values and body content, which may hold credentials.
  * @param method case-sensitive HTTP method token
  * @param path absolute raw path without query or fragment
+ * @param headers request header fields; copied into an immutable case-insensitive map
+ * @param body request content; never null, {@link Body#empty()} when absent
  */
-public record Request(String method, String path) {
+public record Request(String method, String path, Map<String, String> headers, Body body) {
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
 
     /**
-     * Creates and validates the method/path identity.
+     * Creates a request without headers or body, validating the path as described by the
+     * canonical constructor.
+     *
+     * @param method HTTP token
+     * @param path absolute raw path
+     * @throws IllegalArgumentException for an invalid method
+     * @throws InvalidRequestPathException for a rejected path
+     */
+    public Request(String method, String path) {
+        this(method, path, Map.of(), Body.empty());
+    }
+
+    /**
+     * Creates and validates the request.
      * The path must start with {@code /} and contain only RFC 3986 path characters,
      * well-formed percent-escapes, and non-ASCII characters other than controls and spaces.
      * It is rejected when it contains an empty segment ({@code //}; a single trailing slash is
@@ -24,18 +47,78 @@ public record Request(String method, String path) {
      * character, a malformed percent-escape, or an encoded dot, slash, backslash, or NUL
      * ({@code %2E}, {@code %2F}, {@code %5C}, {@code %00} in either case).
      *
+     * Header names must be HTTP tokens and values must not contain control characters other
+     * than horizontal tab.
+     *
      * @param method HTTP token
      * @param path absolute raw path
-     * @throws IllegalArgumentException for an invalid method
+     * @param headers header fields
+     * @param body request content
+     * @throws IllegalArgumentException for an invalid method or header
      * @throws InvalidRequestPathException for a rejected path
      */
     public Request {
         Objects.requireNonNull(method, "method");
         Objects.requireNonNull(path, "path");
+        Objects.requireNonNull(headers, "headers");
+        Objects.requireNonNull(body, "body");
         if (!TOKEN.matcher(method).matches()) {
             throw new IllegalArgumentException("Invalid HTTP method: " + method);
         }
         validatePath(path);
+        if (headers.isEmpty()) {
+            headers = Map.of();
+        } else {
+            var copy = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+            headers.forEach((name, value) -> {
+                if (!TOKEN.matcher(name).matches() || value.chars().anyMatch(c -> (c < 32 && c != '\t') || c == 127)) {
+                    throw new IllegalArgumentException("Invalid request header");
+                }
+                if (copy.put(name, value) != null) {
+                    throw new IllegalArgumentException("Header names must be unique ignoring case");
+                }
+            });
+            headers = Collections.unmodifiableMap(copy);
+        }
+    }
+
+    /**
+     * Returns a header value, matching the name case-insensitively.
+     *
+     * @param name header name
+     * @return value, if present
+     */
+    public Optional<String> header(String name) {
+        return Optional.ofNullable(headers.get(Objects.requireNonNull(name, "name")));
+    }
+
+    /**
+     * Returns a copy with the supplied headers replacing the current ones.
+     *
+     * @param headers header fields
+     * @return request with the headers
+     */
+    public Request withHeaders(Map<String, String> headers) {
+        return new Request(method, path, headers, body);
+    }
+
+    /**
+     * Returns a copy with the supplied body.
+     *
+     * @param body request content
+     * @return request with the body
+     */
+    public Request withBody(Body body) {
+        return new Request(method, path, headers, body);
+    }
+
+    /**
+     * Describes the request without header values or body content.
+     *
+     * @return method, path, header names and body summary
+     */
+    @Override public String toString() {
+        return "Request[method=" + method + ", path=" + path + ", headers=" + headers.keySet() + ", body=" + body + "]";
     }
 
     /**

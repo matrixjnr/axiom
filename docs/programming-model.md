@@ -10,7 +10,8 @@ The experimental provider SPI exists to keep the dependency from server to core.
 
 Use `axiom-http` in the repository's examples, or `axiom-test` for the test client.
 Both expose core contracts at compile time and include the server provider at
-runtime. HTTP keeps Netty in its implementation dependencies; core uses only the JDK.
+runtime. Add `axiom-json` with `runtimeOnly` for the JSON codec. HTTP keeps Netty
+and JSON keeps Jackson in their implementation dependencies; core uses only the JDK.
 
 ## Registration and matching
 
@@ -50,14 +51,15 @@ are not part of `Request.path()`. See [routing rules](routing.md) for edge cases
 
 ## Lifecycle and concurrency
 
-- `start()` compiles and freezes registration, then enters `RUNNING`; repeated starts are harmless.
+- `start()` discovers body codecs, compiles and freezes registration, then enters
+  `RUNNING`; repeated starts are harmless. Two codecs for one media type fail startup.
 - `handle(Request)` requires `RUNNING` and invokes the handler on the calling thread.
 - `close()` enters `CLOSED` permanently, releases registered handler references,
   and rejects new requests. It is safe to call repeatedly or before startup.
 
 Registration, startup, and shutdown are serialized by a lifecycle lock. Startup
-publishes one immutable snapshot of the router, frozen routes, and admission
-policies; request acceptance, `resolve`, and `admissionPolicy(route)` read it
+publishes one immutable snapshot of the router, frozen routes, admission
+policies, codecs and the body limit; request acceptance, `resolve`, and `admissionPolicy(route)` read it
 without taking the lock. `listen` discovers the transport and binds outside the
 lock; if the application closes meanwhile, the new listener is closed and `listen`
 throws `IllegalStateException`.
@@ -75,8 +77,8 @@ handlers. Await each listener's `termination()` to join shutdown. See
 ## Execution metadata
 
 `ctx.execution()` exposes the request ID and monotonic remaining budget.
-HTTP uses bounded virtual-thread execution with a configurable deadline;
-direct calls and the test client retain synchronous caller-thread execution.
+HTTP and the test client use bounded virtual-thread execution with a configurable
+deadline; direct `handle` calls run synchronously on the caller's thread.
 See [execution semantics](execution.md) for cancellation and timeout boundaries,
 and [admission](admission.md) for aggregate and route limits with bounded queues.
 
@@ -88,12 +90,15 @@ A handler returns an object or throws an exception:
 - `String`: status 200 by default, with `text/plain; charset=utf-8`.
 - `byte[]`: status 200 by default, with `application/octet-stream`; copied defensively.
 - `null`: status 204 unless a status was explicitly set on the context.
-- Other objects: retained as body values without serialization or copying. In-memory
-  callers receive them unchanged; the HTTP transport answers them with 500 until a
-  codec layer exists.
+- Other objects: retained without copying. `ctx.json(value)` marks a value for the
+  JSON codec, which encodes it when the response is prepared; values without a codec
+  for their Content-Type reach in-memory callers unchanged and the HTTP transport
+  answers them with 500.
 
 `ctx.status(201).text("created")` sets a status and returns a response snapshot.
-`ctx.noContent()` returns 204. An explicit `Response.of(status, body)` can use
+`ctx.status(201).json(item).withLocation("/items/7")` creates a JSON 201 with a
+validated Location, `ctx.redirect(303, "/next")` a redirect, and `ctx.noContent()`
+a 204; [errors](errors.md#success-responses) lists the patterns per status. An explicit `Response.of(status, body)` can use
 `withHeader(name, value)` to create a modified copy. Headers are immutable and
 case-insensitive, with one value per name; repeated headers are not modeled yet.
 Final statuses range from 200 through 599; 204, 205, and 304 reject non-null bodies.
@@ -101,9 +106,14 @@ After `ctx.status(204)` (or 205, 304), returning or mapping a body fails with an
 `IllegalStateException` naming the route and status instead of a generic error.
 `Response` compares by value (status, case-insensitive headers, body; byte arrays by content).
 
-Handler exceptions propagate unchanged to in-memory callers. The HTTP transport
-maps exceptions and unsupported body objects to generic 500 responses.
-No JSON encoding, body parsing, middleware, or error mapping is implied by this API.
+Handlers read bodies with `ctx.body(Type.class)` and headers with
+`ctx.header(name)`; see [request bodies and JSON](bodies.md). A handler that
+throws an `AxiomException` (for example `NotFoundException` or
+`ValidationException`) gets an `application/problem+json` response with only
+status, code, request ID and field violations, in memory and over HTTP; see
+[errors](errors.md). Other handler exceptions propagate unchanged to in-memory
+callers, and the HTTP transport maps them, and unencodable body objects, to a
+generic 500. No middleware or general exception mappers exist.
 
 ## Testing without ports
 
@@ -121,8 +131,12 @@ try (var client = TestClient.start(app)) {
 application, and closing it closes the application. Requests go through a private
 dispatcher using the application's admission policies and request timeout, so
 overload (503) and deadline expiry (504) are testable; `submit(request)` returns a
-future for holding capacity from tests. Handler exceptions propagate rather than
-becoming 500 responses. Response bodies the transport cannot send (anything other
-than `String` or `byte[]`, or over the size limits) fail with `IllegalStateException`
-where a listener would answer 500. Sockets, HTTP parsing and connection behavior
+future for holding capacity from tests. `post`, `put` and `patch` take a content
+type and a `String` or `byte[]` body, so tests send raw JSON without a codec
+dependency. The body limit (413), routing errors and `AxiomException` mapping
+produce the same problem responses as a listener. Other handler exceptions
+propagate rather than becoming 500 responses. Response bodies the transport cannot
+send (anything other than `String` or `byte[]` after encoding, or over the size
+limits) fail with `IllegalStateException` where a listener would answer 500.
+Sockets, HTTP parsing and connection behavior (414, 431, Expect, pipelining)
 are not simulated.

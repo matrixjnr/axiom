@@ -1,6 +1,8 @@
 package io.axiom.server.internal;
 
 import io.axiom.context.Context;
+import io.axiom.error.DecodeException;
+import io.axiom.error.UnsupportedMediaTypeException;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
@@ -14,8 +16,11 @@ final class DefaultContext implements Context {
     private int status = 200;
     private boolean explicitStatus;
 
-    DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution) {
+    private final Codecs codecs;
+
+    DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution, Codecs codecs) {
         this.request = request;
+        this.codecs = codecs;
         this.execution = execution;
         this.match = match;
     }
@@ -33,6 +38,23 @@ final class DefaultContext implements Context {
     public Request request() { return request; }
 
     @Override public ExecutionContext execution() { return execution; }
+
+    @Override
+    public <T> T body(Class<T> type) {
+        java.util.Objects.requireNonNull(type, "type");
+        var body = request.body();
+        if (body.isEmpty()) { throw new DecodeException("empty_body"); }
+        var mediaType = body.mediaType();
+        if (mediaType.isEmpty()) { throw new UnsupportedMediaTypeException("missing_content_type"); }
+        if (body.charset().filter(charset -> !charset.equals("utf-8")).isPresent()) {
+            throw new UnsupportedMediaTypeException("unsupported_charset");
+        }
+        var codec = codecs.forMediaType(mediaType.get());
+        if (codec == null) { throw new UnsupportedMediaTypeException(); }
+        var value = codec.decode(body.bytes(), type);
+        if (value == null) { throw new DecodeException("null_body"); }
+        return value;
+    }
 
     @Override
     public Context status(int status) {

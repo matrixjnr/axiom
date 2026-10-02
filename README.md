@@ -2,8 +2,10 @@
 
 Axiom is an early Java API framework targeting Java 21. The current implementation
 supports compiled routing with parameters and wildcards, HTTP/1.1 listeners,
-virtual-thread execution with request deadlines, and synchronous in-memory testing.
-The HTTP transport supports text and byte responses.
+virtual-thread execution with request deadlines and bounded admission, bounded
+request bodies with a strict JSON codec, problem+json error responses, and
+in-memory testing through the same dispatcher. Bodies are buffered in memory (no
+streaming), and there is no middleware, query-parameter API, TLS or HTTP/2 yet.
 
 ```java
 import io.axiom.Axiom;
@@ -23,36 +25,39 @@ Install JDK 21, then run:
 ./gradlew clean check
 ./gradlew build
 ./gradlew :examples:hello:run
+./gradlew :examples:rest-api:run
 ```
 
 On Windows, use `./gradlew.bat`. The wrapper downloads Gradle 9.5.1 on first use.
 `check` includes unit tests, module dependency checks, and public API signature
 checks. Build and configuration caches are enabled. The example listens at
 `http://127.0.0.1:8080/` until stopped. For a finite network smoke test, run
-`./gradlew :examples:hello:run --args="--smoke"`.
+`./gradlew :examples:hello:run --args="--smoke"`. The rest-api example serves a small
+JSON notes API on the same port.
 
 ## Modules
 
 - `axiom-core`: application contracts, HTTP request/response values, and bootstrap SPI
 - `axiom-server`: lifecycle, compiled route dispatch, and the default runtime provider
 - `axiom-http`: HTTP/1.1 transport with Netty kept behind the public API
-- `axiom-json`: JSON adapter build scaffolding
-- `axiom-test`: in-memory test client
+- `axiom-json`: strict JSON codec built on Jackson, added on the runtime classpath
+- `axiom-test`: in-memory test client, sending raw request bodies
 - `axiom-bom`: aligned library versions
 - `examples/hello`: runnable HTTP server and network smoke example
-- `examples/rest-api`: build scaffolding
+- `examples/rest-api`: small JSON API with validation and error responses, and its tests
 - `benchmarks/http`: JMH routing and dispatch benchmarks
 
 Core uses JDK service loading to discover the runtime. Applications depending on
 `axiom-http` receive core on the compile classpath and server on the runtime
-classpath. Core has no dependency on server or external libraries.
+classpath. Core has no dependency on server or external libraries; Netty and
+Jackson stay inside `axiom-http` and `axiom-json`.
 
 No artifacts are published yet. Maven publication and consumer compatibility tests
 will accompany release engineering. The `io.axiom` namespace is provisional until
 ownership is validated. No performance claims have been established.
 
 See the [programming model](docs/programming-model.md),
-[routing rules](docs/routing.md), [HTTP behavior and limits](docs/http.md), [execution and deadlines](docs/execution.md), [admission](docs/admission.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
+[routing rules](docs/routing.md), [request bodies and JSON](docs/bodies.md), [errors](docs/errors.md), [HTTP behavior and limits](docs/http.md), [execution and deadlines](docs/execution.md), [admission](docs/admission.md), [build decisions](docs/build.md), [contributing](CONTRIBUTING.md), and
 [security](SECURITY.md). Licensed under Apache-2.0.
 
 ## Support Axiom

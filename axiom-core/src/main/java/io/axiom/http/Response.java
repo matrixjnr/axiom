@@ -14,8 +14,9 @@ import java.util.regex.Pattern;
  * Header names are case-insensitive. One value per header is supported at this stage.
  * <p>
  * Bodies may be {@code null}, a {@link String}, a {@code byte[]}, or any other object.
- * Other objects are retained for a future codec layer without serialization; the HTTP
- * transport currently answers them with 500. Two responses are equal when their statuses,
+ * Other objects are retained without copying. When the response is prepared, the runtime
+ * encodes them with the installed codec for the response's Content-Type (see
+ * {@code Context.json}); without such a codec the HTTP transport answers 500. Two responses are equal when their statuses,
  * headers (names compared case-insensitively), and bodies are equal, comparing byte arrays
  * by content and other bodies with {@link Object#equals(Object)}.
  */
@@ -49,6 +50,52 @@ public final class Response {
                 ? Map.of("Content-Type", "text/plain; charset=utf-8")
                 : body instanceof byte[] ? Map.of("Content-Type", "application/octet-stream") : Map.of();
         return new Response(status, body, headers);
+    }
+
+    /**
+     * Creates a redirect without a body.
+     *
+     * @param status 301, 302, 303, 307 or 308
+     * @param location target URI reference; validated as by {@link #withLocation(String)}
+     * @return redirect response
+     * @throws IllegalArgumentException for another status or an invalid location
+     */
+    public static Response redirect(int status, String location) {
+        if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) {
+            throw new IllegalArgumentException("Redirect status must be 301, 302, 303, 307 or 308: " + status);
+        }
+        return of(status, null).withLocation(location);
+    }
+
+    /**
+     * Returns a copy with a Location header, for example after 201 Created.
+     * The location must be a URI reference (absolute URI, absolute path or relative reference)
+     * of at most 2048 characters using only visible ASCII characters allowed by RFC 3986, with
+     * well-formed percent-escapes; spaces, quotes, angle brackets, backslashes, control
+     * characters and therefore CR/LF header injection are rejected. Validation does not judge
+     * whether the target is safe to redirect to: never redirect to an unchecked client-supplied URL.
+     *
+     * @param location URI reference
+     * @return a response with the Location header
+     * @throws IllegalArgumentException for an invalid location
+     */
+    public Response withLocation(String location) {
+        Objects.requireNonNull(location, "location");
+        if (location.isEmpty() || location.length() > 2048) {
+            throw new IllegalArgumentException("Location must contain 1 to 2048 characters");
+        }
+        for (int i = 0; i < location.length(); i++) {
+            char c = location.charAt(i);
+            if (c <= 0x20 || c >= 0x7f || "\"<>\\^`{|}".indexOf(c) >= 0) {
+                throw new IllegalArgumentException("Location contains a character outside URI syntax");
+            }
+        }
+        try {
+            new java.net.URI(location);
+        } catch (java.net.URISyntaxException invalid) {
+            throw new IllegalArgumentException("Location is not a valid URI reference");
+        }
+        return withHeader("Location", location);
     }
 
     /**

@@ -40,8 +40,9 @@ with the routes. All listeners share this configuration. Route overrides are not
 implemented yet.
 
 For HTTP, the budget starts when validated request headers are adapted, before
-waiting behind earlier pipelined requests. It covers dispatch, application code,
-and response preparation. An expired queued request is never invoked. A timer
+the body is received and before waiting behind earlier pipelined requests. It
+covers body receipt, dispatch, application code, and response preparation
+(including codec encoding). An expired queued request is never invoked. A timer
 interrupts active execution and produces a single 504 Gateway Timeout when the
 connection is still writable. Timeout closes the connection and drops later
 pipelined requests. Results returned after cancellation or timeout are discarded.
@@ -55,8 +56,10 @@ request waits for admission or runs; the queue wait and this budget bound it
 instead. It still closes idle connections and stalled response writes. Reading
 continues throughout. A request head (request line and headers) must arrive within
 ten seconds of its first byte, or the listener answers 408 and closes; trickling
-bytes does not extend that bound. Request bodies are rejected with 501, so there
-is no upload phase to bound. Slow response delivery has no absolute deadline; only
+bytes does not extend that bound. Receiving the request body counts against the
+execution budget, which starts when the head is parsed: a body still incomplete at
+the deadline is answered 408 and the handler never runs (see
+[request bodies](bodies.md)). Slow response delivery has no absolute deadline; only
 the inactivity timeout applies to it. See [HTTP listeners](http.md) for the limits.
 
 ## Capacity and cancellation
@@ -84,11 +87,12 @@ indefinitely for code that refuses interruption.
 
 ## Synchronous execution
 
-`app.handle(request)` still executes on the calling thread and propagates handler
-exceptions. `TestClient` instead runs each request through a private dispatcher
-(virtual thread, application admission policy and timeout), returns 503/504
-responses for admission and deadline failures, and still propagates handler
-exceptions. Each direct invocation gets fresh metadata using
+`app.handle(request)` still executes on the calling thread. It maps
+`AxiomException`s to problem responses (see [errors](errors.md)) and propagates
+other handler exceptions. `TestClient` instead runs each request through a private
+dispatcher (virtual thread, application admission policy and timeout), returns
+503/504 problem responses for admission and deadline failures, and still propagates
+other handler exceptions. Each direct invocation gets fresh metadata using
 the configured budget. The adapter overload `handle(request, execution)` accepts
 explicit metadata and rejects an already expired context with `TimeoutException`.
 These synchronous paths do not schedule cancellation or interrupt caller-owned
