@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config user.name:*)",
+      "Bash(git config user.email:*)",
+      "Bash(git merge --ff-only:*)",
+      "Bash(git cherry-pick:*)",
+      "Bash(git rebase:*)",
+      "Bash(git worktree:*)"
+    ]
+  }
+}
