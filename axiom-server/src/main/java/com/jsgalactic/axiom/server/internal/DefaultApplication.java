@@ -496,7 +496,10 @@ final class DefaultApplication implements Application {
      */
     private static Response head(Response response) {
         int status = response.status();
-        if (status < 200 || status > 299 || status == 204 || status == 205) { return response.withoutBody(); }
+        // A stream has no known length and its writer must not run: HEAD gets the head only.
+        if (response.isStreaming() || status < 200 || status > 299 || status == 204 || status == 205) {
+            return response.withoutBody();
+        }
         var bytes = ResponseSerialization.bodyBytes(response.body());
         if (bytes == null) { return response; }
         return response.withoutBody().withHeader("Content-Length", Integer.toString(bytes.length));
@@ -602,7 +605,7 @@ final class DefaultApplication implements Application {
             throw new NotAcceptableException();
         }
         var body = response.body();
-        if (body == null || body instanceof String || body instanceof byte[]) { return response; }
+        if (body == null || body instanceof String || body instanceof byte[] || response.isStreaming()) { return response; }
         var encoded = Response.of(response.status(), codec.encode(body));
         for (var header : response.headers().entrySet()) {
             encoded = encoded.withHeader(header.getKey(), header.getValue());

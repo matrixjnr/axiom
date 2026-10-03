@@ -6,6 +6,7 @@ import com.jsgalactic.axiom.http.HttpStatus;
 import com.jsgalactic.axiom.internal.OwnedBodies;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
@@ -14,11 +15,13 @@ import com.jsgalactic.axiom.server.internal.ResponseSerialization;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DuplexChannel;
 import io.netty.handler.codec.DateFormatter;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpObject;
@@ -137,6 +140,13 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private ScheduledFuture<?> responseTimer;
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
+    /**
+     * The streamed response whose head was sent and whose body the handler is still writing; null
+     * otherwise. Set when the head is written and cleared when the exchange ends.
+     */
+    private ChannelBodyWriter stream;
+    private boolean streamKeepAlive;
+    private final StreamMetrics streamMetrics;
     private ScheduledFuture<?> headTimer;
     // Body of the request being received, copied out of each Netty buffer as it arrives. The array
     // grows by doubling as bytes arrive, capped at the declared Content-Length or, for chunked
@@ -172,6 +182,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         this.lingerQuietNanos = settings.lingerQuiet().toNanos();
         this.shutdownLingerNanos = settings.shutdownLinger().toNanos();
         this.responseNanos = settings.responseTimeout().toNanos();
+        this.streamMetrics = new StreamMetrics(application.metrics());
     }
 
     /**
@@ -218,6 +229,13 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         }
         if (closing || draining) { return; }
         draining = true;
+        if (stream != null) {
+            // A stream may never end by itself, so it is cancelled, not drained. The client sees the
+            // body cut off, never a normal end, which is what a truncated download must look like.
+            stream.abort(StreamAbortedException.Reason.SHUTDOWN);
+            abort(context);
+            return;
+        }
         if (!busy) { abort(context); }
     }
 
@@ -400,12 +418,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
             active = executor.submit(route.<Object>map(value -> value).orElse(UNMATCHED),
                     policy, exchange.execution(), () -> {
-                try { return prepare(application.handle(exchange.request(), exchange.execution()), exchange); }
-                catch (Exception | Error failure) {
-                    if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
-                        LOG.log(System.Logger.Level.ERROR,
-                                "HTTP request " + exchange.execution().requestId() + " failed", failure);
-                    }
+                try {
+                    var response = application.handle(exchange.request(), exchange.execution());
+                    return response.isStreaming() ? stream(ctx, exchange, response) : prepare(response, exchange);
+                } catch (Exception | Error failure) {
+                    logFailure(exchange, failure);
                     throw failure;
                 }
             }, WireResponse::status);
@@ -414,6 +431,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 try {
                     ctx.executor().execute(() -> {
                         active = null; // The outcome is final; only the response write remains.
+                        // The head of a stream is out, so there is no response left to choose: it ends
+                        // with a final chunk when the body completed, and by closing the connection otherwise.
+                        if (stream != null) { endStream(ctx, failure); return; }
                         if (closing || !ctx.channel().isActive()) { return; }
                         if (failure instanceof Error) {
                             abort(ctx);
@@ -447,9 +467,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static WireResponse prepare(Response response, Exchange exchange) {
         var bytes = ResponseSerialization.bodyBytes(response.body());
         if (bytes == null || !ResponseSerialization.headersSendable(response.headers())) { return error(500, exchange); }
-        boolean close = java.util.Arrays.stream(response.headers().getOrDefault("Connection", "").split(","))
-                .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
-        return new WireResponse(response.status(), response.headers(), bytes, close);
+        return new WireResponse(response.status(), response.headers(), bytes, closeRequested(response.headers()), false);
     }
 
     private void send(ChannelHandlerContext ctx, Exchange exchange, WireResponse response) {
@@ -487,25 +505,129 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             if (keepAlive && exchange.http10()) { message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive"); }
             if (!keepAlive) { closing = true; pending.clear(); queuedBodyBytes = 0; releaseBody(); }
             owned = null;
-            var written = ctx.writeAndFlush(message);
-            // Most responses are taken by the socket at once; only a pending write needs a bound.
-            if (!written.isDone()) {
-                responseTimer = ctx.executor().schedule(() -> { responseTimer = null; abort(ctx); },
-                        responseNanos, TimeUnit.NANOSECONDS);
-            }
-            written.addListener(future -> {
-                if (responseTimer != null) { responseTimer.cancel(false); responseTimer = null; }
-                active = null;
-                if (!future.isSuccess()) { ctx.close(); return; }
-                if (!keepAlive || ending) { linger(ctx); return; }
-                busy = false;
-                dispatch(ctx);
-                sendContinue(ctx);
-            });
+            finishWrite(ctx, ctx.writeAndFlush(message), keepAlive && !ending);
         } catch (RuntimeException failure) {
             if (owned != null) { owned.release(); }
             abort(ctx);
         }
+    }
+
+    /**
+     * Bounds the write of the last bytes of a response and, once the socket has taken them, ends
+     * the exchange: the connection lingers when it is not persistent, otherwise it serves the next
+     * request.
+     */
+    private void finishWrite(ChannelHandlerContext ctx, ChannelFuture written, boolean persistent) {
+        // Most responses are taken by the socket at once; only a pending write needs a bound.
+        if (!written.isDone()) {
+            responseTimer = ctx.executor().schedule(() -> { responseTimer = null; abort(ctx); },
+                    responseNanos, TimeUnit.NANOSECONDS);
+        }
+        written.addListener(future -> {
+            if (responseTimer != null) { responseTimer.cancel(false); responseTimer = null; }
+            active = null;
+            if (!future.isSuccess()) { ctx.close(); return; }
+            if (!persistent) { linger(ctx); return; }
+            busy = false;
+            dispatch(ctx);
+            sendContinue(ctx);
+        });
+    }
+
+    private static boolean closeRequested(Map<String, String> headers) {
+        return Arrays.stream(headers.getOrDefault("Connection", "").split(","))
+                .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
+    }
+
+    private static void logFailure(Exchange exchange, Throwable failure) {
+        if (failure instanceof StreamAbortedException aborted) {
+            // Expected outcomes of a stream: a client leaving or shutdown is not an error. The cap is
+            // the application's mistake, so it is worth a warning.
+            var level = aborted.reason() == StreamAbortedException.Reason.LIMIT_EXCEEDED
+                    ? System.Logger.Level.WARNING : System.Logger.Level.DEBUG;
+            LOG.log(level, "HTTP request " + exchange.execution().requestId() + " stream aborted: " + aborted.reason());
+        } else if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
+            LOG.log(System.Logger.Level.ERROR, "HTTP request " + exchange.execution().requestId() + " failed", failure);
+        }
+    }
+
+    /**
+     * Sends the head of a streamed response, then runs its body on the calling handler thread, so
+     * the admission slot and the deadline cover the whole stream. Returns once the body has
+     * finished; the final chunk is written by {@link #endStream} on the event loop. A body that
+     * ends in failure, or whose writer was aborted even if the body swallowed that, fails the task:
+     * the head is out, so the only honest ending is closing the connection.
+     */
+    private WireResponse stream(ChannelHandlerContext ctx, Exchange exchange, Response response) throws Exception {
+        if (!ResponseSerialization.headersSendable(response.headers())) { return error(500, exchange); }
+        boolean close = closeRequested(response.headers());
+        var writer = new ChannelBodyWriter(ctx.channel(), exchange.execution(), response.streamLimit(),
+                responseNanos, streamMetrics);
+        boolean started;
+        try {
+            started = ctx.executor().submit(() -> beginStream(ctx, exchange, response, close, writer)).get();
+        } catch (java.util.concurrent.ExecutionException | RejectedExecutionException unavailable) {
+            started = false;
+        }
+        // Nothing was sent yet, so a refusal can still be an ordinary response.
+        if (!started) { return error(503, exchange); }
+        streamMetrics.started();
+        Throwable failure = null;
+        try {
+            response.streamBody().writeTo(writer);
+        } catch (Exception | Error thrown) {
+            failure = thrown;
+            throw thrown;
+        } finally {
+            writer.end();
+            var reason = writer.aborted();
+            streamMetrics.finished(reason != null ? StreamMetrics.Outcome.of(reason)
+                    : failure != null ? (exchange.execution().isExpired() ? StreamMetrics.Outcome.TIMEOUT
+                            : StreamMetrics.Outcome.FAILED) : StreamMetrics.Outcome.COMPLETED, writer.bytesWritten());
+        }
+        var reason = writer.aborted();
+        if (reason != null) { throw new StreamAbortedException(reason); }
+        return new WireResponse(response.status(), Map.of(), new byte[0], close, true);
+    }
+
+    /** Event loop: writes the head of a streamed response; false when the connection can no longer take it. */
+    private boolean beginStream(ChannelHandlerContext ctx, Exchange exchange, Response response, boolean close,
+            ChannelBodyWriter writer) {
+        if (closing || draining || listenerClosing.getAsBoolean() || !ctx.channel().isActive()
+                || exchange.execution().isExpired()) {
+            return false;
+        }
+        var message = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(response.status()));
+        var omitted = new HashSet<>(HOP_HEADERS);
+        for (var token : response.headers().getOrDefault("Connection", "").split(",")) {
+            omitted.add(token.trim().toLowerCase(Locale.ROOT));
+        }
+        response.headers().forEach((name, value) -> {
+            if (!omitted.contains(name.toLowerCase(Locale.ROOT))) { message.headers().set(name, value); }
+        });
+        // HTTP/1.0 has no chunked coding: the body is delimited by closing the connection.
+        boolean keepAlive = exchange.keepAlive() && !close && !exchange.http10();
+        if (!exchange.http10()) { message.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED); }
+        message.headers().set("X-Request-ID", exchange.execution().requestId());
+        message.headers().set(HttpHeaderNames.DATE, httpDate());
+        HttpUtil.setKeepAlive(message, keepAlive);
+        stream = writer;
+        streamKeepAlive = keepAlive;
+        ctx.writeAndFlush(message).addListener(future -> {
+            if (!future.isSuccess()) { writer.abort(StreamAbortedException.Reason.CLIENT_DISCONNECTED); ctx.close(); }
+        });
+        return true;
+    }
+
+    /** Event loop: the body task has ended; finish the response or drop the connection. */
+    private void endStream(ChannelHandlerContext ctx, Throwable failure) {
+        var finished = stream;
+        stream = null;
+        if (closing || !ctx.channel().isActive()) { return; }
+        if (failure != null || finished.aborted() != null) { abort(ctx); return; }
+        boolean keepAlive = streamKeepAlive;
+        if (!keepAlive) { closing = true; pending.clear(); queuedBodyBytes = 0; releaseBody(); }
+        finishWrite(ctx, ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT), keepAlive);
     }
 
     /**
@@ -537,7 +659,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     private static WireResponse error(int status, Exchange exchange) {
         return new WireResponse(status, Map.of("Content-Type", Problems.MEDIA_TYPE),
-                Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true);
+                Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true,
+                false);
     }
 
     /**
@@ -627,7 +750,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         receiving = null;
         pending.clear();
         queuedBodyBytes = 0;
+        // The stream learns why before the cancellation interrupts its thread, so the reason is the disconnect.
+        if (stream != null) { stream.abort(StreamAbortedException.Reason.CLIENT_DISCONNECTED); stream = null; }
         if (active != null) { active.cancel(); active = null; }
+    }
+
+    @Override public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+        if (stream != null) { stream.signal(); }
+        super.channelWritabilityChanged(ctx);
     }
 
     @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
@@ -647,5 +777,6 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private record CachedDate(long second, String value) { }
     private static volatile CachedDate date = new CachedDate(Long.MIN_VALUE, "");
     private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) { }
-    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close) { }
+    /** A prepared response; {@code streamed} marks a stream that was already written, with no body here. */
+    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean streamed) { }
 }
