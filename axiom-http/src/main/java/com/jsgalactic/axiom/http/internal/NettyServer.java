@@ -64,7 +64,7 @@ final class NettyServer implements Server {
     private NettyServer(AdmissionPolicy policy, Metrics metrics, TransportSettings settings) {
         this.settings = settings;
         var options = settings.options();
-        slots = new ConnectionSlots(options.maxConnections(), options.maxLingeringConnections());
+        slots = new ConnectionSlots(options.maxConnections(), options.maxLingeringConnections(), metrics);
         decoderConfig = decoderConfig(options);
         io = new MultiThreadIoEventLoopGroup(options.ioThreads(),
                 Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());

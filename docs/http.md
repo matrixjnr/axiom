@@ -186,7 +186,8 @@ without a response and without consuming a slot. A connection that only lingers 
 data and its remaining life is bounded by the linger caps. At most 32 connections per
 listener linger this way by default; beyond that a lingering connection keeps its slot until it
 closes, so a listener never has more than 160 open sockets by default (the connection cap plus
-the lingering pool). The listening socket requests a 1024-entry accept
+the lingering pool). The gauge `axiom.http.connections` (tag `state` = `open` or `lingering`)
+reports both pools, see [observability](observability.md). The listening socket requests a 1024-entry accept
 backlog and sets SO_REUSEADDR so a restart can rebind while old connections
 linger in TIME_WAIT. Connections use TCP_NODELAY and a 32/128 KiB write-buffer
 water mark. A connection holds at most eight outstanding requests, including the
@@ -284,6 +285,13 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 
 Choosing values:
 
+- **File descriptors and load balancers.** A listener can hold `maxConnections +
+  maxLingeringConnections` sockets (160 by default) plus its listening socket, its event-loop
+  selectors and wakeup pipes, and the files and outbound connections the application itself opens.
+  Raise the process descriptor limit (`ulimit -n`, container or systemd `LimitNOFILE`) above the
+  sum over all listeners with headroom, and size any connection limit on a load balancer or
+  proxy in front of the listener to the same sum, not to `maxConnections`. The lingering pool
+  is only used briefly, but a burst of connections that all end at once can fill it.
 - Total open sockets are at most `maxConnections + maxLingeringConnections`. The worst-case memory
   held for request bodies grows linearly with `maxConnections` (see
   [request bodies](bodies.md#memory-per-connection)).
