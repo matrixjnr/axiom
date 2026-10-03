@@ -1,3 +1,9 @@
+---
+title: Observability
+parent: Guides
+nav_order: 9
+---
+
 # Observability
 
 Axiom records what it does in a small, dependency-free `Metrics` SPI, reports liveness and

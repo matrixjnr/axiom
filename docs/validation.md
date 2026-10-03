@@ -1,3 +1,9 @@
+---
+title: Validation
+parent: Guides
+nav_order: 4
+---
+
 # Validation
 
 Two optional modules check values in handlers and report failures as the
