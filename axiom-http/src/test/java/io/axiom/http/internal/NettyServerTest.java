@@ -64,6 +64,61 @@ class NettyServerTest {
         }
     }
 
+    @Test void lingeringConnectionsMoveToTheirOwnSmallerPoolAndFreeTheirConnectionSlot() throws Exception {
+        try (var app = Axiom.create()) {
+            app.start();
+            var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0));
+            var accepted = new ArrayList<DuplexEmbeddedChannel>();
+            try {
+                for (int i = 0; i < NettyServer.MAX_CONNECTIONS; i++) {
+                    var channel = new DuplexEmbeddedChannel();
+                    server.accept(channel, app);
+                    accepted.add(channel);
+                }
+                assertThat(server.connections()).isEqualTo(NettyServer.MAX_CONNECTIONS);
+                // A rejected request: the 400 is written at once and the connection lingers.
+                for (int i = 0; i < NettyServer.MAX_LINGERING; i++) {
+                    reject(accepted.get(i));
+                    assertThat(server.connections()).isEqualTo(NettyServer.MAX_CONNECTIONS - i - 1);
+                }
+                assertThat(server.lingering()).isEqualTo(NettyServer.MAX_LINGERING);
+                // The lingering pool is full: the next one lingers on its regular slot.
+                var overflow = accepted.get(NettyServer.MAX_LINGERING);
+                reject(overflow);
+                assertThat(overflow.outputShutdown).isTrue();
+                assertThat(overflow.isActive()).isTrue();
+                assertThat(server.lingering()).isEqualTo(NettyServer.MAX_LINGERING);
+                assertThat(server.connections()).isEqualTo(NettyServer.MAX_CONNECTIONS - NettyServer.MAX_LINGERING);
+                // The freed slots take new connections; then the listener is full again.
+                for (int i = 0; i < NettyServer.MAX_LINGERING; i++) {
+                    var channel = new DuplexEmbeddedChannel();
+                    server.accept(channel, app);
+                    assertThat(channel.isActive()).isTrue();
+                    accepted.add(channel);
+                }
+                var full = new DuplexEmbeddedChannel();
+                server.accept(full, app);
+                assertThat(full.isActive()).isFalse();
+                // Each pool gets back exactly the slot the closing connection held.
+                accepted.getFirst().close();
+                assertThat(server.lingering()).isEqualTo(NettyServer.MAX_LINGERING - 1);
+                assertThat(server.connections()).isEqualTo(NettyServer.MAX_CONNECTIONS);
+                overflow.close();
+                assertThat(server.connections()).isEqualTo(NettyServer.MAX_CONNECTIONS - 1);
+            } finally {
+                for (var channel : accepted) { channel.finishAndReleaseAll(); }
+                server.close();
+                server.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    private static void reject(DuplexEmbeddedChannel channel) {
+        channel.writeInbound(io.netty.buffer.Unpooled.copiedBuffer("GARBAGE\r\n\r\n", java.nio.charset.StandardCharsets.US_ASCII));
+        for (io.netty.buffer.ByteBuf written; (written = channel.readOutbound()) != null;) { written.release(); }
+        assertThat(channel.outputShutdown).as("lingering").isTrue();
+    }
+
     @Test void refusesConnectionsBeyondTheLimitAndReleasesSlotsOnClose() throws Exception {
         try (var app = Axiom.create()) {
             app.start();

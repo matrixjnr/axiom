@@ -310,7 +310,7 @@ class HttpConnectionTest {
         channel.freezeTime();
         channel.pipeline().addLast(new RequestDecoder(new io.netty.handler.codec.http.HttpDecoderConfig()),
                 new io.netty.handler.codec.http.HttpResponseEncoder(),
-                new HttpConnection(app, executor, TransportSettings.DEFAULTS.withHeadTimeout(headTimeout), () -> false));
+                new HttpConnection(app, executor, TransportSettings.DEFAULTS.withHeadTimeout(headTimeout), null, () -> false));
         return channel;
     }
 

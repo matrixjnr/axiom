@@ -106,8 +106,9 @@ connection closes when the client closes its side, after two seconds, after 16 M
 discarded input, or on inactivity, whichever comes first. The listener does not try
 to guess that a client has finished sending: a client that reads the response but
 keeps its socket open holds the connection for the full two seconds. A lingering
-connection still counts against the connection limit and can delay listener
-shutdown by up to those two seconds. Connections closed without a response (an idle
+connection holds no request data and no longer counts against the connection limit
+(see [resource limits](#resource-limits)), but it can delay listener shutdown by up
+to those two seconds. Connections closed without a response (an idle
 connection at shutdown, a connection still receiving a request at shutdown,
 inactivity, a transport failure or a disconnect) close at once.
 
@@ -152,7 +153,11 @@ threads. Full execution capacity with no free queue slot, or an expired queue
 wait, produces 503 and closes that connection. So does any other failure to start
 a request, including a pipelined request reached after the application has
 closed. Connections are limited to 128; additional connections close immediately
-without consuming a slot. The listening socket requests a 1024-entry accept
+without consuming a slot. A connection that only lingers after its last response
+(see [wire behavior](#wire-behavior)) gives its slot back, because it holds no request
+data and its remaining life is bounded by the linger caps. At most 32 connections per
+listener linger this way; beyond that a lingering connection keeps its slot until it
+closes, so a listener never has more than 160 open sockets. The listening socket requests a 1024-entry accept
 backlog and sets SO_REUSEADDR so a restart can rebind while old connections
 linger in TIME_WAIT. Connections use TCP_NODELAY and a 32/128 KiB write-buffer
 water mark. A connection holds at most eight outstanding requests, including the

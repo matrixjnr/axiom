@@ -94,6 +94,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * before {@link #drain} has run on this connection.
      */
     private final BooleanSupplier listenerClosing;
+    /** The listener's slot for this connection, or null outside a listener; released by the listener. */
+    private final ConnectionSlots.Slot slot;
     private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
     private Exchange receiving;
     private boolean busy;
@@ -138,12 +140,13 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** A connection outside any listener, with the production bounds; for tests. */
     HttpConnection(Application application, RequestDispatcher executor) {
-        this(application, executor, TransportSettings.DEFAULTS, () -> false);
+        this(application, executor, TransportSettings.DEFAULTS, null, () -> false);
     }
 
     /** Production uses {@link TransportSettings#DEFAULTS}; tests may vary single bounds. */
     HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
-            BooleanSupplier listenerClosing) {
+            ConnectionSlots.Slot slot, BooleanSupplier listenerClosing) {
+        this.slot = slot;
         this.listenerClosing = listenerClosing;
         this.application = application;
         this.executor = executor;
@@ -540,6 +543,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             return;
         }
         lingering = true;
+        // Only discarding remains, bounded in time and bytes, so the connection stops keeping
+        // new clients out (when the listener's separate lingering bound allows).
+        if (slot != null) { slot.linger(); }
         decoder.discard(MAX_DISCARDED_INPUT);
         lingerTimer = ctx.executor().schedule(() -> { ctx.close(); }, lingerNanos, TimeUnit.NANOSECONDS);
         duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
