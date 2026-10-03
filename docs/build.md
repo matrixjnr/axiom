@@ -50,6 +50,10 @@ constrained by the BOM but not part of the starter.
 `axiom-metrics` depends on core only, declares no external dependency (the registry and the
 Prometheus text renderer use the JDK) and may use `axiom-test` in test configurations only.
 The Metrics SPI itself lives in core.
+`axiom-openapi` depends on core and `axiom-validation` (to map rule sets to schema constraints),
+declares no external dependency (it writes JSON itself) and may use `axiom-test` and `axiom-json` in
+test configurations only, to compare generated schemas with the real codec. The route metadata it
+reads (`RouteDoc`) lives in core.
 
 Core discovers the default runtime through a JDK service provider. HTTP and test
 client consumers receive core through `api`. HTTP uses server through

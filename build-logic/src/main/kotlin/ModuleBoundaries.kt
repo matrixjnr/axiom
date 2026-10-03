@@ -19,7 +19,9 @@ object ModuleBoundaries {
         "axiom-security" to setOf("axiom-core"),
         "axiom-security-jwt" to setOf("axiom-core", "axiom-security"),
         // In-memory metrics registry and Prometheus text rendering; JDK only, no metrics library.
-        "axiom-metrics" to setOf("axiom-core")
+        "axiom-metrics" to setOf("axiom-core"),
+        // OpenAPI documents from route metadata; reads validation rules, writes JSON itself (JDK only).
+        "axiom-openapi" to setOf("axiom-core", "axiom-validation")
     )
 
     /** Modules that exist only to run tests and are never published. */

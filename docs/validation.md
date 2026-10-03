@@ -141,7 +141,7 @@ be described. `Rules.constraints()` collects them by property (`name`, or `name[
 rules) in declaration order. Steps added with `nested`, `eachNested`, `check` and `include` are
 not part of the description; describe the nested validator itself. A constraint carries rule
 parameters only, never a value. `axiom-openapi` uses this to emit schema constraints (see
-the OpenAPI guide).
+[OpenAPI](openapi.md)).
 
 ## Jakarta Validation adapter
 

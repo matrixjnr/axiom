@@ -26,7 +26,9 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-validation-jakarta" to setOf("axiom-test"),
                 "axiom-security" to setOf("axiom-test"),
                 "axiom-security-jwt" to setOf("axiom-test"),
-                "axiom-metrics" to setOf("axiom-test")
+                "axiom-metrics" to setOf("axiom-test"),
+                // Round-trip tests compare generated schemas with the real JSON codec.
+                "axiom-openapi" to setOf("axiom-test", "axiom-json")
             )
             val testOnlyModules = ModuleBoundaries.testOnlyModules
             // Third-party production dependencies are confined to the module that adapts them.

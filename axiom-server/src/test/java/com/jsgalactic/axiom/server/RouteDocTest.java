@@ -78,4 +78,19 @@ class RouteDocTest {
         assertThat(doc.isDeprecated()).isFalse();
         assertThat(doc.operationId()).isEmpty();
     }
+
+    record Page<T>(List<T> items) {}
+
+    @Test void genericTypesAreBuiltFromTheirArguments() {
+        var type = (java.lang.reflect.ParameterizedType) RouteDoc.type(Page.class, Note.class);
+        assertThat(type.getRawType()).isEqualTo(Page.class);
+        assertThat(type.getActualTypeArguments()).containsExactly(Note.class);
+        assertThat(type.getTypeName()).contains("Page<").contains("Note>");
+        assertThat(type.toString()).isEqualTo(type.getTypeName());
+        assertThat(type.getOwnerType()).isEqualTo(RouteDocTest.class);
+        assertThat(((java.lang.reflect.ParameterizedType) RouteDoc.listOf(String.class)).getRawType()).isEqualTo(List.class);
+        assertThatIllegalArgumentException().isThrownBy(() -> RouteDoc.type(Page.class));
+        assertThatIllegalArgumentException().isThrownBy(() -> RouteDoc.type(Note.class, String.class));
+        assertThatIllegalArgumentException().isThrownBy(() -> RouteDoc.type(List.class, String.class, String.class));
+    }
 }

@@ -23,6 +23,13 @@ class CheckReadmeSnippetsTest {
     }
 
     @Test
+    fun problemsNameTheCheckedFile() {
+        val readme = "<!-- snippet: Hello.java -->\n${fence}java\nclass Other {}\n$fence\n"
+        assertThat(CheckReadmeSnippets.problems(readme, "guide.md") { files[it] }).hasSize(1).first().asString()
+            .contains("guide.md:1").contains("differs")
+    }
+
+    @Test
     fun divergingRegionIsReported() {
         val readme = "<!-- snippet: Test.java#demo -->\n${fence}java\none();\n$fence\n"
         assertThat(problems(readme)).hasSize(1).first().asString().contains("differs")

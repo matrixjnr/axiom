@@ -130,6 +130,48 @@ public final class RouteDoc {
     }
 
     /**
+     * Creates the type {@code raw<arguments...>}, for example {@code type(Page.class, Note.class)}
+     * for a {@code Page<Note>}, since a {@code Class} literal cannot carry type arguments.
+     *
+     * @param raw generic class
+     * @param arguments its type arguments, one per type parameter
+     * @return a parameterized type usable wherever a {@code RouteDoc} takes a type
+     * @throws IllegalArgumentException if the count differs from the class's type parameters
+     */
+    public static Type type(Class<?> raw, Type... arguments) {
+        Objects.requireNonNull(raw, "raw");
+        if (arguments.length == 0 || arguments.length != raw.getTypeParameters().length) {
+            throw new IllegalArgumentException(raw.getSimpleName() + " has " + raw.getTypeParameters().length
+                    + " type parameter(s), not " + arguments.length);
+        }
+        var copy = arguments.clone();
+        for (var argument : copy) {
+            Objects.requireNonNull(argument, "argument");
+        }
+        return new java.lang.reflect.ParameterizedType() {
+            @Override public Type[] getActualTypeArguments() { return copy.clone(); }
+            @Override public Type getRawType() { return raw; }
+            @Override public Type getOwnerType() { return raw.getDeclaringClass(); }
+            @Override public String getTypeName() {
+                var names = new ArrayList<String>();
+                for (var argument : copy) {
+                    names.add(argument.getTypeName());
+                }
+                return raw.getName() + "<" + String.join(", ", names) + ">";
+            }
+            @Override public String toString() { return getTypeName(); }
+        };
+    }
+
+    /**
+     * Creates the type {@code List<element>}.
+     *
+     * @param element element type
+     * @return a parameterized list type
+     */
+    public static Type listOf(Type element) { return type(List.class, element); }
+
+    /**
      * Returns the empty description: no metadata at all.
      *
      * @return the empty description

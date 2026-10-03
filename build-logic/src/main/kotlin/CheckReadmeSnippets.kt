@@ -30,11 +30,12 @@ abstract class CheckReadmeSnippets : DefaultTask() {
     @TaskAction
     fun check() {
         val base = root.get().asFile
-        val problems = problems(readme.get().asFile.readText()) { path ->
+        val file = readme.get().asFile
+        val problems = problems(file.readText(), file.name) { path ->
             base.resolve(path).takeIf { it.isFile }?.readText()
         }
         if (problems.isNotEmpty()) {
-            throw GradleException(problems.joinToString("\n", prefix = "README snippets differ from their sources:\n"))
+            throw GradleException(problems.joinToString("\n", prefix = "${file.name} snippets differ from their sources:\n"))
         }
     }
 
@@ -42,7 +43,7 @@ abstract class CheckReadmeSnippets : DefaultTask() {
         private val marker = Regex("""^<!-- snippet: (\S+?)(?:#(\S+))? -->$""")
 
         /** Problems found; [source] returns the text of a repository-relative path, or null if missing. */
-        fun problems(readme: String, source: (String) -> String?): List<String> {
+        fun problems(readme: String, file: String = "README.md", source: (String) -> String?): List<String> {
             val lines = readme.lines()
             val result = mutableListOf<String>()
             var checked = 0
@@ -50,7 +51,7 @@ abstract class CheckReadmeSnippets : DefaultTask() {
                 val match = marker.matchEntire(line.trim()) ?: continue
                 val path = match.groupValues[1]
                 val name = match.groupValues[2]
-                val where = "README.md:${index + 1} ($path" + (if (name.isEmpty()) "" else "#$name") + ")"
+                val where = "$file:${index + 1} ($path" + (if (name.isEmpty()) "" else "#$name") + ")"
                 checked++
                 val fence = lines.getOrNull(index + 1)
                 if (fence == null || !fence.startsWith("```")) {
@@ -65,10 +66,10 @@ abstract class CheckReadmeSnippets : DefaultTask() {
                 val expected = if (name.isEmpty()) text.lines() else region(text, name)
                 if (expected == null) { result += "  - $where: the source has no region '$name'"; continue }
                 if (normalize(expected) != normalize(quoted)) {
-                    result += "  - $where: the README block differs from the source; copy the source into the README"
+                    result += "  - $where: the block differs from the source; copy the source into the README"
                 }
             }
-            if (checked == 0) { result += "  - no '<!-- snippet: path -->' marker found in the README" }
+            if (checked == 0) { result += "  - no '<!-- snippet: path -->' marker found in $file" }
             return result
         }
 
