@@ -11,6 +11,7 @@ import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.routing.Route;
+import com.jsgalactic.axiom.routing.RouteDoc;
 import com.jsgalactic.axiom.routing.RouteGroup;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -272,6 +273,27 @@ public interface Application extends RouteGroup, AutoCloseable {
      * @throws IllegalArgumentException if the route is not registered
      */
     AdmissionPolicy admissionPolicy(Route route);
+
+    /**
+     * Attaches documentation to a registered route before startup, replacing an earlier one. The
+     * description is plain data for tools such as an OpenAPI generator; it never affects routing
+     * or request handling. Routes without one are documented by method and path only.
+     * @param route registered route identity
+     * @param doc route description
+     * @return this application
+     * @throws IllegalArgumentException if the route is not registered
+     * @throws IllegalStateException after configuration has ended
+     */
+    Application describe(Route route, RouteDoc doc);
+
+    /**
+     * Returns the documentation attached to a route with {@link #describe}. Readable at any time,
+     * also after startup and close.
+     * @param route registered route identity
+     * @return the description, empty if none was attached
+     * @throws IllegalArgumentException if the route is not registered
+     */
+    Optional<RouteDoc> doc(Route route);
 
     /**
      * Sets where listeners and the test client record request, latency and admission metrics, before

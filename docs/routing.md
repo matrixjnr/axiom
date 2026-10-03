@@ -437,3 +437,23 @@ with empty segments are rejected.
 
 The [JMH harness](../benchmarks/http/README.md) exercises the public in-memory
 dispatcher. No timing threshold is enforced by CI.
+
+## Documenting routes
+
+`Application.describe(route, RouteDoc)` attaches optional, immutable documentation to a registered
+route before startup: summary, description, tags, operation id, path/query/header parameters, a
+request body type with media types, responses (status, type, media types) and security scheme
+names. There are no annotations and nothing is scanned; the description is plain data that is
+never consulted while routing or handling a request. `Application.doc(route)` reads it back at
+any time. Routes without a description are still routes; tools document them by method and path
+only. The `axiom-openapi` module turns the descriptions into an OpenAPI document (see
+[openapi](openapi.md)).
+
+```java
+app.describe(app.get("/notes/:id", read),
+        RouteDoc.summary("Read a note").tags("notes").response(200, "The note", Note.class));
+```
+
+`describe` throws `IllegalArgumentException` for a route that is not registered and
+`IllegalStateException` after startup. A group that fails to configure also drops the
+descriptions of the routes it rolled back.

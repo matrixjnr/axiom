@@ -16,6 +16,7 @@ import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.routing.Route;
+import com.jsgalactic.axiom.routing.RouteDoc;
 import com.jsgalactic.axiom.routing.RouteGroup;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -59,6 +60,7 @@ final class DefaultApplication implements Application {
     private final Scope root = new Scope(null, "");
     private final Map<Class<?>, ErrorHandler<?>> errorHandlers = new LinkedHashMap<>();
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
+    private final Map<Route, RouteDoc> routeDocs = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
     private final Set<String> recognizedMethods = new java.util.TreeSet<>();
     private Handler notFoundHandler;
@@ -369,6 +371,7 @@ final class DefaultApplication implements Application {
             var route = entry.getKey();
             shapes.remove(route.method() + " " + shape(route.path()), route);
             routePolicies.remove(route);
+            routeDocs.remove(route);
             removed.remove();
         }
         scope.middleware.clear();
@@ -507,6 +510,24 @@ final class DefaultApplication implements Application {
         }
         if (!published.routeSet().contains(route)) { throw notRegistered(route); }
         return published.routePolicies().getOrDefault(route, published.defaultPolicy());
+    }
+
+    @Override public synchronized Application describe(Route route, RouteDoc doc) {
+        requireState(State.CONFIGURING);
+        Objects.requireNonNull(route, "route");
+        Objects.requireNonNull(doc, "doc");
+        if (!registrations.containsKey(route)) { throw notRegistered(route); }
+        routeDocs.put(route, doc);
+        return this;
+    }
+
+    @Override public synchronized Optional<RouteDoc> doc(Route route) {
+        Objects.requireNonNull(route, "route");
+        var published = runtime;
+        if (published != null ? !published.routeSet().contains(route) : !registrations.containsKey(route)) {
+            throw notRegistered(route);
+        }
+        return Optional.ofNullable(routeDocs.get(route));
     }
 
     @Override public synchronized Application metrics(Metrics metrics) {
