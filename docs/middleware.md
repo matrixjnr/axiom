@@ -1,6 +1,19 @@
 # Middleware, route groups and error handlers
 
-Status: implemented.
+Middleware run code around handlers, route groups share a path prefix and
+middleware, and error handlers map exceptions to responses. The
+[notes example](../examples/rest-api) uses all three.
+
+```text
+listener / TestClient: parse, admit, start deadline
+  -> app.handle: body limit (413), CONNECT (501)       no middleware yet
+  -> router match
+       matched:   global -> group (outer..inner) -> route -> handler
+       unmatched: global -> router answer (404, 405, OPTIONS 204, 501)
+  <- exception?  error handler (nearest class) or built-in problem mapping
+  <- codec encoding and Accept check (406), HEAD body removal
+  <- listener: serialization, X-Request-ID, write
+```
 
 ## Goals
 
@@ -138,7 +151,9 @@ app.error(IllegalStateException.class, (ctx, failure) -> { throw new ConflictExc
 
 The never-leak rule is unchanged: framework responses contain no exception
 messages, class names or stack traces; what an error handler returns is the
-application's responsibility.
+application's responsibility. Router answers are responses, not exceptions, and
+are never offered to error handlers; global middleware can replace them. See
+[errors](errors.md#error-handlers).
 
 ## Validated bodies
 
@@ -164,6 +179,22 @@ the Jakarta adapter can be passed directly; `Validation.require` is unchanged.
 - Building the chain per request from a list: avoidable work on every request.
 - Running group middleware for 404/405: no group matched, and guessing one from a
   prefix would make a group's authentication answer for paths it does not own.
-- Mapping exceptions inside the chain so middleware see error responses: the
-  requested semantics are that middleware observe exceptions; middleware that
-  must decorate error responses catch them or use an error handler.
+- Mapping exceptions inside the chain so middleware see error responses:
+  middleware then could not observe exceptions for logging or translation.
+  The cost is that headers a middleware adds after `next.run()` are missing on
+  error responses unless it catches the exception itself.
+- Mapping `Throwable`: `Error`s signal a broken process, not a request outcome.
+- Route-level middleware through a separate builder or an empty-prefix group
+  only: either is more ceremony for the common single-route case.
+
+## Limitations
+
+- Middleware that add headers after `next.run()` do not decorate responses for
+  exceptions (problem responses and error handler responses).
+- In global middleware, `ctx.route()` throws for router answers; there is no
+  accessor that reports whether a route matched.
+- Error handlers are application-wide; there are no group-scoped handlers.
+- Middleware are synchronous and run after admission; they cannot influence
+  admission, run before the body is received, or see listener errors.
+- `Next` and the context are confined to the request thread; a middleware cannot
+  continue the chain on another thread.

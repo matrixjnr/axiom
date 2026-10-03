@@ -88,8 +88,9 @@ There are no typed conversions, matching the path capture accessors. See
 - `start()` discovers body codecs, compiles and freezes registration, then enters
   `RUNNING`; repeated starts are harmless. Two codecs for one media type fail startup.
 - `handle(Request)` requires `RUNNING` and invokes the handler on the calling thread.
-- `close()` enters `CLOSED` permanently, releases registered handler references,
-  and rejects new requests. It is safe to call repeatedly or before startup.
+- `close()` enters `CLOSED` permanently, releases registered handler, middleware
+  and error handler references, and rejects new requests. It is safe to call
+  repeatedly or before startup.
 
 Registration, startup, and shutdown are serialized by a lifecycle lock. Startup
 publishes one immutable snapshot of the router, frozen routes, admission
