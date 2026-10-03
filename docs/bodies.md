@@ -44,7 +44,8 @@ these close the connection, and nothing sent after the request is read as a requ
 digits (surrounding whitespace is allowed, as for any field); signs, empty values,
 lists and other characters receive **400**. A request with neither Content-Length
 nor Transfer-Encoding has an empty body (RFC 9112 section 6.3), whatever its method;
-the listener never answers 411.
+the listener never answers 411 (a handler can require a declared length itself; see
+[errors](errors.md#throwing-errors)).
 
 Bodies are framed, read and limited the same way for every method. A GET, HEAD,
 DELETE or OPTIONS request may carry a body (RFC 9110 gives it no defined meaning for
@@ -284,6 +285,18 @@ parameters matches only when every parameter is `charset=utf-8`. An absent, blan
 or malformed Accept header (for example an invalid weight such as `q=2`, or an
 unterminated quoted string) is treated as if it were not sent, never as an error.
 
+**Limits.** At most 64 media ranges are parsed (empty list elements do not count);
+a header with 65 or more is treated like a malformed one, as if absent, so the
+representation is served. The bound keeps parsing cost per request constant, and
+real clients stay far below it: browsers send 5 to 10 ranges (Chrome's navigation
+header has 8, with `v=b3` and `q` parameters), `fetch`, curl and most libraries send
+`*/*` or two or three ranges, and axios sends `application/json, text/plain, */*`.
+Ignoring an unusable header rather than answering 406 follows RFC 9110's guidance
+that recipients tolerate what they cannot interpret, and cannot make a working
+client fail on a typo; a client that wants a 406 must send a well-formed header of
+64 ranges or fewer. The boundary (64 parsed, 65 ignored) and the real-client
+headers above are covered by tests.
+
 **The 406 is decided after the handler has run**, because the representation is
 only known once the handler returns. Side effects of the handler (a created
 record, a sent message) have already happened when the client receives 406.
@@ -295,10 +308,28 @@ installed, is a server error (500 over HTTP).
 
 Codecs implement the experimental `BodyCodec` SPI and declare exact lowercase media
 types. They are discovered once with `ServiceLoader` (thread context class loader)
-during `start()`; two codecs declaring the same media type fail startup with
-`IllegalStateException` and the application stays configurable. Codecs are shared
-across requests and must be thread-safe. See [errors](errors.md) for how failures
-reach clients.
+during `start()`. See [errors](errors.md) for how failures reach clients.
+
+**Registry rules.**
+
+- A codec is found by the exact `type/subtype` it declares. There is no priority
+  order, no wildcard (`application/*`, `*/*`) and no structured-suffix fallback: a
+  codec for `application/json` does not serve `application/vnd.api+json`, and
+  `application/problem+json` is produced by the framework itself. A codec that serves
+  several types lists each one.
+- Any number of codecs may be installed if their media types are disjoint, in any
+  order. Two codecs declaring the same type fail `start()` with `IllegalStateException`
+  naming the type and both classes, and a declaration that is not an exact lowercase
+  `type/subtype` (wildcards, parameters, upper case) fails the same way; the
+  application stays configurable. `ServiceLoader` order is not a contract, so a tie is
+  never broken silently. To replace the JSON codec, leave `axiom-json` off the
+  runtime classpath and install your own.
+
+**Lifecycle and threading.** The runtime instantiates each codec through its public
+no-argument constructor, never closes it, and keeps one instance for the application's
+lifetime. That instance serves every request, concurrently and on virtual threads:
+codecs must be thread-safe, hold no per-request state in fields and be immutable after
+construction. The SPI Javadoc states the same contract.
 
 The runtime decodes through `decode(ByteBuffer, Class)`, passing a read-only view of
 the request body that the codec must not retain. Its default implementation copies
