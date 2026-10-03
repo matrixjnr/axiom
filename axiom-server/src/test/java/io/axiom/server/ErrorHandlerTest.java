@@ -137,6 +137,37 @@ class ErrorHandlerTest {
     }
 
     @Test
+    void failuresAfterTheContextStatusChangedIgnoreThatStatus() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/builtin", ctx -> {
+                ctx.status(201);
+                throw new NotFoundException();
+            });
+            app.get("/mapped", ctx -> {
+                ctx.status(204);
+                throw new IllegalStateException();
+            }, (ctx, next) -> {
+                ctx.status(202);
+                return next.run();
+            });
+            app.get("/unmapped", ctx -> {
+                ctx.status(204);
+                throw new UnsupportedOperationException();
+            });
+            app.error(IllegalStateException.class, (ctx, failure) -> ctx.text("recovered"));
+            app.start();
+            var builtin = app.handle(Request.get("/builtin"));
+            assertThat(builtin.status()).isEqualTo(404);
+            assertThat(text(builtin)).contains("\"status\":404");
+            var mapped = app.handle(Request.get("/mapped"));
+            assertThat(mapped.status()).isEqualTo(200);
+            assertThat(mapped.body()).isEqualTo("recovered");
+            assertThatThrownBy(() -> app.handle(Request.get("/unmapped")))
+                    .isInstanceOf(UnsupportedOperationException.class);
+        }
+    }
+
+    @Test
     void anAxiomExceptionThrownByAnErrorHandlerIsItsAnswerAndIsNotHandledAgain() throws Exception {
         try (var app = throwing(new NoSuchElementException(POISON))) {
             app.error(NoSuchElementException.class, (ctx, failure) -> { throw new NotFoundException("item_not_found"); });
