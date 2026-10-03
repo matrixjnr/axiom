@@ -162,10 +162,10 @@ class RouterTest {
             assertThat(app.handle(new Request("PUT", "/users/7")).body()).isEqualTo("7");
             var literalMismatch = app.handle(new Request("DELETE", "/users/new"));
             assertThat(literalMismatch.status()).isEqualTo(405);
-            assertThat(literalMismatch.headers()).containsEntry("Allow", "GET, HEAD, PATCH, POST, PUT");
+            assertThat(literalMismatch.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS, PATCH, POST, PUT");
             var wildcardMismatch = app.handle(new Request("DELETE", "/users/7/photo"));
             assertThat(wildcardMismatch.status()).isEqualTo(405);
-            assertThat(wildcardMismatch.headers()).containsEntry("Allow", "PATCH");
+            assertThat(wildcardMismatch.headers()).containsEntry("Allow", "OPTIONS, PATCH");
         }
     }
 
@@ -179,7 +179,7 @@ class RouterTest {
             assertThat(app.handle(new Request("POST", "/users/me")).body()).isEqualTo("updated me");
             assertThat(app.resolve(new Request("POST", "/users/me")).orElseThrow().path()).isEqualTo("/users/:id");
             assertThat(app.handle(new Request("DELETE", "/users/me")).headers())
-                    .containsEntry("Allow", "GET, HEAD, POST");
+                    .containsEntry("Allow", "GET, HEAD, OPTIONS, POST");
         }
     }
 
@@ -243,7 +243,7 @@ class RouterTest {
             assertThat(app.resolve(new Request("HEAD", "/other")).orElseThrow().method()).isEqualTo("GET");
             var mismatch = app.handle(new Request("HEAD", "/posts/1"));
             assertThat(mismatch.status()).isEqualTo(405);
-            assertThat(mismatch.headers()).containsEntry("Allow", "POST");
+            assertThat(mismatch.headers()).containsEntry("Allow", "OPTIONS, POST");
             assertThat(mismatch.body()).isNull();
         }
     }

@@ -26,16 +26,25 @@ final class CompiledRouter {
     private static final Set<String> STANDARD_METHODS =
             Set.of("GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH");
 
-    private CompiledRouter(Node root, Map<String, Node> exactPaths, Set<String> methods) {
+    private CompiledRouter(Node root, Map<String, Node> exactPaths, Set<String> methods, Set<String> declared) {
         this.root = root;
         this.exactPaths = Map.copyOf(exactPaths);
         this.serverAllow = String.join(", ", methods);
         var known = new HashSet<>(STANDARD_METHODS);
         known.addAll(methods);
+        known.addAll(declared);
         this.recognized = Set.copyOf(known);
     }
 
     static CompiledRouter compile(Map<Route, Handler> registrations) {
+        return compile(registrations, Set.of());
+    }
+
+    /**
+     * Compiles the table. {@code declared} lists methods the application recognizes although no
+     * route has them, so they get 404 rather than 501 on an unrouted path.
+     */
+    static CompiledRouter compile(Map<Route, Handler> registrations, Set<String> declared) {
         var nodes = new ArrayList<Builder>();
         var root = new Builder(nodes);
         var exact = new HashMap<String, Builder>();
@@ -73,6 +82,8 @@ final class CompiledRouter {
             builder.literals.forEach((segment, child) -> literals.put(segment, child.frozen));
             var methods = new TreeSet<>(builder.endpoints.keySet());
             if (methods.contains("GET")) { methods.add("HEAD"); }
+            // Every routed path answers OPTIONS, with its own route or automatically.
+            methods.add("OPTIONS");
             builder.frozen = new Node(Map.copyOf(literals),
                     builder.parameter == null ? null : builder.parameter.frozen,
                     builder.wildcard == null ? null : builder.wildcard.frozen,
@@ -84,15 +95,15 @@ final class CompiledRouter {
         registrations.keySet().forEach(route -> everyMethod.add(route.method()));
         if (everyMethod.contains("GET")) { everyMethod.add("HEAD"); }
         everyMethod.add("OPTIONS");
-        return new CompiledRouter(root.frozen, exactPaths, everyMethod);
+        return new CompiledRouter(root.frozen, exactPaths, everyMethod, declared);
     }
 
     /**
      * Finds the most specific complete path match registered for the request method.
      * Complete matches are visited in precedence order; one without the method is skipped
      * so a less specific template can serve it. When no complete match has the method, the
-     * result reports a method mismatch whose Allow value is the union over all of them; for
-     * OPTIONS that union also lists OPTIONS, which the application then answers itself.
+     * result reports a method mismatch whose Allow value is the union over all of them, which
+     * always lists OPTIONS: for an OPTIONS request the application then answers itself.
      * {@code OPTIONS *} is never looked up: it reports a mismatch listing every registered method.
      */
     Match match(Request request) {
@@ -128,30 +139,52 @@ final class CompiledRouter {
                 }
                 continue;
             }
-            // Push in reverse precedence. Backtrack only when a branch cannot match the whole path.
-            if (node.wildcard() != null) {
-                pending.push(new Step(node.wildcard(), segments.size()));
-            }
-            if (node.parameter() != null && segments.starts[index] != segments.ends[index]) {
-                pending.push(new Step(node.parameter(), index + 1));
-            }
-            if (!node.literals().isEmpty()) {
-                var literal = node.literals().get(segments.value(index));
-                if (literal != null) { pending.push(new Step(literal, index + 1)); }
-            }
+            descend(pending, node, index, segments);
         }
         if (mismatch == null) { return null; }
-        if (method.equals("OPTIONS")) {
-            // Automatic OPTIONS: no matching template registered OPTIONS, so the application answers it.
-            if (allowed == null) { allowed = new TreeSet<>(mismatch.methods()); }
-            allowed.add("OPTIONS");
-        }
         return new Match(null, allowed == null ? mismatch.allow() : String.join(", ", allowed), null);
     }
 
+    /** Pushes the branches of a node in reverse precedence. Backtrack only when a branch cannot match the path. */
+    private static void descend(ArrayDeque<Step> pending, Node node, int index, Segments segments) {
+        if (node.wildcard() != null) {
+            pending.push(new Step(node.wildcard(), segments.size()));
+        }
+        if (node.parameter() != null && segments.starts[index] != segments.ends[index]) {
+            pending.push(new Step(node.parameter(), index + 1));
+        }
+        if (!node.literals().isEmpty()) {
+            var literal = node.literals().get(segments.value(index));
+            if (literal != null) { pending.push(new Step(literal, index + 1)); }
+        }
+    }
+
     /**
-     * Whether the method is one this application knows: an RFC 9110 or PATCH method, or a method
-     * registered on any route. Matching is case-sensitive, so {@code get} is not recognized unless
+     * The Allow value of the automatic OPTIONS answer for a request path: the union of the methods
+     * of every complete match, whether or not one of them serves OPTIONS itself, with HEAD wherever
+     * GET is and OPTIONS. {@code *} gives the server-wide list. Empty when no template matches.
+     */
+    String allowFor(Request request) {
+        if (request.path().equals("*")) { return serverAllow; }
+        var segments = new Segments(request.path());
+        var pending = new ArrayDeque<Step>();
+        pending.push(new Step(root, 0));
+        var allowed = new TreeSet<String>();
+        while (!pending.isEmpty()) {
+            var step = pending.pop();
+            var node = step.node();
+            if (step.index() == segments.size()) {
+                if (!node.endpoints().isEmpty()) { allowed.addAll(node.methods()); }
+                continue;
+            }
+            descend(pending, node, step.index(), segments);
+        }
+        return String.join(", ", allowed);
+    }
+
+    /**
+     * Whether the method is one this application knows: an RFC 9110 or PATCH method, a method
+     * registered on any route, or a declared one. Matching is case-sensitive, so {@code get} is not recognized unless
      * it is registered.
      */
     boolean recognizes(String method) { return recognized.contains(method); }

@@ -57,7 +57,7 @@ class HttpStatusMappingTest {
                 wire.write("DELETE /items HTTP/1.1\r\nHost: a\r\n\r\n");
                 var mismatch = wire.read(false);
                 assertProblem(mismatch, 405, "method_not_allowed");
-                assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD, POST");
+                assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD, OPTIONS, POST");
                 wire.write("GET /items HTTP/1.1\r\nHost: a\r\nAccept: text/html\r\n\r\n");
                 assertProblem(wire.read(false), 406, "not_acceptable");
                 wire.write("GET /items HTTP/1.1\r\nHost: a\r\nAccept: application/json\r\n\r\n");
