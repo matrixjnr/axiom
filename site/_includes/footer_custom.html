@@ -1,0 +1,6 @@
+<p class="text-small mb-0">
+  Axiom {{ site.axiom_version }}{% if site.axiom_commit %}
+  (<a href="https://github.com/matrixjnr/axiom/commit/{{ site.axiom_commit }}">{{ site.axiom_commit | slice: 0, 7 }}</a>){% endif %}.
+  {% if page.path == "index.md" %}{% assign source = "README.md" %}{% else %}{% assign source = page.path | prepend: "docs/" %}{% endif %}
+  <a href="https://github.com/matrixjnr/axiom/blob/main/{{ source }}" id="edit-this-page">Edit this page on GitHub</a>
+</p>
