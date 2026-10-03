@@ -235,9 +235,10 @@ chunked body gets 413 as soon as its running total exceeds the limit. Per connec
 the bodies of waiting pipelined requests and the body being received (`2 × L`
 together; a request that would exceed that share is answered 503 after the earlier
 responses and the connection closes), so `3 × L` with
-`L = maxRequestBody`. These bounds are per connection and per listener, not
-global: 128 connections allow about `384 × L` per listener; see
-[request bodies](bodies.md#memory-per-connection). Body bytes are copied out of
+`L = maxRequestBody`. Across all of a listener's connections, request bodies are further
+limited by `maxInFlightBodyBytes` (64 MiB by default): a request whose body does not fit in what
+remains is answered 503 and its connection closes, instead of the listener holding up to
+`128 × 3 × L`; see [request bodies](bodies.md#memory-per-connection). Body bytes are copied out of
 network buffers as they arrive, so no Netty buffer is retained across reads.
 Response bodies are limited to 1 MiB of encoded bytes (a `String` counts its UTF-8
 bytes) and response headers to 8 KiB, counted as name, value and four characters
@@ -308,6 +309,7 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `maxConnections` | 128 | 1 to 1,000,000 | Open connections per listener |
 | `maxLingeringConnections` | 32 | 0 to 1,000,000 | Lingering connections that stop counting against `maxConnections`; zero keeps them on their regular slots |
 | `maxPipelinedRequests` | 8 | 1 to 1024 | Outstanding requests per connection, including the running one |
+| `maxInFlightBodyBytes` | 64 MiB | 1 byte to 1 TiB | Request body bytes the listener holds at once, across connections (503 beyond); must be at least the application's `maxRequestBody` |
 | `maxRequestLine` | 4096 | 256 to 65,536 | Longest request line in bytes (414 beyond) |
 | `maxHeaderBytes` | 8192 | 256 to 1 MiB | Largest header section in bytes (431 beyond) |
 | `ioThreads` | processors, at least 2 | 1 to 1024 | I/O threads of the listener; handlers never run on them |
@@ -321,9 +323,10 @@ Choosing values:
   sum over all listeners with headroom, and size any connection limit on a load balancer or
   proxy in front of the listener to the same sum, not to `maxConnections`. The lingering pool
   is only used briefly, but a burst of connections that all end at once can fill it.
-- Total open sockets are at most `maxConnections + maxLingeringConnections`. The worst-case memory
-  held for request bodies grows linearly with `maxConnections` (see
-  [request bodies](bodies.md#memory-per-connection)).
+- Total open sockets are at most `maxConnections + maxLingeringConnections`. The memory held for
+  request bodies is capped by `maxInFlightBodyBytes` however many connections are open (see
+  [request bodies](bodies.md#memory-per-connection)); lower it to bound heap use under many slow
+  uploaders, and raise it together with `maxRequestBody` when large bodies must upload concurrently.
 - The connection cap and admission are independent limits. A connection over the cap is closed
   at once without a response, so the client sees a closed connection, never a 503; admission 503s
   are only produced for requests on accepted connections. A cap below the application's admission
