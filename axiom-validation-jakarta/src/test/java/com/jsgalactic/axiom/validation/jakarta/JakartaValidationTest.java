@@ -77,11 +77,11 @@ class JakartaValidationTest {
 
     @Test
     void reportsClassLevelConstraintsAtTheObjectPath() {
-        assertThat(VALIDATION.validate(new Period(5, 1))).containsExactly(new Violation("_root", "ordered_range"));
+        assertThat(VALIDATION.validate(new Period(5, 1))).containsExactly(new Violation("", "ordered_range"));
         var booking = new Booking(new Period(5, 1), List.of(new Period(1, 2), new Period(3, 2)));
         assertThat(VALIDATION.validate(booking)).containsExactly(
                 new Violation("extra[1]", "ordered_range"), new Violation("period", "ordered_range"));
-        assertThat(VALIDATION.validate(null)).containsExactly(new Violation("_root", "not_null"));
+        assertThat(VALIDATION.validate(null)).containsExactly(new Violation("", "not_null"));
     }
 
     @Test
@@ -95,6 +95,46 @@ class JakartaValidationTest {
             assertThat(both.validate(draft)).hasSize(2);
         }
         assertThatThrownBy(() -> JakartaValidation.create((Class<?>) null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void supportsGroupSequencesPassedAsGroups() {
+        try (var sequence = JakartaValidation.create(Fixtures.BasicThenCostly.class)) {
+            // The sequence stops at the first group that fails, so the costly check is not reached.
+            assertThat(sequence.validate(new Fixtures.Account(" ", "x"))).containsExactly(new Violation("name", "not_blank"));
+            assertThat(sequence.validate(new Fixtures.Account("ada", "x"))).containsExactly(new Violation("password", "size"));
+            assertThat(sequence.validate(new Fixtures.Account("ada", "long enough"))).isEmpty();
+        }
+    }
+
+    @Test
+    void honorsAGroupSequenceThatRedefinesTheDefaultGroup() {
+        assertThat(VALIDATION.validate(new Fixtures.Sequenced(" ", "x"))).containsExactly(new Violation("name", "not_blank"));
+        assertThat(VALIDATION.validate(new Fixtures.Sequenced("ada", "x"))).containsExactly(new Violation("password", "size"));
+        assertThat(VALIDATION.validate(new Fixtures.Sequenced("ada", "long enough"))).isEmpty();
+    }
+
+    @Test
+    void cascadesThroughValidOnAContainerAndLeavesTheProvidersDeprecationWarning() {
+        var records = new ArrayList<java.util.logging.LogRecord>();
+        var handler = new java.util.logging.Handler() {
+            @Override public void publish(java.util.logging.LogRecord record) { records.add(record); }
+            @Override public void flush() { }
+            @Override public void close() { }
+        };
+        var root = java.util.logging.Logger.getLogger("");
+        root.addHandler(handler);
+        try (var fresh = JakartaValidation.create()) {
+            var violations = fresh.validate(new Fixtures.Legacy(List.of(new Item(" ", 1))));
+            assertThat(violations).containsExactly(new Violation("items[0].sku", "not_blank"));
+        } finally {
+            root.removeHandler(handler);
+        }
+        // The provider's deprecation warning is left alone on purpose: it points at the annotation to fix.
+        assertThat(records).anySatisfy(record -> {
+            assertThat(record.getLevel()).isEqualTo(java.util.logging.Level.WARNING);
+            assertThat(record.getMessage()).startsWith("HV000271").contains("deprecated");
+        });
     }
 
     @Test

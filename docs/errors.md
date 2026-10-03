@@ -26,7 +26,7 @@ Every framework and application error response uses an
 | `status` | The HTTP status, repeated for clients that lose the status line |
 | `code` | Machine-readable code: `[a-z][a-z0-9_.-]{0,63}`, validated when the exception is created |
 | `requestId` | The `X-Request-ID` of the response, for correlating logs |
-| `violations` | Present only when non-empty: `field` (property path such as `items[0].name`) and `code` |
+| `violations` | Present only when non-empty: `code` and, unless the violation concerns the whole value, `field` (property path such as `items[0].name`) |
 
 `type`, `title`, `detail` and `instance` are omitted; RFC 9457 treats a missing
 `type` as `about:blank`. The in-memory `app.handle`, `TestClient` and the HTTP
@@ -75,6 +75,22 @@ from rules or Jakarta annotations; see [validation](validation.md).
 | 502 | `BadGatewayException` | `bad_gateway` | |
 | 503 | `ServiceUnavailableException([retryAfter])` | `service_unavailable` | `Retry-After` |
 | 504 | `GatewayTimeoutException` | `gateway_timeout` | |
+
+**411** is for endpoints, not the listener: a request with neither Content-Length nor
+Transfer-Encoding has an empty body (RFC 9112 section 6.3), so the listener never
+answers 411. A handler that accepts only bodies with a declared length, such as an upload
+endpoint that refuses chunked content, checks the header itself:
+
+```java
+app.post("/upload", ctx -> {
+    if (ctx.header("Content-Length").isEmpty()) { throw new LengthRequiredException(); }
+    return ctx.status(201).json(store.save(ctx.request().body().bytes()));
+});
+```
+
+A violation whose `field` is empty concerns the whole value (a rule across several
+properties, or a `null` body); its problem entry has only a `code`, for example
+`{"violations":[{"code":"end_before_start"}]}`.
 
 Default codes are the RFC 9110 reason phrase in snake case (`HttpStatus.defaultCode`),
 so 413 is `content_too_large` and 422 `unprocessable_content`. Subclass

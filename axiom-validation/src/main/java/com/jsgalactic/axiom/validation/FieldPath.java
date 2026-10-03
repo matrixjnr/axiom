@@ -11,12 +11,13 @@ import java.util.regex.Pattern;
  * Paths are bounded: once appending a segment would exceed {@link #MAX_LENGTH} characters, or an
  * index exceeds the nine digits a violation field allows, the path stops at the last ancestor that
  * fits and is marked {@linkplain #isTruncated() truncated}; later appends are ignored so a
- * violation is never attributed to an unrelated field. The empty path is reported as
- * {@value #ROOT}, for checks on the whole value.
+ * violation is never attributed to an unrelated field. The empty path is reported as the
+ * empty {@link #ROOT} field, for checks on the whole value; problem responses leave the field
+ * out for it.
  */
 public final class FieldPath {
-    /** Field reported for violations of the whole value. */
-    public static final String ROOT = "_root";
+    /** Field reported for violations of the whole value: the empty string. */
+    public static final String ROOT = "";
     /** Longest field path, matching the limit of {@link Violation#field()}. */
     public static final int MAX_LENGTH = 256;
     private static final int MAX_INDEX = 999_999_999;
@@ -86,7 +87,7 @@ public final class FieldPath {
     }
 
     /**
-     * Appends a field reported by a nested validator; {@value #ROOT} maps to this path.
+     * Appends a field reported by a nested validator; the empty {@link #ROOT} maps to this path.
      *
      * @param field a valid {@link Violation#field()} value
      * @return extended path, or this path marked truncated if the result would be too long
@@ -95,7 +96,7 @@ public final class FieldPath {
     public FieldPath append(String field) {
         Objects.requireNonNull(field, "field");
         new Violation(field, "valid");
-        if (field.equals(ROOT) || truncated) {
+        if (field.isEmpty() || truncated) {
             return this;
         }
         return extend(path.isEmpty() ? field : path + "." + field);
@@ -128,9 +129,9 @@ public final class FieldPath {
     /**
      * Returns the path as a violation field.
      *
-     * @return the path, or {@value #ROOT} for the root
+     * @return the path, or the empty {@link #ROOT} for the root
      */
-    public String toField() { return path.isEmpty() ? ROOT : path; }
+    public String toField() { return path; }
 
     @Override public boolean equals(Object other) {
         return other instanceof FieldPath that && path.equals(that.path) && truncated == that.truncated;
