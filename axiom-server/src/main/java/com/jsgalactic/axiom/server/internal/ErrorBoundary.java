@@ -23,8 +23,12 @@ final class ErrorBoundary implements Handler {
     /** Error handlers of the route's scopes, innermost scope first. */
     private final List<ErrorHandlers> scopes;
     private final FailureLog log;
+    /** Development errors: answers describe the exception. Off unless the application opted in. */
+    private final boolean development;
 
-    ErrorBoundary(Handler chain, Middleware[] middleware, List<ErrorHandlers> scopes, FailureLog log) {
+    ErrorBoundary(Handler chain, Middleware[] middleware, List<ErrorHandlers> scopes, FailureLog log,
+                  boolean development) {
+        this.development = development;
         this.chain = chain;
         this.middleware = middleware;
         this.scopes = List.copyOf(scopes);
@@ -66,11 +70,17 @@ final class ErrorBoundary implements Handler {
      */
     private Response map(DefaultContext context, Exception failure) throws Exception {
         var requestId = context.execution().requestId();
-        var handler = cancelled(context, failure) ? null : find(failure.getClass());
+        boolean cancelled = cancelled(context, failure);
+        var handler = cancelled ? null : find(failure.getClass());
         if (handler == null) {
-            if (!(failure instanceof AxiomException axiom)) { throw failure; }
+            if (!(failure instanceof AxiomException axiom)) {
+                if (!development || cancelled) { throw failure; }
+                // Development errors only: the listener would otherwise answer an opaque 500.
+                log.failure("Request " + requestId + " failed with an unexpected exception", failure);
+                return described(genericFailure(requestId), failure);
+            }
             if (axiom.status() >= 500) { logMapped(requestId, failure, axiom.status(), false); }
-            return Problems.response(axiom, requestId);
+            return described(Problems.response(axiom, requestId), failure);
         }
         context.resetStatus();
         try {
@@ -89,9 +99,17 @@ final class ErrorBoundary implements Handler {
             if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
             broken.addSuppressed(failure);
             log.defect("Request " + requestId + " failed and its error handler failed too", broken);
-            // A framework-generated 500 closes the connection over HTTP, like the listener's own 500.
-            return Problems.response(500, requestId).withHeader("Connection", "close");
+            return described(genericFailure(requestId), broken);
         }
+    }
+
+    /** A framework-generated 500 closes the connection over HTTP, like the listener's own 500. */
+    private static Response genericFailure(String requestId) {
+        return Problems.response(500, requestId).withHeader("Connection", "close");
+    }
+
+    private Response described(Response problem, Throwable failure) {
+        return development ? Problems.withDebug(problem, failure) : problem;
     }
 
     private com.jsgalactic.axiom.context.ErrorHandler<Exception> find(Class<?> type) {

@@ -110,4 +110,30 @@ class ErrorHandlerListenerTest {
             }
         }
     }
+
+    /** Opted-in development errors show the exception over a loopback listener; production stays opaque. */
+    @Test
+    void developmentErrorsDescribeUnmappedExceptionsOnlyWhenEnabled() throws Exception {
+        for (boolean development : new boolean[] {false, true}) {
+            app = Axiom.create();
+            if (development) { app.developmentErrors(); }
+            app.get("/boom", ctx -> { throw new ArithmeticException(POISON); });
+            server = app.listen(0);
+            try (var socket = new Socket()) {
+                socket.connect(server.localAddress(), 5000);
+                socket.setSoTimeout(10_000);
+                socket.getOutputStream().write("GET /boom HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                        .getBytes(StandardCharsets.ISO_8859_1));
+                var reply = MiddlewareListenerTest.read(socket.getInputStream(), false);
+                assertThat(reply.status()).isEqualTo(500);
+                if (development) {
+                    assertThat(reply.body()).contains("\"type\":\"java.lang.ArithmeticException\"", POISON);
+                } else {
+                    assertThat(reply.body()).doesNotContain("debug", "ArithmeticException", "POISON");
+                }
+            }
+            close();
+            app = null;
+        }
+    }
 }

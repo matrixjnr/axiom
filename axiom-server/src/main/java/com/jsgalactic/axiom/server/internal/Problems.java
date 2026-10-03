@@ -79,6 +79,50 @@ public final class Problems {
         return json.append('}').toString().getBytes(StandardCharsets.UTF_8);
     }
 
+    /** Frames of a stack trace included in a development response. */
+    static final int DEBUG_FRAMES = 64;
+    /** Causes included in a development response. */
+    static final int DEBUG_CAUSES = 8;
+
+    /**
+     * Adds the development-mode {@code debug} member to a problem response: the exception's class,
+     * message, stack frames and causes. Only used when the application opted in to development
+     * errors, which it can do only for loopback listeners.
+     *
+     * @param problem a response built by this class
+     * @param failure exception to describe
+     * @return the response with the extra member
+     */
+    static Response withDebug(Response problem, Throwable failure) {
+        var original = new String((byte[]) problem.body(), StandardCharsets.UTF_8);
+        var json = new StringBuilder(original.length() + 512).append(original, 0, original.length() - 1)
+                .append(",\"debug\":{\"type\":");
+        string(json, failure.getClass().getName());
+        if (failure.getMessage() != null) { string(json.append(",\"message\":"), failure.getMessage()); }
+        json.append(",\"stack\":[");
+        var frames = failure.getStackTrace();
+        for (int i = 0; i < Math.min(frames.length, DEBUG_FRAMES); i++) {
+            if (i > 0) { json.append(','); }
+            string(json, frames[i].toString());
+        }
+        json.append(']');
+        var cause = failure.getCause();
+        if (cause != null) {
+            json.append(",\"causes\":[");
+            for (int i = 0; cause != null && i < DEBUG_CAUSES; i++, cause = cause.getCause()) {
+                if (i > 0) { json.append(','); }
+                string(json.append("{\"type\":"), cause.getClass().getName());
+                if (cause.getMessage() != null) { string(json.append(",\"message\":"), cause.getMessage()); }
+                json.append('}');
+            }
+            json.append(']');
+        }
+        json.append("}}");
+        var rebuilt = Response.of(problem.status(), json.toString().getBytes(StandardCharsets.UTF_8));
+        for (var header : problem.headers().entrySet()) { rebuilt = rebuilt.withHeader(header.getKey(), header.getValue()); }
+        return rebuilt;
+    }
+
     /** Escapes defensively although every value is already restricted to safe characters. */
     private static StringBuilder string(StringBuilder json, String value) {
         json.append('"');

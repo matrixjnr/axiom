@@ -8,7 +8,8 @@ when present, field violations. Exception messages, causes, stack traces, class
 names, parser output and request content never reach a response body, in
 production or in tests. Exceptions that are not `AxiomException` and have no
 [error handler](#error-handlers) become a generic **500** over HTTP and are logged
-with the request ID.
+with the request ID. The one exception to the rule is the explicit, loopback-only
+[development mode](#development-errors).
 
 ## Problem responses
 
@@ -146,7 +147,7 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   is interrupted, the interrupt flag is restored and the generic 500 is used.
 - Exceptions without a handler behave as before: `AxiomException`s become problem
   responses, others propagate from `app.handle` and `TestClient` and become the
-  generic 500 over HTTP.
+  generic 500 over HTTP (unless [development errors](#development-errors) are on).
 
 What an error handler returns reaches the client unchanged: never copy exception
 messages, class names or stack traces into it. Headers that middleware add after
@@ -192,6 +193,34 @@ All exceptions of a request, including those of global middleware, use the scope
 matched. A request no route serves has no group, so only the application's handlers apply to
 exceptions of the custom `notFound`, `methodNotAllowed` and `notImplemented` handlers and global
 middleware. Like group routes, a group's handlers are removed if its configuration callback throws.
+
+### Development errors
+
+For local debugging, `app.developmentErrors()` (before startup; there is no flag to pass, so
+configuration cannot turn it on by accident) adds a `debug` member to the problem responses the
+runtime builds for failures:
+
+```json
+{"status":500,"code":"internal_server_error","requestId":"...",
+ "debug":{"type":"java.lang.IllegalStateException","message":"no such order 7",
+          "stack":["com.example.Orders.load(Orders.java:41)","..."],
+          "causes":[{"type":"java.io.IOException","message":"..."}]}}
+```
+
+It covers an `AxiomException`'s problem response, the generic 500 of a failing error handler
+(describing the handler's failure), and an exception that nothing maps, which is then answered
+with a 500 carrying `Connection: close` instead of propagating from `app.handle` and `TestClient`.
+At most 64 stack frames and 8 causes are included. Responses built by your own error handlers
+and failures the listener answers itself are unchanged. The `debug` member can expose internals
+and request content, so the mode is guarded:
+
+- off unless the call is made, and the default responses never contain exception details;
+- `listen` throws `IllegalStateException` for any address that is not a loopback address
+  (including the wildcard address and unresolved names) while it is on;
+- a warning is logged at startup.
+
+A reverse proxy or tunnel in front of the loopback listener would still forward the details, so
+do not run it that way.
 
 ### Logging of failures
 

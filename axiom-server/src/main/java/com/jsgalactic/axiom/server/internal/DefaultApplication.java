@@ -69,6 +69,7 @@ final class DefaultApplication implements Application {
     private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
     private volatile Metrics metrics = Metrics.NOOP;
     private volatile FailureLog failureLog = FailureLog.DEFAULT;
+    private volatile boolean developmentErrors;
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
     private volatile int maxRequestBody = 1024 * 1024;
     private volatile State state = State.CONFIGURING;
@@ -108,6 +109,10 @@ final class DefaultApplication implements Application {
         Objects.requireNonNull(address, "address");
         Objects.requireNonNull(options, "options");
         if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+        if (developmentErrors && (address.isUnresolved() || !address.getAddress().isLoopbackAddress())) {
+            throw new IllegalStateException("Development errors expose exception details in responses and are"
+                    + " allowed only on a loopback address, not " + address);
+        }
         // Provider discovery and binding can block; neither runs under the lifecycle lock.
         var providers = ServiceLoader.load(HttpTransportProvider.class).iterator();
         if (!providers.hasNext()) {
@@ -420,6 +425,10 @@ final class DefaultApplication implements Application {
             // A route of an open group could be compiled without the middleware its callback adds later.
             throw new IllegalStateException("Cannot start while a route group is being configured");
         }
+        if (developmentErrors) {
+            LOG.log(System.Logger.Level.WARNING, "Development errors are on: responses describe exceptions."
+                    + " Never use them in production.");
+        }
         var codecs = Codecs.discover();
         var global = List.copyOf(root.middleware);
         var rootScopes = root.errorScopes();
@@ -429,12 +438,12 @@ final class DefaultApplication implements Application {
             registration.scope().collectGroupMiddleware(chain);
             chain.addAll(registration.middleware());
             chains.put(route, Pipeline.compose(chain, registration.handler(),
-                    registration.scope().errorScopes(), failureLog));
+                    registration.scope().errorScopes(), failureLog, developmentErrors));
         });
         var router = CompiledRouter.compile(chains, Set.copyOf(recognizedMethods));
         // Answers the router produces itself are wrapped by global middleware only.
         var unmatched = Pipeline.compose(global, unmatchedTerminal(notFoundHandler, methodNotAllowedHandler,
-                notImplementedHandler), rootScopes, failureLog);
+                notImplementedHandler), rootScopes, failureLog, developmentErrors);
         runtime = snapshot(router, unmatched, codecs);
         registrations.clear();
         shapes.clear();
@@ -536,6 +545,12 @@ final class DefaultApplication implements Application {
     }
 
     @Override public Metrics metrics() { return metrics; }
+
+    @Override public synchronized Application developmentErrors() {
+        requireState(State.CONFIGURING);
+        developmentErrors = true;
+        return this;
+    }
 
     @Override public synchronized Application failureLog(System.Logger logger, System.Logger.Level level) {
         requireState(State.CONFIGURING);

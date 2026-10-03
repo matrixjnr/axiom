@@ -17,7 +17,7 @@ final class Pipeline {
      * response with the context's settings before the innermost middleware sees it.
      */
     static Handler compose(List<Middleware> middleware, Handler handler, List<ErrorHandlers> scopes,
-                           FailureLog log) {
+                           FailureLog log, boolean development) {
         Handler chain = context -> {
             var result = handler.handle(context);
             return result instanceof Response response ? response : context.response(result);
@@ -25,7 +25,7 @@ final class Pipeline {
         for (int i = middleware.size() - 1; i >= 0; i--) {
             chain = wrap(middleware.get(i), chain, i, middleware.size());
         }
-        return new ErrorBoundary(chain, middleware.toArray(new Middleware[0]), scopes, log);
+        return new ErrorBoundary(chain, middleware.toArray(new Middleware[0]), scopes, log, development);
     }
 
     /**
