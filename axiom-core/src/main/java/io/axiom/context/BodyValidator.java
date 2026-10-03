@@ -21,8 +21,10 @@ public interface BodyValidator<T> {
     /**
      * Checks a value.
      *
-     * @param value decoded value, never null when called by {@code validatedBody}
+     * @param value value to check; never null when called by {@code validatedBody}, but other
+     *        callers (such as {@code Validation.require}) may pass null
      * @return violations, empty when the value is valid; never null and without null elements
+     *         (callers fail with {@link IllegalStateException} otherwise)
      */
     List<Violation> validate(T value);
 }

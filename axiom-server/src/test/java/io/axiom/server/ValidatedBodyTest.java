@@ -93,6 +93,17 @@ class ValidatedBodyTest {
     }
 
     @Test
+    void keepsExactlyTheFirstHundredOfOneHundredAndOneViolations() throws Exception {
+        BodyValidator<Item> many = value -> IntStream.range(0, 101)
+                .mapToObj(i -> new Violation("items[" + i + "]", "invalid")).toList();
+        try (var app = app(many)) {
+            var text = text(app.handle(post("application/json", "name=pen;quantity=2")));
+            assertThat(text.split("\\{\"field\"", -1)).hasSize(101);
+            assertThat(text).contains("\"items[0]\"", "\"items[99]\"").doesNotContain("items[100]");
+        }
+    }
+
+    @Test
     void rejectsBrokenValidators() throws Exception {
         try (var nullList = app(item -> null); var nullElement = app(item -> Collections.singletonList(null))) {
             assertThatIllegalStateException().isThrownBy(() -> nullList.handle(post("application/json", "name=a;quantity=1")));

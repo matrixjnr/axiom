@@ -29,8 +29,10 @@ public interface Validator<T> extends BodyValidator<T> {
     /**
      * Checks a value.
      *
-     * @param value value to check; may be null
-     * @return immutable or caller-owned violations, empty when the value is valid; never null
+     * @param value value to check; may be null, but never null when called by
+     *        {@code ctx.validatedBody}
+     * @return immutable or caller-owned violations, empty when the value is valid; never null and
+     *         without null elements (callers fail with {@link IllegalStateException} otherwise)
      */
     @Override
     List<Violation> validate(T value);
