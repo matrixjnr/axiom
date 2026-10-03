@@ -273,7 +273,8 @@ is parsed; otherwise the listener answers 408 and closes. A connection receiving
 body bytes is not idle, but one that stops sending mid-body for 30 seconds is.
 
 The default execution deadline is ten seconds, configurable before startup through
-`app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.
+`app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`, a correlation value
+that is predictable within one process and must not be used as a secret or credential.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
 A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2, streaming request bodies,

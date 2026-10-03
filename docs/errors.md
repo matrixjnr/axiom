@@ -25,7 +25,7 @@ Every framework and application error response uses an
 | --- | --- |
 | `status` | The HTTP status, repeated for clients that lose the status line |
 | `code` | Machine-readable code: `[a-z][a-z0-9_.-]{0,63}`, validated when the exception is created |
-| `requestId` | The `X-Request-ID` of the response, for correlating logs |
+| `requestId` | The `X-Request-ID` of the response, for correlating logs. A correlation value, not a secret: later IDs from the same process can be predicted from an earlier one (see [execution](execution.md)) |
 | `violations` | Present only when non-empty: `code` and, unless the violation concerns the whole value, `field` (property path such as `items[0].name`) |
 
 `type`, `title`, `detail` and `instance` are omitted; RFC 9457 treats a missing
