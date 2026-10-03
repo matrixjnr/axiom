@@ -10,7 +10,8 @@ listener / TestClient: parse, admit, start deadline
   -> router match
        matched:   global -> group (outer..inner) -> route -> handler
        unmatched: global -> router answer or its custom handler (404, 405, OPTIONS 204, 501)
-  <- exception?  error handler (nearest class) or built-in problem mapping
+  <- exception?  error handler (nearest class) or built-in problem mapping,
+                 then Middleware.afterError, innermost first
   <- codec encoding and Accept check (406), HEAD body removal
   <- listener: serialization, X-Request-ID, write
 ```
@@ -30,26 +31,62 @@ before admission or for errors the listener produces itself.
 
 ## Middleware
 
-> **Middleware do not decorate error responses.** When a handler or middleware
+> **Decorate error responses with `afterError`.** When a handler or middleware
 > throws, the exception passes through every middleware and becomes a response
-> only afterwards (problem response or error handler). Headers a middleware adds
-> after `next.run()`, such as security headers, are therefore missing on those
-> responses. Do not rely on middleware for headers that every response must
-> carry. Workaround: register a global error handler for `Exception` that adds the
-> headers, and one for `AxiomException` if problem responses need them too (it
-> replaces their built-in body, so it must build its own), or catch exceptions in
-> the middleware and turn them into responses there.
+> only afterwards (problem response, error handler response or 406), so code
+> after `next.run()` does not run for it. A middleware that must decorate every
+> response, such as security headers or CORS, overrides `afterError` as well. The
+> bundled `SecurityHeaders` and `Cors` do.
 
 ```java
 @FunctionalInterface
 public interface Middleware {
     Response handle(Context ctx, Next next) throws Exception;
 
+    default Response afterError(Context ctx, Response response) { return response; }
+
     interface Next {
         Response run() throws Exception;
     }
 }
 ```
+
+```java
+Middleware headers = new Middleware() {
+    public Response handle(Context ctx, Next next) throws Exception {
+        return next.run().withHeader("X-Content-Type-Options", "nosniff");
+    }
+    public Response afterError(Context ctx, Response response) {
+        return response.withHeader("X-Content-Type-Options", "nosniff");
+    }
+};
+```
+
+`afterError` is called once for each response that was produced from an exception,
+for every middleware that was entered when the failure happened, innermost first:
+
+- **Which responses:** the problem response of an `AxiomException`, the response of
+  an error handler (including one that translated the exception), the generic 500
+  of a failing error handler, and the 406 for a response type the client does not
+  accept. A request that never reaches the chain (413, CONNECT, listener errors),
+  an exception that nothing maps (it propagates from `app.handle` and becomes the
+  generic 500 over HTTP) and a cancelled or expired request do not reach it.
+- **Which middleware:** exactly those on the stack when the exception was thrown.
+  A middleware an outer one short-circuited before was never entered and is not
+  called. A middleware that catches an exception and throws another one is
+  counted, and so are the ones outside it; the ones it had called inside are not.
+  When the 406 is decided every middleware has returned, and all of them are called.
+- **Not called** for responses that come back through `next.run()`, including ones
+  a handler or middleware builds itself with an error status, and for the router's
+  404, 405 and 501 answers, which already flow through global middleware as
+  ordinary responses. An exception thrown by a custom `notFound` handler is an
+  ordinary handler exception.
+- It runs on the request's thread under the deadline and must not throw: an
+  `AxiomException` from it answers with its own undecorated problem response, `null`
+  and any other exception fail the request like an unexpected exception.
+- A middleware that already catches exceptions and builds responses itself keeps
+  working; it does not need `afterError` for those, and its own response is
+  decorated by the middleware outside it as before.
 
 `next.run()` runs the rest of the chain (more middleware, then the handler) and
 returns its response. A middleware that returns without calling it short-circuits:
@@ -160,7 +197,7 @@ app.error(IllegalStateException.class, (ctx, failure) -> { throw new ConflictExc
 - `error(Class<E>, ErrorHandler<? super E>)` registers a handler for an exception
   class and its subclasses before startup; one handler per class.
 - An exception that leaves the chain (handler or middleware) is looked up after
-  middleware have unwound. The registered class nearest to the exception's own
+  middleware have unwound, and the response is then decorated by `afterError`. The registered class nearest to the exception's own
   class in its superclass chain wins.
 - `AxiomException` keeps its built-in problem response unless a handler is
   registered for `AxiomException` or one of its subclasses: the built-in
@@ -214,16 +251,15 @@ the Jakarta adapter can be passed directly; `Validation.require` is unchanged.
   prefix would make a group's authentication answer for paths it does not own.
 - Mapping exceptions inside the chain so middleware see error responses:
   middleware then could not observe exceptions for logging or translation.
-  The cost is that headers a middleware adds after `next.run()` are missing on
-  error responses unless it catches the exception itself.
+  Instead the exception passes through the chain as before and the response is
+  decorated afterwards by `afterError`, which costs a second method on middleware
+  that decorate responses.
 - Mapping `Throwable`: `Error`s signal a broken process, not a request outcome.
 - Route-level middleware through a separate builder or an empty-prefix group
   only: either is more ceremony for the common single-route case.
 
 ## Limitations
 
-- Middleware that add headers after `next.run()` do not decorate responses for
-  exceptions (problem responses and error handler responses).
 - Error handlers are application-wide; there are no group-scoped handlers.
 - Middleware are synchronous and run after admission; they cannot influence
   admission, run before the body is received, or see listener errors.

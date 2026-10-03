@@ -51,6 +51,24 @@ class CorsTest {
     }
 
     @Test
+    void decoratesResponsesMappedFromExceptionsLikeOthers() throws Exception {
+        var app = Axiom.create();
+        app.use(strict().build());
+        app.get("/denied", ctx -> { throw new com.jsgalactic.axiom.error.UnauthorizedException("Bearer realm=\"api\""); });
+        try (var client = TestClient.start(app)) {
+            var denied = client.execute(request("GET", "/denied", "Origin", APP));
+            assertThat(denied.status()).isEqualTo(401);
+            assertThat(denied.headers()).containsEntry("Access-Control-Allow-Origin", APP)
+                    .containsEntry("Access-Control-Allow-Credentials", "true")
+                    .containsEntry("Access-Control-Expose-Headers", "X-Request-ID").containsEntry("Vary", "Origin");
+            var other = client.execute(request("GET", "/denied", "Origin", "https://evil.example.com"));
+            assertThat(other.status()).isEqualTo(401);
+            assertNoCorsHeaders(other);
+            assertThat(other.headers()).containsEntry("Vary", "Origin");
+        }
+    }
+
+    @Test
     void answersAnAllowedPreflightOnTopOfAutomaticOptions() throws Exception {
         try (var client = client(strict().build())) {
             var response = client.execute(preflight("/notes", APP, "POST", "content-type, Authorization"));

@@ -100,7 +100,8 @@ typed values (a method set, a `Duration` rounded up to whole seconds and at most
 day, a challenge starting with an auth-scheme token) and validated to visible ASCII,
 so CR/LF injection is rejected when the exception is created. Never build codes,
 fields or challenges from request data. A cause attached with `initCause` is kept
-for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
+for logs only. 5xx `AxiomException`s are logged with the request ID (see
+[logging](#logging-of-failures)).
 
 ## Error handlers
 
@@ -132,10 +133,7 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   or with global middleware. Exceptions those handlers throw are offered like any
   handler's. Requests rejected before routing (413, CONNECT) and listener errors are
   not offered either.
-- A mapped failure is logged at WARNING with the request ID and the exception,
-  server-side only, unless it is an `AxiomException` below 500 answered below
-  500 (an expected client error). Translations by throwing an `AxiomException`
-  log the original exception the same way.
+- A mapped failure is logged once; see [logging](#logging-of-failures).
 - Only `Exception` subclasses can be mapped; `Error`s keep failing the request.
 - Error handlers never run for a request that was cancelled or whose deadline
   expired (its outcome is discarded anyway), and `InterruptedException` and
@@ -147,9 +145,29 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
 
 What an error handler returns reaches the client unchanged: never copy exception
 messages, class names or stack traces into it. Headers that middleware add after
-`next.run()` are not on error handler or problem responses, because the exception
-passed through the middleware; a middleware that must decorate them catches the
-exception itself.
+`next.run()` are not added by that code for error handler or problem responses,
+because the exception passed through the middleware; middleware that must decorate
+them override `Middleware.afterError`, which runs for every such response (problem
+responses, error handler responses, the generic 500 and the 406; see
+[middleware](middleware.md#middleware)). `SecurityHeaders` and `Cors` do.
+
+### Logging of failures
+
+Failures are logged server-side only, never in a response, through the logger named
+`com.jsgalactic.axiom.failures` at WARNING by default. `app.failureLog(logger, level)` chooses
+another `System.Logger` and level before startup (`Level.OFF` silences the entries). Each
+failure is logged once per request, with the request ID and the exception:
+
+- a 5xx `AxiomException` answered by its built-in problem response;
+- an exception an error handler mapped, whatever the answer's status, unless it is an
+  `AxiomException` below 500 answered below 500 (an expected client error). A translation
+  by throwing an `AxiomException` logs the original exception only, with the status of the
+  translation, so a translated 5xx is not logged twice;
+- a failing error handler (or a `null` result) is a defect and is always logged at ERROR on
+  the same logger, with the original failure suppressed into it, whatever the level.
+
+Exceptions that propagate unmapped from `app.handle` are the caller's to log; the HTTP
+listener logs them itself.
 
 ## Framework statuses
 

@@ -37,12 +37,12 @@ final class DefaultApplication implements Application {
      * Immutable configuration published at startup. The request path reads it through one
      * volatile field and takes no lock; {@code router} is null once the application closes.
      */
-    private record Runtime(CompiledRouter router, Handler unmatched, ErrorHandlers errors, List<Route> routes,
+    private record Runtime(CompiledRouter router, Handler unmatched, List<Route> routes,
                            Set<Route> routeSet, Map<Route, AdmissionPolicy> routePolicies,
                            AdmissionPolicy defaultPolicy, Codecs codecs, int maxRequestBody) {
         /** Drops every reference to application handlers, middleware and error handlers. */
         Runtime withoutRouter() {
-            return new Runtime(null, null, ErrorHandlers.NONE, routes, routeSet, routePolicies, defaultPolicy,
+            return new Runtime(null, null, routes, routeSet, routePolicies, defaultPolicy,
                     codecs, maxRequestBody);
         }
     }
@@ -69,6 +69,7 @@ final class DefaultApplication implements Application {
     private final List<Server> listeners = new ArrayList<>();
     private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
     private volatile Metrics metrics = Metrics.NOOP;
+    private volatile FailureLog failureLog = FailureLog.DEFAULT;
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
     private volatile int maxRequestBody = 1024 * 1024;
     private volatile State state = State.CONFIGURING;
@@ -404,18 +405,19 @@ final class DefaultApplication implements Application {
         }
         var codecs = Codecs.discover();
         var global = List.copyOf(root.middleware);
+        var scopes = List.of(new ErrorHandlers(errorHandlers));
         var chains = new LinkedHashMap<Route, Handler>();
         registrations.forEach((route, registration) -> {
             var chain = new ArrayList<>(global);
             registration.scope().collectGroupMiddleware(chain);
             chain.addAll(registration.middleware());
-            chains.put(route, Pipeline.compose(chain, registration.handler()));
+            chains.put(route, Pipeline.compose(chain, registration.handler(), scopes, failureLog));
         });
         var router = CompiledRouter.compile(chains, Set.copyOf(recognizedMethods));
         // Answers the router produces itself are wrapped by global middleware only.
         var unmatched = Pipeline.compose(global, unmatchedTerminal(notFoundHandler, methodNotAllowedHandler,
-                notImplementedHandler));
-        runtime = snapshot(router, unmatched, new ErrorHandlers(errorHandlers), codecs);
+                notImplementedHandler), scopes, failureLog);
+        runtime = snapshot(router, unmatched, codecs);
         registrations.clear();
         shapes.clear();
         state = State.RUNNING;
@@ -446,9 +448,9 @@ final class DefaultApplication implements Application {
         };
     }
 
-    private Runtime snapshot(CompiledRouter router, Handler unmatched, ErrorHandlers errors, Codecs codecs) {
+    private Runtime snapshot(CompiledRouter router, Handler unmatched, Codecs codecs) {
         var routes = List.copyOf(registrations.keySet());
-        return new Runtime(router, unmatched, errors, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
+        return new Runtime(router, unmatched, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
                 codecs, maxRequestBody);
     }
 
@@ -517,6 +519,12 @@ final class DefaultApplication implements Application {
 
     @Override public Metrics metrics() { return metrics; }
 
+    @Override public synchronized Application failureLog(System.Logger logger, System.Logger.Level level) {
+        requireState(State.CONFIGURING);
+        failureLog = new FailureLog(logger, level);
+        return this;
+    }
+
     @Override public Optional<Route> resolve(Request request) {
         Objects.requireNonNull(request, "request");
         var match = acceptingRouter().match(request);
@@ -551,8 +559,9 @@ final class DefaultApplication implements Application {
         try {
             response = dispatch(published, request, execution);
         } catch (AxiomException failure) {
+            // Failures before routing (413) and exceptions of afterError, which the chain did not map.
             if (failure.status() >= 500) {
-                LOG.log(System.Logger.Level.WARNING, "Request " + execution.requestId() + " failed with "
+                failureLog.failure("Request " + execution.requestId() + " failed with "
                         + failure.status() + " " + failure.code(), failure);
             }
             response = Problems.response(failure, execution.requestId());
@@ -592,65 +601,8 @@ final class DefaultApplication implements Application {
                     frameworkAnswer(published.router(), request, match, execution), published.router());
             chain = published.unmatched();
         }
-        try {
-            // Composed chains always return a Response; encoding runs once, after every middleware.
-            return encode(published.codecs(), request, (Response) chain.handle(context), true);
-        } catch (Exception failure) {
-            return handleError(published, context, failure);
-        }
-    }
-
-    /**
-     * Offers an exception from the chain to the registered error handlers. Without one it is
-     * rethrown: AxiomExceptions get their problem response, others propagate. An AxiomException
-     * thrown by the error handler is rethrown for its problem response and not handled again;
-     * any other failure of the error handler becomes the generic 500.
-     */
-    private static Response handleError(Runtime published, DefaultContext context, Exception failure) throws Exception {
-        if (cancelled(context, failure)) { throw failure; }
-        var handler = published.errors().find(failure.getClass());
-        if (handler == null) { throw failure; }
-        context.resetStatus();
-        try {
-            var response = handler.handle(context, failure);
-            if (response == null) {
-                throw new IllegalStateException("Error handler for " + failure.getClass().getName() + " returned null");
-            }
-            // Error responses are sent whatever the client accepts, like problem responses.
-            var encoded = encode(published.codecs(), context.request(), response, false);
-            logMapped(context, failure, encoded.status());
-            return encoded;
-        } catch (AxiomException translated) {
-            logMapped(context, failure, translated.status());
-            throw translated;
-        } catch (Exception broken) {
-            if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
-            broken.addSuppressed(failure);
-            LOG.log(System.Logger.Level.ERROR, "Request " + context.execution().requestId()
-                    + " failed and its error handler failed too", broken);
-            return Problems.response(500, context.execution().requestId());
-        }
-    }
-
-    /**
-     * Logs a failure an error handler mapped, server-side only, unless it is an expected client
-     * error: an AxiomException below 500 answered below 500.
-     */
-    private static void logMapped(DefaultContext context, Exception failure, int status) {
-        boolean clientError = failure instanceof AxiomException axiom && axiom.status() < 500;
-        if (status >= 500 || !clientError) {
-            LOG.log(System.Logger.Level.WARNING, "Request " + context.execution().requestId() + " failed; its error handler"
-                    + " answered " + status, failure);
-        }
-    }
-
-    /**
-     * Whether the request was cancelled or ran out of time: its outcome is discarded, so no
-     * application error handler runs. Interruption and cancellation are never offered at all.
-     */
-    private static boolean cancelled(DefaultContext context, Exception failure) {
-        return failure instanceof InterruptedException || failure instanceof java.util.concurrent.CancellationException
-                || Thread.currentThread().isInterrupted() || context.execution().isExpired();
+        // The chain's outermost step encodes the response and maps exceptions; see ErrorBoundary.
+        return (Response) chain.handle(context);
     }
 
     /** The router's own answer when no route serves the request method on its path. */
@@ -665,26 +617,6 @@ final class DefaultApplication implements Application {
         return Problems.response(405, execution.requestId()).withHeader("Allow", match.allow());
     }
 
-    /**
-     * Prepares a response whose Content-Type has an installed codec: checks the request's Accept
-     * header (406 when nothing matches) and encodes values other than String and byte[].
-     */
-    private static Response encode(Codecs codecs, Request request, Response response, boolean negotiate) {
-        var mediaType = Codecs.mediaType(response.headers().get("Content-Type"));
-        var codec = mediaType == null ? null : codecs.forMediaType(mediaType);
-        if (codec == null) { return response; }
-        if (negotiate && !Codecs.acceptable(request.header("Accept").orElse(null), mediaType)) {
-            throw new NotAcceptableException();
-        }
-        var body = response.body();
-        if (body == null || body instanceof String || body instanceof byte[] || response.isStreaming()) { return response; }
-        var encoded = Response.of(response.status(), codec.encode(body));
-        for (var header : response.headers().entrySet()) {
-            encoded = encoded.withHeader(header.getKey(), header.getValue());
-        }
-        return encoded;
-    }
-
     @Override
     public State state() { return state; }
 
@@ -695,7 +627,7 @@ final class DefaultApplication implements Application {
         synchronized (this) {
             hook = shutdownHook;
             shutdownHook = null;
-            runtime = runtime == null ? snapshot(null, null, ErrorHandlers.NONE, Codecs.of(List.of())) : runtime.withoutRouter();
+            runtime = runtime == null ? snapshot(null, null, Codecs.of(List.of())) : runtime.withoutRouter();
             state = State.CLOSED;
             registrations.clear();
             root.middleware.clear();

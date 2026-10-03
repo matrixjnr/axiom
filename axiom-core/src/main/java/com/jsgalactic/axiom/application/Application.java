@@ -172,7 +172,9 @@ public interface Application extends RouteGroup, AutoCloseable {
     /**
      * Maps exceptions of a class and its subclasses to responses before startup. When a handler
      * or middleware throws, the registered class nearest to the exception's class in its
-     * superclass chain wins, after every middleware has unwound. {@link com.jsgalactic.axiom.error.AxiomException}
+     * superclass chain wins, after every middleware has unwound; the response is then decorated by
+     * the middleware through {@link com.jsgalactic.axiom.context.Middleware#afterError}.
+     * {@link com.jsgalactic.axiom.error.AxiomException}
      * keeps its built-in problem response unless a handler is registered for
      * {@code AxiomException} or one of its subclasses: the built-in mapping counts as registered
      * for {@code AxiomException}, so a handler for {@code Exception} does not replace it.
@@ -288,6 +290,28 @@ public interface Application extends RouteGroup, AutoCloseable {
      * @return metrics receiving the runtime's measurements
      */
     Metrics metrics();
+
+    /**
+     * Chooses where and at which level the runtime logs failures it answered, before startup. The
+     * default is the logger named {@code com.jsgalactic.axiom.failures} at
+     * {@link System.Logger.Level#WARNING}.
+     *
+     * <p>Each request failure is logged at most once, with the request ID and the exception, and
+     * never reaches a response: a 5xx {@link com.jsgalactic.axiom.error.AxiomException} answered
+     * by the built-in problem response, and an exception that an {@link #error error handler}
+     * mapped (including one it translated into an {@code AxiomException}), unless it is an
+     * {@code AxiomException} below 500 answered below 500, which is an expected client error and
+     * is not logged. A failing error handler is a defect of the application and is always logged
+     * at {@link System.Logger.Level#ERROR} on the same logger. Failures the listener answers
+     * itself are logged by the transport.
+     *
+     * @param logger destination, for example {@code System.getLogger("audit")}
+     * @param level level of the entries; {@link System.Logger.Level#OFF} silences them
+     * @return this application
+     * @throws IllegalArgumentException if {@code level} is {@link System.Logger.Level#ALL}
+     * @throws IllegalStateException if configuration has ended
+     */
+    Application failureLog(System.Logger logger, System.Logger.Level level);
 
     /**
      * Resolves a route identity without executing user code. Requires a running application.
