@@ -89,7 +89,8 @@ final class ErrorBoundary implements Handler {
             if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
             broken.addSuppressed(failure);
             log.defect("Request " + requestId + " failed and its error handler failed too", broken);
-            return Problems.response(500, requestId);
+            // A framework-generated 500 closes the connection over HTTP, like the listener's own 500.
+            return Problems.response(500, requestId).withHeader("Connection", "close");
         }
     }
 

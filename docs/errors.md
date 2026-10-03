@@ -117,7 +117,11 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   wins. One handler per class; registration ends at `start()`.
 - Handlers run after every middleware has unwound, with the request's context
   (status reset to 200). Their responses are encoded by the codecs without an
-  Accept check, like problem responses.
+  Accept check, like problem responses: **an error is never answered 406.** The
+  client cannot be told about a failure it did not ask to see in that form, so the
+  error is sent as its handler built it (a handler that wants to honor Accept
+  reads `ctx.header("Accept")` itself); a successful response of the same type
+  is still answered 406 when Accept excludes it.
 - `AxiomException`s keep the problem responses above unless a handler is
   registered for `AxiomException` or a subclass: the built-in mapping counts as
   the handler for `AxiomException`, so a handler for `Exception` does not
@@ -126,7 +130,8 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   response; it is not offered to error handlers again. Any other exception from
   an error handler, or a `null` result, is logged with the request ID and
   answered with the generic 500 problem body, in memory, in `TestClient` and over
-  HTTP. That 500 keeps a keep-alive connection open.
+  HTTP. That 500 carries `Connection: close` and the listener closes the
+  connection after it, like the listener's own 500 for an unmapped exception.
 - Router answers (404, 405, 501, automatic OPTIONS) are responses, not exceptions,
   and are never offered. Customize them with `app.notFound`, `app.methodNotAllowed`
   and `app.notImplemented` (see [customising router answers](routing.md#customising-router-answers)),
@@ -198,9 +203,12 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 
 Errors the listener generates itself (the rows marked Listener, including its 500,
 503 and 504) close the connection because the request framing or connection state
-may be unusable. Runtime errors (404, 405, 406, 415, 501 for an unrecognized method, 400 from decoding) and
-`AxiomException`s thrown by handlers, whatever their status, keep a keep-alive
-connection open. A listener never sends an error ahead of an
+may be unusable. So does every **500 the framework generates**: an unmapped handler
+exception, an unsendable response, and the generic 500 after a failing error handler
+(which carries `Connection: close`, also in memory), since the application is in an
+unknown state. Runtime errors (404, 405, 406, 415, 501 for an unrecognized method, 400 from decoding) and
+`AxiomException`s thrown by handlers or error handlers, whatever their status (including
+an `InternalServerErrorException`), keep a keep-alive connection open. A listener never sends an error ahead of an
 earlier pipelined response: earlier requests complete and are answered in order, then
 the error is sent and the connection closes (see
 [errors on pipelined requests](http.md#errors-on-pipelined-requests)).
