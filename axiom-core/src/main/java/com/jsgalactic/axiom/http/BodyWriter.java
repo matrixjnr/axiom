@@ -59,4 +59,28 @@ public interface BodyWriter {
      * @return bytes written
      */
     long bytesWritten();
+
+    /**
+     * Reports whether the listener has started to shut down. A stream is not cut off at once
+     * then: it keeps the shutdown grace period, during which writes still work, and is aborted
+     * with {@link StreamAbortedException.Reason#SHUTDOWN} only if it is still running afterwards.
+     * A body that sees shutdown should send what completes it, such as a final event, and
+     * return, which ends the response with a final chunk and closes the connection. A body that
+     * ignores it is cut when the grace period ends.
+     *
+     * @return true once shutdown has begun; always false for a writer that is not connected to a listener
+     */
+    default boolean shutdownRequested() { return false; }
+
+    /**
+     * Runs an action once when shutdown begins, or at once on the calling thread if it already
+     * has. Use it to wake a body that is blocked on something other than a write, for example to
+     * complete a future or unsubscribe so that a blocking poll returns. The action runs on a
+     * thread of the server (often its event loop) when shutdown begins, so it must be quick and
+     * must not block; an exception it throws is logged and ignored. Actions never run for a
+     * writer that is not connected to a listener.
+     *
+     * @param action what to run
+     */
+    default void onShutdown(Runnable action) { Objects.requireNonNull(action, "action"); }
 }

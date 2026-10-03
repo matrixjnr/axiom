@@ -280,9 +280,9 @@ in-memory registry and a Prometheus renderer.
 var registry = MetricsRegistry.create();
 var app = Axiom.create().metrics(registry);             // requests, latency, admission, queue depth
 var health = Health.builder(app).readiness("database", () -> pool.isValid(1)).build();
-health.register(app, security.hasRole("ops"));          // GET /health/live, GET /health/ready
+health.register(app, security.hasRole("ops"));          // GET /health/startup, /health/live, /health/ready
 app.get("/metrics", PrometheusText.handler(registry), security.hasRole("ops"));
-// shutdown: health.beginDrain(); then app.close()
+// shutdown: app.closeOnJvmShutdown(Duration.ofSeconds(10)) drains readiness, waits, then closes
 ```
 
 Tags are route templates and status classes, never raw paths or user input. **Do not expose

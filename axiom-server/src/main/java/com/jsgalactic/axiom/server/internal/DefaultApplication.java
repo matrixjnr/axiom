@@ -15,6 +15,7 @@ import com.jsgalactic.axiom.http.spi.HttpTransportProvider;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.observability.Metrics;
+import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteDoc;
 import com.jsgalactic.axiom.routing.RouteGroup;
@@ -87,6 +88,18 @@ final class DefaultApplication implements Application {
         void remove(Thread hook);
     }
 
+    /** How the shutdown hook waits for balancers to notice the drain; a seam so tests need not wait. */
+    interface DrainPause {
+        void pause(Duration delay) throws InterruptedException;
+    }
+
+    private final List<Runnable> drainActions = new ArrayList<>();
+    private Duration drainDelay = Duration.ZERO;
+    private DrainPause drainPause = delay -> Thread.sleep(delay);
+
+    /** Replaces the wait of the shutdown hook; for tests. */
+    void drainPause(DrainPause pause) { this.drainPause = Objects.requireNonNull(pause, "pause"); }
+
     /** Time added to the longest grace period for the stop of executors and event loops. */
     static final Duration SHUTDOWN_HOOK_MARGIN = Duration.ofSeconds(5);
     private final Duration hookMargin;
@@ -137,10 +150,28 @@ final class DefaultApplication implements Application {
     }
 
     @Override
-    public Application closeOnJvmShutdown() {
+    public Application closeOnJvmShutdown() { return closeOnJvmShutdown(Duration.ZERO); }
+
+    @Override
+    public Application onDrain(Runnable action) {
+        Objects.requireNonNull(action, "action");
+        synchronized (this) {
+            if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+            drainActions.add(action);
+        }
+        return this;
+    }
+
+    @Override
+    public Application closeOnJvmShutdown(Duration drainDelay) {
+        Objects.requireNonNull(drainDelay, "drainDelay");
+        if (drainDelay.isNegative() || drainDelay.compareTo(Duration.ofHours(1)) > 0) {
+            throw new IllegalArgumentException("drainDelay must be from zero to one hour");
+        }
         synchronized (this) {
             if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
             if (shutdownHook != null) { return this; }
+            this.drainDelay = drainDelay;
             var hook = new Thread(this::shutdownFromJvm, "axiom-shutdown");
             hooks.add(hook); // IllegalStateException when the JVM is already shutting down
             shutdownHook = hook;
@@ -150,6 +181,20 @@ final class DefaultApplication implements Application {
 
     /** The shutdown hook: closes the application, then waits for its listeners, within a bound. */
     private void shutdownFromJvm() {
+        List<Runnable> drains;
+        Duration pause;
+        synchronized (this) {
+            drains = List.copyOf(drainActions);
+            pause = drainDelay;
+        }
+        for (var drain : drains) {
+            try { drain.run(); }
+            catch (RuntimeException failure) { LOG.log(System.Logger.Level.WARNING, "A drain action failed", failure); }
+        }
+        if (!pause.isZero()) {
+            try { drainPause.pause(pause); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
         List<Server> owned;
         Duration wait;
         synchronized (this) {
@@ -405,7 +450,7 @@ final class DefaultApplication implements Application {
             // A route of an open group could be compiled without the middleware its callback adds later.
             throw new IllegalStateException("Cannot start while a route group is being configured");
         }
-        var codecs = Codecs.discover();
+        var codecs = Codecs.discover(metrics);
         var global = List.copyOf(root.middleware);
         var chains = new LinkedHashMap<Route, Handler>();
         registrations.forEach((route, registration) -> {
@@ -573,7 +618,7 @@ final class DefaultApplication implements Application {
             response = dispatch(published, request, execution);
         } catch (AxiomException failure) {
             if (failure.status() >= 500) {
-                LOG.log(System.Logger.Level.WARNING, "Request " + execution.requestId() + " failed with "
+                LOG.log(System.Logger.Level.WARNING, "Request " + TraceContext.correlation(execution.requestId(), request) + " failed with "
                         + failure.status() + " " + failure.code(), failure);
             }
             response = Problems.response(failure, execution.requestId());
@@ -655,7 +700,7 @@ final class DefaultApplication implements Application {
         } catch (Exception broken) {
             if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
             broken.addSuppressed(failure);
-            LOG.log(System.Logger.Level.ERROR, "Request " + context.execution().requestId()
+            LOG.log(System.Logger.Level.ERROR, "Request " + context.correlation()
                     + " failed and its error handler failed too", broken);
             return Problems.response(500, context.execution().requestId());
         }
@@ -668,7 +713,7 @@ final class DefaultApplication implements Application {
     private static void logMapped(DefaultContext context, Exception failure, int status) {
         boolean clientError = failure instanceof AxiomException axiom && axiom.status() < 500;
         if (status >= 500 || !clientError) {
-            LOG.log(System.Logger.Level.WARNING, "Request " + context.execution().requestId() + " failed; its error handler"
+            LOG.log(System.Logger.Level.WARNING, "Request " + context.correlation() + " failed; its error handler"
                     + " answered " + status, failure);
         }
     }
@@ -727,6 +772,7 @@ final class DefaultApplication implements Application {
             shutdownHook = null;
             runtime = runtime == null ? snapshot(null, null, ErrorHandlers.NONE, Codecs.of(List.of())) : runtime.withoutRouter();
             state = State.CLOSED;
+            drainActions.clear();
             registrations.clear();
             root.middleware.clear();
             errorHandlers.clear();

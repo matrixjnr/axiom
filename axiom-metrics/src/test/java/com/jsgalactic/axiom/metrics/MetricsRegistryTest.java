@@ -3,7 +3,9 @@ package com.jsgalactic.axiom.metrics;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -129,5 +131,39 @@ class MetricsRegistryTest {
         assertThat(registry.gaugeValue("app.depth")).isZero();
         assertThat(registry.timerSnapshot("app.work", "route", "/a").count()).isEqualTo(total);
         assertThat(registry.droppedSeries()).isZero();
+    }
+
+    @Test void rejectsInvalidBucketsAndHelp() {
+        var builder = MetricsRegistry.builder();
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.timerBuckets(List.of()));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.timerBuckets(null));
+        assertThatIllegalArgumentException().isThrownBy(
+                () -> builder.timerBuckets(List.of(Duration.ofMillis(5), Duration.ofMillis(5))));
+        assertThatIllegalArgumentException().isThrownBy(
+                () -> builder.timerBuckets(List.of(Duration.ofMillis(5), Duration.ofMillis(1))));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.timerBuckets(List.of(Duration.ZERO)));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.timerBuckets(List.of(Duration.ofSeconds(-1))));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.timerBuckets(List.of(Duration.ofSeconds(Long.MAX_VALUE))));
+        var tooMany = new ArrayList<Duration>();
+        for (int i = 1; i <= MetricsRegistry.MAX_BUCKETS + 1; i++) { tooMany.add(Duration.ofMillis(i)); }
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.timerBuckets(tooMany));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.timerBuckets("Bad-Name", List.of(Duration.ofMillis(1))));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.help("app.x", ""));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.help("app.x", "two\nlines"));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.help("app.x", "x".repeat(MetricsRegistry.MAX_HELP_LENGTH + 1)));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.help("Bad", "text"));
+        assertThatIllegalArgumentException().isThrownBy(() -> builder.maxSeries(0));
+        assertThat(builder.timerBuckets(tooMany.subList(0, MetricsRegistry.MAX_BUCKETS)).build()).isNotNull();
+    }
+
+    @Test void theBucketsOfASeriesAreFixedWhenItIsCreatedAndTheDefaultsAreDocumented() {
+        var registry = MetricsRegistry.create();
+        assertThat(registry.timerBuckets("app.any")).isEqualTo(MetricsRegistry.DEFAULT_BUCKETS)
+                .hasSize(12).startsWith(Duration.ofMillis(1)).endsWith(Duration.ofSeconds(10));
+        assertThat(registry.help("app.any")).isEmpty();
+        var timer = registry.timer("app.any");
+        timer.record(Duration.ofMillis(10).toNanos());
+        timer.record(Duration.ofMillis(11).toNanos());
+        assertThat(registry.timerSnapshot("app.any").count()).isEqualTo(2);
     }
 }

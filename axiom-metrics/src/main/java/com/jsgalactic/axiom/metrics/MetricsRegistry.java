@@ -1,12 +1,15 @@
 package com.jsgalactic.axiom.metrics;
 
 import com.jsgalactic.axiom.observability.Metrics;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.regex.Pattern;
@@ -26,6 +29,12 @@ import java.util.regex.Pattern;
  * application bug that puts user input into a tag cannot exhaust memory. Existing series keep
  * recording. Tag values longer than {@value #MAX_VALUE_LENGTH} characters are truncated.
  *
+ * <p><strong>Histograms and help.</strong> Timers are histograms with {@link #DEFAULT_BUCKETS} unless
+ * {@link Builder#timerBuckets} sets other bounds, for every timer or for one name. The registry keeps
+ * no quantiles and no exemplars: a histogram lets the monitoring system derive quantiles across
+ * instances, and an exemplar would need a per-request identifier that must never be a tag.
+ * {@link Builder#help} gives a metric text for the exposition's {@code # HELP} line.
+ *
  * <p><strong>Consistency.</strong> A metric name always has one kind (counter, gauge or timer) and
  * one set of tag keys; using it differently fails with {@link IllegalArgumentException}.
  */
@@ -36,16 +45,22 @@ public final class MetricsRegistry implements Metrics {
     public static final int MAX_VALUE_LENGTH = 256;
     /** Longest metric name. */
     public static final int MAX_NAME_LENGTH = 100;
-    /** Timer bucket upper bounds in seconds; an implicit final bucket holds everything larger. */
-    static final double[] BUCKETS_SECONDS =
-            {0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10};
-    private static final long[] BUCKETS_NANOS = new long[BUCKETS_SECONDS.length];
+    /** Most upper bounds one timer may have, not counting the implicit final bucket. */
+    public static final int MAX_BUCKETS = 64;
+    /** Longest help text. */
+    public static final int MAX_HELP_LENGTH = 512;
+    /**
+     * Timer bucket upper bounds used unless a timer is configured otherwise: 1 ms, 5 ms, 10 ms,
+     * 25 ms, 50 ms, 100 ms, 250 ms, 500 ms, 1 s, 2.5 s, 5 s and 10 s. An implicit final bucket
+     * holds everything larger.
+     */
+    public static final List<Duration> DEFAULT_BUCKETS = List.of(
+            Duration.ofMillis(1), Duration.ofMillis(5), Duration.ofMillis(10), Duration.ofMillis(25),
+            Duration.ofMillis(50), Duration.ofMillis(100), Duration.ofMillis(250), Duration.ofMillis(500),
+            Duration.ofSeconds(1), Duration.ofMillis(2500), Duration.ofSeconds(5), Duration.ofSeconds(10));
+    private static final long[] DEFAULT_NANOS = nanos(DEFAULT_BUCKETS);
     private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*");
     private static final Pattern KEY = Pattern.compile("[a-z][a-z0-9_]*");
-
-    static {
-        for (int i = 0; i < BUCKETS_NANOS.length; i++) { BUCKETS_NANOS[i] = Math.round(BUCKETS_SECONDS[i] * 1e9); }
-    }
 
     /** What a metric name measures. */
     enum Kind { COUNTER, GAUGE, TIMER }
@@ -56,18 +71,33 @@ public final class MetricsRegistry implements Metrics {
     private record Key(String name, List<String> tags) { }
 
     private final int maxSeries;
+    private final long[] defaultBuckets;
+    private final Map<String, long[]> timerBuckets;
+    private final Map<String, String> help;
     private final ConcurrentHashMap<Key, Series> series = new ConcurrentHashMap<>();
     private final Map<String, Family> families = new HashMap<>();
     private final Map<String, String> exposedNames = new HashMap<>();
     private final LongAdder dropped = new LongAdder();
 
-    private MetricsRegistry(int maxSeries) { this.maxSeries = maxSeries; }
+    private MetricsRegistry(Builder builder) {
+        this.maxSeries = builder.maxSeries;
+        this.defaultBuckets = builder.defaultBuckets;
+        this.timerBuckets = Map.copyOf(builder.timerBuckets);
+        this.help = Map.copyOf(builder.help);
+    }
+
+    /**
+     * Starts a registry with explicit settings: the series limit, the histogram buckets of all
+     * timers or of one timer, and help text.
+     * @return a new builder with the defaults of {@link #create()}
+     */
+    public static Builder builder() { return new Builder(); }
 
     /**
      * Creates a registry that keeps up to {@link #DEFAULT_MAX_SERIES} series.
      * @return an empty registry
      */
-    public static MetricsRegistry create() { return new MetricsRegistry(DEFAULT_MAX_SERIES); }
+    public static MetricsRegistry create() { return builder().build(); }
 
     /**
      * Creates a registry with an explicit series limit.
@@ -76,8 +106,7 @@ public final class MetricsRegistry implements Metrics {
      * @throws IllegalArgumentException if the limit is below one
      */
     public static MetricsRegistry create(int maxSeries) {
-        if (maxSeries < 1) { throw new IllegalArgumentException("maxSeries must be positive"); }
-        return new MetricsRegistry(maxSeries);
+        return builder().maxSeries(maxSeries).build();
     }
 
     @Override public Counter counter(String name, String... tags) {
@@ -140,6 +169,25 @@ public final class MetricsRegistry implements Metrics {
     public long droppedSeries() { return dropped.sum(); }
 
     /**
+     * Returns the help text of a metric.
+     * @param name metric name
+     * @return the text given to {@link Builder#help}, or empty
+     */
+    public Optional<String> help(String name) { return Optional.ofNullable(help.get(name)); }
+
+    /**
+     * Returns a timer's bucket upper bounds.
+     * @param name metric name
+     * @return the configured bounds in ascending order, or the registry default
+     */
+    public List<Duration> timerBuckets(String name) {
+        var configured = timerBuckets.getOrDefault(name, defaultBuckets);
+        var bounds = new ArrayList<Duration>(configured.length);
+        for (var nanos : configured) { bounds.add(Duration.ofNanos(nanos)); }
+        return List.copyOf(bounds);
+    }
+
+    /**
      * A timer's totals.
      * @param count number of observations
      * @param totalNanos sum of the observed durations in nanoseconds
@@ -188,11 +236,31 @@ public final class MetricsRegistry implements Metrics {
             var created = switch (kind) {
                 case COUNTER -> new CounterSeries(key);
                 case GAUGE -> new GaugeSeries(key);
-                case TIMER -> new TimerSeries(key);
+                case TIMER -> new TimerSeries(key, timerBuckets.getOrDefault(name, defaultBuckets));
             };
             series.put(key, created);
             return created;
         }
+    }
+
+    private static long[] nanos(List<Duration> bounds) {
+        if (bounds.size() > MAX_BUCKETS) {
+            throw new IllegalArgumentException("A timer has at most " + MAX_BUCKETS + " buckets");
+        }
+        var nanos = new long[bounds.size()];
+        long previous = 0;
+        for (int i = 0; i < nanos.length; i++) {
+            long each;
+            try {
+                each = Objects.requireNonNull(bounds.get(i), "bucket").toNanos();
+            } catch (ArithmeticException tooLong) {
+                throw new IllegalArgumentException("A bucket bound is too long", tooLong);
+            }
+            if (each <= previous) { throw new IllegalArgumentException("Bucket bounds are positive and strictly ascending"); }
+            nanos[i] = each;
+            previous = each;
+        }
+        return nanos;
     }
 
     private static String conflict(String name, Kind existing, Kind requested) {
@@ -267,21 +335,100 @@ public final class MetricsRegistry implements Metrics {
     }
 
     static final class TimerSeries extends Series implements Timer {
+        /** Upper bounds in nanoseconds, ascending. */
+        final long[] bounds;
         /** Per-bucket counts (not cumulative); the last entry counts observations above every bound. */
-        final LongAdder[] buckets = new LongAdder[BUCKETS_NANOS.length + 1];
+        final LongAdder[] buckets;
         final LongAdder totalNanos = new LongAdder();
-        private TimerSeries(Key key) {
+        private TimerSeries(Key key, long[] bounds) {
             super(key);
+            this.bounds = bounds;
+            this.buckets = new LongAdder[bounds.length + 1];
             for (int i = 0; i < buckets.length; i++) { buckets[i] = new LongAdder(); }
         }
         @Override Kind kind() { return Kind.TIMER; }
         @Override public void record(long nanos) {
             if (nanos < 0) { return; }
             int bucket = 0;
-            while (bucket < BUCKETS_NANOS.length && nanos > BUCKETS_NANOS[bucket]) { bucket++; }
+            while (bucket < bounds.length && nanos > bounds[bucket]) { bucket++; }
             buckets[bucket].increment();
             totalNanos.add(nanos);
         }
     }
 
+    /** Settings of a {@link MetricsRegistry}. Not thread-safe; build once at startup. */
+    public static final class Builder {
+        private int maxSeries = DEFAULT_MAX_SERIES;
+        private long[] defaultBuckets = DEFAULT_NANOS;
+        private final Map<String, long[]> timerBuckets = new HashMap<>();
+        private final Map<String, String> help = new HashMap<>();
+
+        private Builder() { }
+
+        /**
+         * Sets the series limit.
+         * @param maxSeries most distinct name-and-tag combinations to keep, at least one
+         * @return this builder
+         * @throws IllegalArgumentException if the limit is below one
+         */
+        public Builder maxSeries(int maxSeries) {
+            if (maxSeries < 1) { throw new IllegalArgumentException("maxSeries must be positive"); }
+            this.maxSeries = maxSeries;
+            return this;
+        }
+
+        /**
+         * Sets the histogram bounds of every timer that has none of its own.
+         * @param bounds positive, strictly ascending upper bounds, at most {@value #MAX_BUCKETS}
+         * @return this builder
+         * @throws IllegalArgumentException if the bounds are empty, unordered or too many
+         */
+        public Builder timerBuckets(List<Duration> bounds) {
+            this.defaultBuckets = checked(bounds);
+            return this;
+        }
+
+        /**
+         * Sets the histogram bounds of one timer, whatever its tags. Applies to series created
+         * afterwards, so configure before the application starts.
+         * @param name timer name
+         * @param bounds positive, strictly ascending upper bounds, at most {@value #MAX_BUCKETS}
+         * @return this builder
+         * @throws IllegalArgumentException if the name is invalid or the bounds are empty, unordered or too many
+         */
+        public Builder timerBuckets(String name, List<Duration> bounds) {
+            validate(name, List.of());
+            timerBuckets.put(name, checked(bounds));
+            return this;
+        }
+
+        /**
+         * Sets the text of the {@code # HELP} line of a metric.
+         * @param name metric name
+         * @param text one line of plain text, at most {@value #MAX_HELP_LENGTH} characters
+         * @return this builder
+         * @throws IllegalArgumentException if the name is invalid or the text is empty, too long
+         *         or contains a line break
+         */
+        public Builder help(String name, String text) {
+            validate(name, List.of());
+            if (text == null || text.isBlank() || text.length() > MAX_HELP_LENGTH
+                    || text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0) {
+                throw new IllegalArgumentException("Help is one non-empty line of at most " + MAX_HELP_LENGTH + " characters");
+            }
+            help.put(name, text);
+            return this;
+        }
+
+        /**
+         * Creates the registry.
+         * @return an empty registry
+         */
+        public MetricsRegistry build() { return new MetricsRegistry(this); }
+
+        private static long[] checked(List<Duration> bounds) {
+            if (bounds == null || bounds.isEmpty()) { throw new IllegalArgumentException("A timer needs at least one bucket"); }
+            return nanos(bounds);
+        }
+    }
 }

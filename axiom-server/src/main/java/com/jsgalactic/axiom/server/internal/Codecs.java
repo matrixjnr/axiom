@@ -1,6 +1,7 @@
 package com.jsgalactic.axiom.server.internal;
 
 import com.jsgalactic.axiom.codec.spi.BodyCodec;
+import com.jsgalactic.axiom.observability.Metrics;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -35,10 +36,21 @@ final class Codecs {
      *         declare the same one
      */
     static Codecs discover() {
-        return of(ServiceLoader.load(BodyCodec.class));
+        return discover(Metrics.NOOP);
     }
 
-    static Codecs of(Iterable<BodyCodec> codecs) {
+    /**
+     * Like {@link #discover()}, with each codec's work timed and its failures counted when
+     * {@code metrics} records. The series are tagged by operation and by the media type the codec
+     * declared, never by a request's Content-Type.
+     */
+    static Codecs discover(Metrics metrics) {
+        return of(ServiceLoader.load(BodyCodec.class), metrics);
+    }
+
+    static Codecs of(Iterable<BodyCodec> codecs) { return of(codecs, Metrics.NOOP); }
+
+    static Codecs of(Iterable<BodyCodec> codecs, Metrics metrics) {
         var index = new HashMap<String, BodyCodec>();
         for (var codec : codecs) {
             for (var type : codec.mediaTypes()) {
@@ -46,9 +58,9 @@ final class Codecs {
                     throw new IllegalStateException("Codec " + codec.getClass().getName()
                             + " declares an invalid media type; use an exact lowercase type/subtype without wildcards");
                 }
-                var previous = index.putIfAbsent(type, codec);
+                var previous = index.putIfAbsent(type, metrics == Metrics.NOOP ? codec : MeteredCodec.of(codec, type, metrics));
                 if (previous != null) {
-                    throw new IllegalStateException("Codecs " + previous.getClass().getName() + " and "
+                    throw new IllegalStateException("Codecs " + MeteredCodec.unwrap(previous).getClass().getName() + " and "
                             + codec.getClass().getName() + " both handle " + type + "; install only one");
                 }
             }
