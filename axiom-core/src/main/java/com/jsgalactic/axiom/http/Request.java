@@ -1,6 +1,7 @@
 package com.jsgalactic.axiom.http;
 
 import com.jsgalactic.axiom.internal.PercentDecoding;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -23,15 +24,22 @@ import java.util.regex.Pattern;
  * <p>
  * Headers are an immutable, case-insensitive map with one value per name; transports join
  * repeated fields with {@code ", "}. The {@link Body} carries the content and its Content-Type.
- * {@link #toString()} omits the query, header values and body content, which may hold
- * credentials.
+ * {@link #toString()} omits the query, header values, body content and remote address, which
+ * may hold credentials or personal data.
+ * <p>
+ * The remote address is the transport peer: the socket address the connection came from, set by
+ * the HTTP listener. It is {@code null} for requests created in memory unless a test sets it with
+ * {@link #withRemoteAddress(InetSocketAddress)}. Behind a reverse proxy it is the proxy's address;
+ * forwarded client addresses are headers and must only be believed from trusted proxies.
  * @param method case-sensitive HTTP method token
  * @param path absolute raw path without query or fragment, or {@code *} for {@code OPTIONS *}
  * @param query raw query without the leading {@code ?}; {@code ""} when absent
  * @param headers request header fields; copied into an immutable case-insensitive map
  * @param body request content; never null, {@link Body#empty()} when absent
+ * @param remoteAddress resolved transport peer address, or {@code null} when unknown
  */
-public record Request(String method, String path, String query, Map<String, String> headers, Body body) {
+public record Request(String method, String path, String query, Map<String, String> headers, Body body,
+                      InetSocketAddress remoteAddress) {
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
     /** Longest accepted raw query, in characters. */
     public static final int MAX_QUERY_LENGTH = 4096;
@@ -67,6 +75,22 @@ public record Request(String method, String path, String query, Map<String, Stri
     }
 
     /**
+     * Creates a request without a known remote address, validating it as described by the
+     * canonical constructor.
+     *
+     * @param method HTTP token
+     * @param path absolute raw path
+     * @param query raw query without the leading {@code ?}; {@code ""} when absent
+     * @param headers header fields
+     * @param body request content
+     * @throws IllegalArgumentException for an invalid method, query or header
+     * @throws InvalidRequestPathException for a rejected path
+     */
+    public Request(String method, String path, String query, Map<String, String> headers, Body body) {
+        this(method, path, query, headers, body, null);
+    }
+
+    /**
      * Creates and validates the request.
      * The path is either {@code *} or an absolute path. {@code *} (the asterisk-form of
      * {@code OPTIONS *}) is accepted only with the method {@code OPTIONS} and an empty query; it
@@ -87,14 +111,17 @@ public record Request(String method, String path, String query, Map<String, Stri
      * the query.
      * <p>
      * Header names must be HTTP tokens and values must not contain control characters other
-     * than horizontal tab.
+     * than horizontal tab. A remote address, when present, must be resolved (carry an IP
+     * address), so that no code ever triggers a name lookup for it.
      *
      * @param method HTTP token
      * @param path absolute raw path
      * @param query raw query without the leading {@code ?}; {@code ""} when absent
      * @param headers header fields
      * @param body request content
-     * @throws IllegalArgumentException for an invalid method, query or header
+     * @param remoteAddress resolved transport peer address, or {@code null} when unknown
+     * @throws IllegalArgumentException for an invalid method, query, header or an unresolved
+     *         remote address
      * @throws InvalidRequestPathException for a rejected path
      */
     public Request {
@@ -103,6 +130,9 @@ public record Request(String method, String path, String query, Map<String, Stri
         Objects.requireNonNull(query, "query");
         Objects.requireNonNull(headers, "headers");
         Objects.requireNonNull(body, "body");
+        if (remoteAddress != null && remoteAddress.isUnresolved()) {
+            throw new IllegalArgumentException("The remote address must be resolved");
+        }
         if (!TOKEN.matcher(method).matches()) {
             throw new IllegalArgumentException("Invalid HTTP method: " + method);
         }
@@ -174,7 +204,7 @@ public record Request(String method, String path, String query, Map<String, Stri
      * @return request with the headers
      */
     public Request withHeaders(Map<String, String> headers) {
-        return new Request(method, path, query, headers, body);
+        return new Request(method, path, query, headers, body, remoteAddress);
     }
 
     /**
@@ -184,11 +214,23 @@ public record Request(String method, String path, String query, Map<String, Stri
      * @return request with the body
      */
     public Request withBody(Body body) {
-        return new Request(method, path, query, headers, body);
+        return new Request(method, path, query, headers, body, remoteAddress);
     }
 
     /**
-     * Describes the request without its query, header values or body content.
+     * Returns a copy with the supplied transport peer address. Transports call this with the
+     * connection's peer; tests use it to simulate a client or a proxy.
+     *
+     * @param remoteAddress resolved peer address, or {@code null} for unknown
+     * @return request with the remote address
+     * @throws IllegalArgumentException for an unresolved address
+     */
+    public Request withRemoteAddress(InetSocketAddress remoteAddress) {
+        return new Request(method, path, query, headers, body, remoteAddress);
+    }
+
+    /**
+     * Describes the request without its query, header values, body content or remote address.
      *
      * @return method, path, header names and body summary
      */
