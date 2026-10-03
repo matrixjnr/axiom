@@ -153,9 +153,18 @@ To serve the site at `axiom.jsgalactic.com`:
    to the site root. With the Actions deployment the setting in step 2 is what counts, so the
    file only documents the choice in the repository.
 
-6. Serve the site from the root of the domain: in `site/_config.yml` set `url` to
-   `https://axiom.jsgalactic.com` and `baseurl` to `""`, and in
-   `build-logic/src/main/kotlin/axiom.docs-site.gradle.kts` set `siteUrl` and `baseUrl` of
-   `checkSiteLinks` to match (`https://axiom.jsgalactic.com` and `""`). The Markdown does not
-   change, because it contains no site addresses. The old `https://matrixjnr.github.io/axiom/`
-   address redirects to the custom domain.
+6. Nothing else to change. The Docs workflow asks GitHub Pages (`actions/configure-pages`) for the
+   address the site is served at and builds with it: the origin and base path (`/axiom` at the
+   project address, empty on a custom domain) go to Jekyll through `AXIOM_SITE_URL` and
+   `AXIOM_SITE_BASEURL` (see `site/build.sh`) and to `checkSiteLinks` through
+   `-Paxiom.site.url` and `-Paxiom.site.baseUrl`. If the Pages settings cannot be read (a pull
+   request from a fork, for example) the build falls back to the project address in
+   `site/_config.yml`. The old `https://matrixjnr.github.io/axiom/` address redirects to the custom
+   domain.
+
+   To preview a build for another address locally, set the two variables, for example
+   `AXIOM_SITE_URL=https://axiom.jsgalactic.com AXIOM_SITE_BASEURL= site/build.sh`.
+
+   If a page loads without styling, the stylesheet links point at a different base path than the
+   one the site is served from; open the page source and compare the `href` of
+   `just-the-docs-default.css` with the address in the browser.
