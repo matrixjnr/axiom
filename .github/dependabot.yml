@@ -30,3 +30,25 @@ updates:
         patterns: ['jakarta.validation*', 'org.hibernate.validator*']
       test-tools:
         patterns: ['org.junit*', 'org.assertj*']
+  # Build logic and the standalone consumer builds are separate Gradle builds (each with its
+  # own verification metadata where it has one); the root entry does not see them.
+  - package-ecosystem: gradle
+    directories:
+      - /build-logic
+      - /compatibility/gradle-kotlin
+      - /compatibility/gradle-groovy
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      build-and-consumers:
+        patterns: ['*']
+  - package-ecosystem: maven
+    directory: /compatibility/maven
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies]
