@@ -57,6 +57,22 @@ public interface EventSink {
     long bytesWritten();
 
     /**
+     * Reports whether the listener has started to shut down; see {@link BodyWriter#shutdownRequested()}.
+     * An event stream that sees it should send a last event and return, which ends the stream
+     * cleanly; browsers then reconnect after the {@code retry} delay.
+     *
+     * @return true once shutdown has begun
+     */
+    default boolean shutdownRequested() { return false; }
+
+    /**
+     * Runs an action once when shutdown begins; see {@link BodyWriter#onShutdown(Runnable)}.
+     *
+     * @param action what to run; quick and non-blocking
+     */
+    default void onShutdown(Runnable action) { Objects.requireNonNull(action, "action"); }
+
+    /**
      * Wraps a body writer as an event sink.
      *
      * @param out destination of the encoded events
@@ -76,6 +92,10 @@ public interface EventSink {
             }
 
             @Override public long bytesWritten() { return out.bytesWritten(); }
+
+            @Override public boolean shutdownRequested() { return out.shutdownRequested(); }
+
+            @Override public void onShutdown(Runnable action) { out.onShutdown(action); }
         };
     }
 }

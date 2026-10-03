@@ -60,10 +60,10 @@ an explicit `app.close()` unregisters it, and it throws `IllegalStateException` 
 application or when the JVM is already shutting down. Hooks of different libraries run concurrently
 and in no defined order.
 
-Open [streams](streaming.md#shutdown) are the exception to the grace period: they are cancelled
-as soon as `close()` begins, because they may never end by themselves. Their handlers' writes
-fail with `SHUTDOWN`, and their connections close without a final chunk, so the client sees the
-body cut off rather than completed.
+Open [streams](streaming.md#shutdown) keep the grace period too, and are told that shutdown began
+(`BodyWriter.shutdownRequested()`, `onShutdown`) so that a body can end normally with a final chunk;
+a body still running when the period ends is cut with `SHUTDOWN`, and its connection closes without
+a final chunk, so the client sees the body cut off rather than completed.
 
 A failed bind releases its resources before reporting `IOException`. The
 application remains running, so binding another address is safe. Missing or

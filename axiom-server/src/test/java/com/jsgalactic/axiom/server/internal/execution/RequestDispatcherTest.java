@@ -198,6 +198,34 @@ class RequestDispatcherTest {
             assertThat(task.result().toCompletableFuture().join()).isEqualTo("recovered");
         } finally { stop(dispatcher); }
     }
+    @Test void aTimerArmedForTheOriginalDeadlineWaitsForAnExtendedOne() throws Exception {
+        var workers = new ManualWorkers();
+        var timers = new ManualTimers();
+        var dispatcher = new RequestDispatcher(1, workers, timers);
+        var context = context();
+        var extended = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try {
+            var task = dispatcher.submit(context, () -> {
+                context.extendDeadline(Duration.ofHours(2));
+                extended.countDown();
+                release.await();
+                return "long";
+            });
+            var runner = Thread.ofVirtual().start(workers::runNext);
+            assertThat(extended.await(30, TimeUnit.SECONDS)).isTrue();
+            // The original timer fires while the deadline has moved: it arms itself again instead of failing the request.
+            timers.fire();
+            assertThat(task.result().toCompletableFuture().isDone()).isFalse();
+            assertThat(timers.callbacks).hasSize(1);
+            timers.fire();
+            assertThat(task.result().toCompletableFuture().isDone()).isFalse();
+            release.countDown();
+            runner.join();
+            assertThat(task.result().toCompletableFuture().join()).isEqualTo("long");
+        } finally { release.countDown(); stop(dispatcher); }
+    }
+
     private static ExecutionContext context() { return ExecutionContext.create(Duration.ofHours(1)); }
     private static void stop(RequestDispatcher dispatcher) throws Exception {
         dispatcher.close();

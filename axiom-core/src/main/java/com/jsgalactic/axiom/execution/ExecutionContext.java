@@ -14,14 +14,14 @@ public final class ExecutionContext {
     private static final AtomicLong SEQUENCE = new AtomicLong();
 
     private final String requestId = PROCESS_PREFIX + "-" + Long.toHexString(SEQUENCE.incrementAndGet());
-    private final long started;
-    private final long budget;
+    /** The moment the budget runs out, on {@link #clock}; moved only by {@link #extendDeadline}. */
+    private volatile long deadline;
+    private volatile boolean extended;
     private final LongSupplier clock;
 
     private ExecutionContext(Duration timeout, LongSupplier clock) {
         this.clock = clock;
-        budget = timeout.toNanos();
-        started = clock.getAsLong();
+        deadline = clock.getAsLong() + timeout.toNanos();
     }
 
     /**
@@ -73,8 +73,36 @@ public final class ExecutionContext {
      * @return remaining monotonic duration
      */
     public Duration remainingTime() {
-        return Duration.ofNanos(Math.max(0, budget - (clock.getAsLong() - started)));
+        return Duration.ofNanos(Math.max(0, deadline - clock.getAsLong()));
     }
+
+    /**
+     * Gives the request more time: the deadline becomes {@code remaining} from now if that is later
+     * than the current one, and is left alone otherwise, so it can never shorten a deadline. The
+     * runtime calls it when the head of a streamed response has been sent, to give the stream the
+     * lifetime its response asks for (see {@code Response.withStreamLifetime}); applications should
+     * use that instead. Has no effect on a deadline that has already passed, which stays expired.
+     * @param remaining positive, at most one day
+     * @throws IllegalArgumentException for an invalid budget
+     */
+    public void extendDeadline(Duration remaining) {
+        validateTimeout(remaining);
+        synchronized (this) {
+            if (isExpired()) { return; }
+            long candidate = clock.getAsLong() + remaining.toNanos();
+            if (candidate - deadline > 0) {
+                deadline = candidate;
+                extended = true;
+            }
+        }
+    }
+
+    /**
+     * Reports whether {@link #extendDeadline} replaced the original budget, so that a timer armed
+     * for the original deadline knows to wait for the new one.
+     * @return true after a successful extension
+     */
+    public boolean isDeadlineExtended() { return extended; }
 
     /**
      * Reports whether the deadline has elapsed.

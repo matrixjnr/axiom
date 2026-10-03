@@ -41,14 +41,20 @@ most 1024 distinct endpoints and pools later ones under `other`.
 | `axiom.admission.active` | gauge | none | Reserved or running executions |
 | `axiom.admission.queued` | gauge | none | Requests waiting for capacity |
 
-[Streamed responses](streaming.md) add four more series, none tagged by anything a request carries:
+[Streamed responses](streaming.md) add four more series, tagged by the route's method and template
+(the same bounded set as the request series) and nothing a request carries:
 
 | Name | Kind | Tags | Meaning |
 | --- | --- | --- | --- |
-| `axiom.http.streams` | counter | `outcome` | Finished streams: `completed`, `client_disconnected`, `limit_exceeded`, `timeout`, `shutdown` or `failed` |
-| `axiom.http.stream.bytes` | counter | none | Body bytes written by streams |
-| `axiom.http.streams.active` | gauge | none | Streams whose head was sent and whose body is still running |
-| `axiom.http.stream.backpressure` | counter | none | Stream writes that had to wait for a slow client |
+| `axiom.http.streams` | counter | `method`, `route`, `outcome` | Finished streams: `completed`, `client_disconnected`, `limit_exceeded`, `timeout`, `shutdown` or `failed` |
+| `axiom.http.stream.bytes` | counter | `method`, `route` | Body bytes written by streams |
+| `axiom.http.streams.active` | gauge | `method`, `route` | Streams whose head was sent and whose body is still running |
+| `axiom.http.stream.backpressure` | counter | `method`, `route` | Stream writes that had to wait for a slow client |
+
+TLS adds two more:
+
+| Name | Kind | Tags | Meaning |
+| --- | --- | --- | --- |
 | `axiom.http.tls.handshakes` | counter | `outcome` | TLS handshakes: `completed`, `failed`, `timeout`, `plaintext` or `closed` |
 | `axiom.http.tls.reloads` | counter | `outcome` | Key material reloads: `completed` or `failed` |
 
@@ -59,8 +65,8 @@ descriptor limit (see [HTTP listeners](http.md#resource-limits)):
 | --- | --- | --- | --- |
 | `axiom.http.connections` | gauge | `state` | Connections holding a regular slot (`open`) or the separate pool for connections that only linger after their last response (`lingering`). The sum over all listeners is the number of open client sockets, at most `maxConnections + maxLingeringConnections` per listener |
 
-These cover requests that pass admission: HTTP listeners and `TestClient`. (The stream series
-are recorded by HTTP listeners only.) Direct
+These cover requests that pass admission: HTTP listeners and `TestClient`. (The stream series are
+recorded by both.) Direct
 `app.handle(...)` calls bypass admission and are not recorded. Timeouts count as `5xx` (504) and
 queue timeouts and capacity refusals as `5xx` (503), matching the responses clients see.
 

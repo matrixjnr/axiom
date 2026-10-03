@@ -218,6 +218,15 @@ public final class RequestDispatcher implements AutoCloseable {
         return task;
     }
 
+    /**
+     * Returns the metric tags of an endpoint key, from the same bounded set the request series use
+     * (at most 1024 endpoints, then {@code other}), so other measurements of the endpoint, such as
+     * streams, line up with its request series.
+     * @param key the endpoint identity given to {@link #submit(Object, AdmissionPolicy, ExecutionContext, Callable)}
+     * @return its tags, or null when metrics are disabled
+     */
+    public EndpointTag endpointTag(Object key) { return metrics.tag(Objects.requireNonNull(key, "key")); }
+
     private boolean queueFull(Bucket bucket) {
         return queued >= policy.maxQueued() || bucket.waiting.size() >= bucket.policy.maxQueued();
     }
@@ -314,6 +323,11 @@ public final class RequestDispatcher implements AutoCloseable {
         var signals = new ArrayList<Runnable>();
         synchronized (this) {
             if (task.finished || generation != task.timerGeneration) { return; }
+            if (!task.waiting && task.context.isDeadlineExtended() && !task.context.isExpired()) {
+                // The running request was given more time (a stream with its own lifetime): wait for that.
+                schedule(task, task.context.remainingTime().toNanos());
+                return;
+            }
             Throwable failure = task.waiting && !task.context.isExpired()
                     ? new QueueTimeoutException() : new DeadlineExceededException();
             finish(task, null, failure, true, signals);
