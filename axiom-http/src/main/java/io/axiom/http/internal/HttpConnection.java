@@ -75,6 +75,17 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     static final Duration LINGER_TIMEOUT = Duration.ofSeconds(2);
     /**
+     * Lingering ends once no input has arrived for this long. Lingering exists for a client that is
+     * still sending; one that has gone quiet has most likely finished, and closing a connection with
+     * no unread input sends no reset. The period is longer than a typical TCP retransmission timeout
+     * (200 ms minimum on Linux), so a single lost segment from a client still sending does not end
+     * it; a client that pauses longer while still sending may get a reset, which can destroy
+     * response bytes it has not read yet.
+     */
+    static final Duration LINGER_QUIET_TIMEOUT = Duration.ofMillis(500);
+    /** Total linger bound once the listener is closing, so lingering connections barely delay shutdown. */
+    static final Duration SHUTDOWN_LINGER_TIMEOUT = Duration.ofMillis(500);
+    /**
      * Bound on writing one response: from handing it to the socket until the operating system has
      * accepted its last byte. A client that reads too slowly to take a whole response (at most 1 MiB
      * of body) in this time loses the connection. The inactivity timeout alone would let a client
@@ -87,6 +98,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final RequestDispatcher executor;
     private final long headTimeoutNanos;
     private final long lingerNanos;
+    private final long lingerQuietNanos;
+    private final long shutdownLingerNanos;
     private final long responseNanos;
     /**
      * True once the listener has started closing. Read on every response, from the moment the
@@ -116,6 +129,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** Output is shut down after an error response; input is discarded until the connection closes. */
     private boolean lingering;
     private ScheduledFuture<?> lingerTimer;
+    /** While lingering: when it ends at the latest, and when input last arrived (event loop ticker). */
+    private long lingerDeadline;
+    private long lastInput;
     /** Bounds the response write in progress; at most one response is written at a time. */
     private ScheduledFuture<?> responseTimer;
     private ChannelHandlerContext context;
@@ -152,6 +168,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         this.executor = executor;
         this.headTimeoutNanos = settings.headTimeout().toNanos();
         this.lingerNanos = settings.linger().toNanos();
+        this.lingerQuietNanos = settings.lingerQuiet().toNanos();
+        this.shutdownLingerNanos = settings.shutdownLinger().toNanos();
         this.responseNanos = settings.responseTimeout().toNanos();
     }
 
@@ -189,6 +207,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * connection with a running exchange closes after that response. Queued requests are dropped.
      */
     void drain() {
+        // A lingering connection only waits for its client; shutdown does not wait long for it.
+        if (lingering && !draining) {
+            draining = true;
+            long now = now(context);
+            lingerDeadline = Math.min(lingerDeadline, now + shutdownLingerNanos);
+            scheduleLingerCheck(context, now);
+            return;
+        }
         if (closing || draining) { return; }
         draining = true;
         if (!busy) { abort(context); }
@@ -533,8 +559,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * close}, HTTP/1.0, a drain): the client reads the response and end of stream, and input it is
      * still sending is discarded rather than left unread, which would make the operating system reset
      * the connection and could destroy response bytes not yet delivered. The connection closes when
-     * the client closes its side, after the linger timeout ({@link #LINGER_TIMEOUT}), after
-     * {@link #MAX_DISCARDED_INPUT} bytes, or on inactivity, whichever comes first.
+     * the client closes its side, once no input has arrived for {@link #LINGER_QUIET_TIMEOUT}, after
+     * {@link #LINGER_TIMEOUT} in total ({@link #SHUTDOWN_LINGER_TIMEOUT} while the listener closes),
+     * after {@link #MAX_DISCARDED_INPUT} bytes, or on inactivity, whichever comes first.
      */
     private void linger(ChannelHandlerContext ctx) {
         var decoder = ctx.pipeline().get(RequestDecoder.class);
@@ -547,9 +574,28 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // new clients out (when the listener's separate lingering bound allows).
         if (slot != null) { slot.linger(); }
         decoder.discard(MAX_DISCARDED_INPUT);
-        lingerTimer = ctx.executor().schedule(() -> { ctx.close(); }, lingerNanos, TimeUnit.NANOSECONDS);
+        long now = now(ctx);
+        lastInput = now;
+        boolean shuttingDown = draining || listenerClosing.getAsBoolean();
+        lingerDeadline = now + (shuttingDown ? Math.min(lingerNanos, shutdownLingerNanos) : lingerNanos);
+        scheduleLingerCheck(ctx, now);
         duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
     }
+
+    /** Arms the single linger timer for whichever comes first: the deadline or the quiet period. */
+    private void scheduleLingerCheck(ChannelHandlerContext ctx, long now) {
+        if (lingerTimer != null) { lingerTimer.cancel(false); }
+        long next = Math.min(lingerDeadline - now, lastInput + lingerQuietNanos - now);
+        lingerTimer = ctx.executor().schedule(() -> {
+            lingerTimer = null;
+            long at = now(ctx);
+            if (at - lingerDeadline >= 0 || at - lastInput >= lingerQuietNanos) { ctx.close(); }
+            else { scheduleLingerCheck(ctx, at); }
+        }, Math.max(0, next), TimeUnit.NANOSECONDS);
+    }
+
+    /** The event loop's clock, which tests can freeze and advance. */
+    private static long now(ChannelHandlerContext ctx) { return ctx.executor().ticker().nanoTime(); }
 
     /** Sends a listener error; for a HEAD request the problem body is omitted as for any HEAD response. */
     private void sendError(ChannelHandlerContext ctx, int status, boolean head) {
@@ -583,6 +629,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // A running handler is bounded by its own deadline, so inactivity is ignored only while it
         // executes; idle connections and stalled response writes still close.
         if (event == RequestDecoder.DECODED) { inputDecoded(ctx); }
+        // Input keeps a lingering connection open, up to the linger deadline.
+        else if (event == RequestDecoder.DISCARDED) { if (lingering) { lastInput = now(ctx); } }
         // Closing keeps a client that keeps sending after an error from occupying the event loop.
         else if (event == RequestDecoder.DISCARD_LIMIT) { abort(ctx); }
         else if (event instanceof IdleStateEvent) { if (active == null) { abort(ctx); } }

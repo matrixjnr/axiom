@@ -55,7 +55,7 @@ class HttpBodyTest {
             fixture.app.start();
             // A long linger keeps the test independent of how fast a loaded machine moves the upload.
             var server = NettyServer.bind(fixture.app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                    TransportSettings.DEFAULTS.withLinger(Duration.ofSeconds(60)));
+                    TransportSettings.DEFAULTS.withLinger(Duration.ofSeconds(60)).withLingerQuiet(Duration.ofSeconds(60)));
             fixture.servers.add(server);
             var wire = new Wire(server);
             // Below the discard cap, so the server never needs to cut the upload short.

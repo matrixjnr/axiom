@@ -29,17 +29,19 @@ class HttpLingerTest {
 
     private static final class Socket extends DuplexEmbeddedChannel { }
 
-    private Socket socket() {
+    private Socket socket() { return socket(TransportSettings.DEFAULTS); }
+
+    private Socket socket(TransportSettings settings) {
         app.maxRequestBody(16);
         app.start();
         var channel = new Socket();
         channel.freezeTime();
-        connection = new HttpConnection(app, executor);
+        connection = new HttpConnection(app, executor, settings, null, () -> false);
         channel.pipeline().addLast(new RequestDecoder(NettyServer.decoderConfig()), new HttpResponseEncoder(), connection);
         return channel;
     }
 
-    @Test void errorResponseHalfClosesAndDiscardsInputUntilTheLingerTimeout() {
+    @Test void errorResponseHalfClosesAndDiscardsInputUntilTheLingerTimeoutWhileInputKeepsArriving() {
         app.post("/", ctx -> { throw new AssertionError("must not execute"); });
         var channel = socket();
         try {
@@ -52,13 +54,98 @@ class HttpLingerTest {
             channel.writeInbound(rest);
             assertThat(rest.refCnt()).isZero();
             assertThat(channel.<Object>readOutbound()).isNull();
-            channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+            // A client still sending keeps the connection lingering up to the total bound.
+            long step = HttpConnection.LINGER_QUIET_TIMEOUT.toMillis() - 1;
+            for (long elapsed = 0; elapsed < HttpConnection.LINGER_TIMEOUT.toMillis() - 1;) {
+                long advance = Math.min(step, HttpConnection.LINGER_TIMEOUT.toMillis() - 1 - elapsed);
+                channel.advanceTimeBy(advance, TimeUnit.MILLISECONDS);
+                elapsed += advance;
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                var more = ascii("more input");
+                channel.writeInbound(more);
+                assertThat(more.refCnt()).isZero();
+            }
+            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isFalse();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test void lingeringEndsOnceTheClientHasBeenQuietForTheQuietPeriod() {
+        var channel = socket();
+        try {
+            channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
+            assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
+            assertThat(channel.outputShutdown).isTrue();
+            channel.advanceTimeBy(HttpConnection.LINGER_QUIET_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
             channel.runScheduledPendingTasks();
             assertThat(channel.isActive()).isTrue();
             channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
             channel.runScheduledPendingTasks();
             assertThat(channel.isActive()).isFalse();
         } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test void inputRestartsTheQuietPeriod() {
+        var channel = socket();
+        try {
+            channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
+            assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
+            long quiet = HttpConnection.LINGER_QUIET_TIMEOUT.toMillis();
+            channel.advanceTimeBy(quiet - 1, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            channel.writeInbound(ascii("still sending"));
+            // The first quiet period would have ended here.
+            channel.advanceTimeBy(quiet - 1, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isTrue();
+            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isFalse();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test void drainCutsTheLingerOfAClientStillSendingToTheShutdownBound() {
+        // The quiet period is out of the way, so only the total bounds can end lingering.
+        var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(java.time.Duration.ofHours(1)));
+        try {
+            channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
+            assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
+            channel.advanceTimeBy(100, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            connection.drain();
+            channel.writeInbound(ascii("still sending"));
+            channel.advanceTimeBy(HttpConnection.SHUTDOWN_LINGER_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isTrue();
+            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isFalse();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test void lingeringThatStartsDuringADrainIsCutToTheShutdownBound() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        app.get("/slow", ctx -> { entered.countDown(); release.await(); return "slow"; });
+        var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(java.time.Duration.ofHours(1)));
+        try {
+            channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\n"));
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+            connection.drain();
+            release.countDown();
+            assertThat(awaitOutputShutdown(channel)).contains("connection: close");
+            channel.advanceTimeBy(HttpConnection.SHUTDOWN_LINGER_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isTrue();
+            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            assertThat(channel.isActive()).isFalse();
+        } finally {
+            release.countDown();
+            channel.finishAndReleaseAll();
+        }
     }
 
     @Test void lingeringStopsOnceTheDiscardLimitIsExceeded() {
@@ -183,7 +270,8 @@ class HttpLingerTest {
         app.start();
         // A long linger keeps the test independent of machine load.
         var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofSeconds(60)));
+                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofSeconds(60))
+                        .withLingerQuiet(java.time.Duration.ofSeconds(60)));
         var client = new java.net.Socket();
         Thread sender = null;
         try {
@@ -221,6 +309,52 @@ class HttpLingerTest {
             if (sender != null) { sender.join(); }
             server.close();
             server.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void overTheNetworkAClientThatReadsTheResponseAndGoesQuietIsClosedAfterTheQuietPeriod() throws Exception {
+        app.get("/", ctx -> "bye");
+        app.start();
+        // The total linger bound is far away: only the quiet period can end lingering.
+        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofHours(1)));
+        try (var wire = new Wire(server)) {
+            wire.write("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n");
+            assertThat(wire.read(false).text()).isEqualTo("bye");
+            assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            // The client keeps its socket open and sends nothing more.
+            awaitNoConnections(server);
+        } finally {
+            server.close();
+            server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void overTheNetworkListenerShutdownDoesNotWaitForTheFullLinger() throws Exception {
+        app.get("/", ctx -> "bye");
+        app.start();
+        // Neither the total linger bound nor the quiet period nor the grace period can end it.
+        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofHours(1))
+                        .withLingerQuiet(java.time.Duration.ofHours(1))
+                        .withShutdownGrace(java.time.Duration.ofHours(1)));
+        try (var wire = new Wire(server)) {
+            wire.write("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n");
+            assertThat(wire.read(false).text()).isEqualTo("bye");
+            assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            assertThat(server.lingering()).isEqualTo(1);
+            server.close();
+            server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        } finally {
+            server.close();
+        }
+    }
+
+    private static void awaitNoConnections(NettyServer server) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (server.connections() + server.lingering() != 0) {
+            assertThat(System.nanoTime()).as("lingering connection closed").isLessThan(deadline);
+            Thread.onSpinWait();
         }
     }
 

@@ -102,13 +102,23 @@ the listener ends a connection after a response, for any reason (a listener erro
 `Connection: close` from the client or the handler, HTTP/1.0 without keep-alive, or
 listener shutdown), it shuts down its output, so the client reads the whole response
 and end of stream, and keeps reading and discarding input without buffering it. The
-connection closes when the client closes its side, after two seconds, after 16 MiB of
-discarded input, or on inactivity, whichever comes first. The listener does not try
-to guess that a client has finished sending: a client that reads the response but
-keeps its socket open holds the connection for the full two seconds. A lingering
-connection holds no request data and no longer counts against the connection limit
-(see [resource limits](#resource-limits)), but it can delay listener shutdown by up
-to those two seconds. Connections closed without a response (an idle
+connection closes when the client closes its side, once no input has arrived for 500
+milliseconds, after two seconds in total, after 16 MiB of discarded input, or on
+inactivity, whichever comes first. Each arriving byte restarts the 500-millisecond
+quiet period but never extends the two-second total.
+
+Lingering exists for a client that is still sending, so a client that has gone quiet
+is taken to have finished: one that reads the response and keeps its socket open is
+closed after the quiet period, and closing a connection with no unread input sends no
+reset. The quiet period is longer than a typical TCP retransmission timeout, so a
+single lost segment does not end it. The trade-off is a client that is still sending
+but pauses for longer (a very lossy link, or a client that stalls between writes): its
+next bytes arrive at a closed connection, the operating system answers with a reset,
+and response bytes the client has not read yet may be lost. Once the listener is
+closing, lingering lasts at most 500 milliseconds in total, so lingering connections
+barely delay shutdown. A lingering connection holds no request data and no longer
+counts against the connection limit (see [resource limits](#resource-limits)).
+Connections closed without a response (an idle
 connection at shutdown, a connection still receiving a request at shutdown,
 inactivity, a transport failure or a disconnect) close at once.
 
