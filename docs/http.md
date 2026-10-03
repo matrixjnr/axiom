@@ -50,7 +50,9 @@ OPTIONS, TRACE, CONNECT and extension methods. Paths that `Request` rejects (emp
 encoded separators; see [routing rules](routing.md)) receive 400. Accepted raw paths
 retain their encoding. Query strings are excluded from routing, retained on the
 request and validated as described in [routing rules](routing.md#query-parameters);
-a malformed or oversized query also receives 400. Request headers are available to handlers, and
+a malformed or oversized query also receives 400. Request headers are available to handlers, the
+connection's peer is `ctx.request().remoteAddress()` (forwarding headers are never applied
+to it; see [trusted proxies](security.md#client-address-and-trusted-proxies)), and
 request bodies are read up to the application's limit; see
 [request bodies](bodies.md). Responses support UTF-8 strings, byte arrays, empty
 bodies and values encoded by an installed codec. Unencodable body objects and

@@ -32,6 +32,7 @@ import io.netty.handler.codec.http.TooLongHttpHeaderException;
 import io.netty.handler.codec.http.TooLongHttpLineException;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCounted;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.ScheduledFuture;
@@ -283,7 +284,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         for (var header : headers) { fields.merge(header.getKey(), header.getValue(), (first, next) -> first + ", " + next); }
         try {
             // Validates the path and query in one pass; any rejection is a 400.
-            receiving = new Exchange(Request.fromTarget(request.method().name(), request.uri()).withHeaders(fields),
+            // The peer is resolved by the socket; embedded test channels have no IP peer.
+            var peer = ctx.channel().remoteAddress() instanceof InetSocketAddress address && !address.isUnresolved()
+                    ? address : null;
+            receiving = new Exchange(Request.fromTarget(request.method().name(), request.uri()).withHeaders(fields)
+                    .withRemoteAddress(peer),
                     HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
         } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
         if (chunked || length > 0) {

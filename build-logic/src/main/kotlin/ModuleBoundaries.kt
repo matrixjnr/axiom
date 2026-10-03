@@ -12,7 +12,11 @@ object ModuleBoundaries {
         // no production code, and no module may depend on it.
         "integration-tests" to setOf("axiom-core", "axiom-http", "axiom-json", "axiom-test"),
         "axiom-validation" to setOf("axiom-core"),
-        "axiom-validation-jakarta" to setOf("axiom-core", "axiom-validation")
+        "axiom-validation-jakarta" to setOf("axiom-core", "axiom-validation"),
+        // Authentication, policies and HTTP security helpers; the JWT adapter builds on them and,
+        // like every security module, uses only the JDK (no JSON or crypto library).
+        "axiom-security" to setOf("axiom-core"),
+        "axiom-security-jwt" to setOf("axiom-core", "axiom-security")
     )
 
     /** Modules that exist only to run tests and are never published. */

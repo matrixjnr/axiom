@@ -16,7 +16,9 @@ abstract class CheckModuleBoundaries : DefaultTask() {
         // through the test client. Unlike integration-tests, these modules also have production code.
         val testScopeOnly = mapOf(
             "axiom-validation" to setOf("axiom-test"),
-            "axiom-validation-jakarta" to setOf("axiom-test")
+            "axiom-validation-jakarta" to setOf("axiom-test"),
+            "axiom-security" to setOf("axiom-test"),
+            "axiom-security-jwt" to setOf("axiom-test")
         )
         val testOnlyModules = ModuleBoundaries.testOnlyModules
         // Third-party production dependencies are confined to the module that adapts them.

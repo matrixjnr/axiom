@@ -113,4 +113,21 @@ class RequestTest {
                 .withBody(Body.of("text/plain", "password".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         assertThat(request.toString()).contains("Authorization").doesNotContain("secret-token", "password");
     }
+
+    @Test
+    void carriesAResolvedRemoteAddressThroughCopiesWithoutPrintingIt() throws Exception {
+        var peer = new java.net.InetSocketAddress(java.net.InetAddress.getByAddress(new byte[] {(byte) 192, 0, 2, 7}), 4711);
+        assertThat(Request.get("/").remoteAddress()).isNull();
+        var request = Request.get("/").withRemoteAddress(peer);
+        assertThat(request.remoteAddress()).isEqualTo(peer);
+        assertThat(request.withHeaders(java.util.Map.of("A", "b")).withBody(Body.empty()).remoteAddress()).isEqualTo(peer);
+        assertThat(request.toString()).doesNotContain("192.0.2.7");
+        assertThat(request.withRemoteAddress(null).remoteAddress()).isNull();
+    }
+
+    @Test
+    void rejectsAnUnresolvedRemoteAddressSoNothingLooksItUp() {
+        assertThatThrownBy(() -> Request.get("/").withRemoteAddress(java.net.InetSocketAddress.createUnresolved("example.org", 80)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
