@@ -23,6 +23,16 @@ commit (see `docs/build.md`). Add the checksums in `gradle/verification-metadata
 in the same commit as the dependency or plugin change that needs them, never in a later
 commit. Commits that do not build break bisecting.
 
+CI builds every commit of a pull request, oldest first, and reports all failing commits.
+Building a commit costs a full `check` (several minutes), so a series is bounded: up to
+20 commits are all built; in a longer series only the newest 20 commits that touch build
+files are built, and the others are listed in a warning of the `commits` job. That covers
+the commits that can break a build while the final tree passes; keep series short, or
+split them into several pull requests, if every commit must be verified. Dependency
+update pull requests (head branch `dependabot/...`) build only the tip commit, because the
+bot's first commit cannot contain the checksums; push the regenerated verification
+metadata on top (see `docs/releasing.md`) and squash-merge.
+
 Shared build configuration belongs in `build-logic`; dependency versions belong
 in `gradle/libs.versions.toml`. Repositories are controlled by settings.
 Do not commit generated output or IDE settings. Do not enable build scan uploads
