@@ -123,8 +123,15 @@ ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 te
 ## Coverage
 
 The `axiom.java-test` convention applies the Gradle `jacoco` plugin with the JaCoCo version
-pinned in the version catalog (`jacoco`). Every test task (`test` and `integrationTest`) runs
-with the JaCoCo agent and writes `build/jacoco/<task>.exec` in its module.
+pinned in the version catalog (`jacoco`). The agent is attached to a test task (`test` and
+`integrationTest`) only when the requested build contains a JaCoCo report task
+(`coverageReport`, a module's `jacocoTestReport`, `testCodeCoverageReport` and so on); such a
+task then writes `build/jacoco/<task>.exec` in its module. Plain `check`, `test`,
+`unitTest` and `integrationTest` runs (local, the CI test jobs and the per-commit job) run
+without the agent, so timing- and allocation-sensitive tests are not instrumented. Decision:
+the agent is a coverage-only concern; the `quality` job is where it runs. Test tasks are
+cached separately with and without the agent, so a coverage run executes the tests once under
+the agent even when the same tests passed without it.
 
 - Per module: `./gradlew :axiom-http:jacocoTestReport` runs the module's test tasks and writes
   `build/reports/jacoco/test/html/` and `build/reports/jacoco/test/jacocoTestReport.xml` from
