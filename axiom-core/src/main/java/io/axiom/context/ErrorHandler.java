@@ -16,6 +16,8 @@ import io.axiom.http.Response;
  * {@link io.axiom.error.AxiomException} answers with that exception's problem response; that
  * exception is not offered to error handlers again. Any other exception, or a {@code null}
  * result, is logged with the request ID and answered with the generic 500 problem response.
+ * Error handlers never run for a cancelled or expired request, and are never offered
+ * {@link InterruptedException} or {@link java.util.concurrent.CancellationException}.
  *
  * <p>Everything the returned response contains reaches the client: never copy exception
  * messages, class names or stack traces into it.

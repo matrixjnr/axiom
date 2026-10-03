@@ -154,6 +154,9 @@ app.error(IllegalStateException.class, (ctx, failure) -> { throw new ConflictExc
 - Unmapped exceptions behave as before: `AxiomException`s become problem
   responses, others propagate from `app.handle` and `TestClient` and become the
   generic 500 over HTTP.
+- Error handlers do not run once the request was cancelled (thread interrupted)
+  or its deadline expired; `InterruptedException` and `CancellationException`
+  are never offered.
 - Only `Exception` subclasses can be mapped. `Error`s (out of memory, stack
   overflow, assertion failures) are not application outcomes; mapping them
   could hide a broken process, so they keep aborting the request.

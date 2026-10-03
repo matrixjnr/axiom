@@ -117,7 +117,10 @@ public interface Application extends RouteGroup, AutoCloseable {
      * for {@code AxiomException}, so a handler for {@code Exception} does not replace it.
      * Exceptions without a handler behave as described for {@link #handle(Request)}. Requests
      * rejected before routing (413, CONNECT) and listener errors are not offered to handlers.
-     * Only exceptions can be mapped; {@link Error}s are never handled.
+     * Only exceptions can be mapped; {@link Error}s are never handled. Handlers do not run for a
+     * request that was cancelled (its thread interrupted) or whose deadline expired, and
+     * {@link InterruptedException} and {@link java.util.concurrent.CancellationException} are
+     * never offered to them.
      *
      * @param type exception class
      * @param handler shared, thread-safe mapping

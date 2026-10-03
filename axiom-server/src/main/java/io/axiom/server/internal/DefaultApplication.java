@@ -456,6 +456,7 @@ final class DefaultApplication implements Application {
      * any other failure of the error handler becomes the generic 500.
      */
     private static Response handleError(Runtime published, DefaultContext context, Exception failure) throws Exception {
+        if (cancelled(context, failure)) { throw failure; }
         var handler = published.errors().find(failure.getClass());
         if (handler == null) { throw failure; }
         context.resetStatus();
@@ -469,11 +470,21 @@ final class DefaultApplication implements Application {
         } catch (AxiomException translated) {
             throw translated;
         } catch (Exception broken) {
+            if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
             broken.addSuppressed(failure);
             LOG.log(System.Logger.Level.ERROR, "Request " + context.execution().requestId()
                     + " failed and its error handler failed too", broken);
             return Problems.response(500, context.execution().requestId());
         }
+    }
+
+    /**
+     * Whether the request was cancelled or ran out of time: its outcome is discarded, so no
+     * application error handler runs. Interruption and cancellation are never offered at all.
+     */
+    private static boolean cancelled(DefaultContext context, Exception failure) {
+        return failure instanceof InterruptedException || failure instanceof java.util.concurrent.CancellationException
+                || Thread.currentThread().isInterrupted() || context.execution().isExpired();
     }
 
     /** The router's own answer when no route serves the request method on its path. */

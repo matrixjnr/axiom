@@ -114,6 +114,10 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   and are never offered; customize them with global middleware. Requests rejected
   before routing (413, CONNECT) and listener errors are not offered either.
 - Only `Exception` subclasses can be mapped; `Error`s keep failing the request.
+- Error handlers never run for a request that was cancelled or whose deadline
+  expired (its outcome is discarded anyway), and `InterruptedException` and
+  `CancellationException` are never offered to them. If an error handler itself
+  is interrupted, the interrupt flag is restored and the generic 500 is used.
 - Exceptions without a handler behave as before: `AxiomException`s become problem
   responses, others propagate from `app.handle` and `TestClient` and become the
   generic 500 over HTTP.
