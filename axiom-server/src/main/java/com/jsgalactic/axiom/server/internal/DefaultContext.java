@@ -150,6 +150,11 @@ final class DefaultContext implements Context {
     }
 
     @Override
+    public Response problem(com.jsgalactic.axiom.error.AxiomException failure) {
+        return Problems.response(java.util.Objects.requireNonNull(failure, "failure"), execution.requestId());
+    }
+
+    @Override
     public Response response(Object body) {
         if (body != null && (status == 204 || status == 205 || status == 304)) {
             var route = match == null ? "unmatched request " + request.method() : "Route " + match.route().method()

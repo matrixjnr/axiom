@@ -25,8 +25,7 @@ listener / TestClient: parse, admit, start deadline
   internals.
 - Everything decided at `start()`: no chain is built per request.
 
-Not goals of this step: group-scoped error handlers, a development mode that
-exposes exception details, asynchronous middleware, and middleware that runs
+Not goals of this step: asynchronous middleware, and middleware that runs
 before admission or for errors the listener produces itself.
 
 ## Middleware
@@ -209,6 +208,8 @@ app.error(IllegalStateException.class, (ctx, failure) -> { throw new ConflictExc
   problem response (a deliberate translation, never handled again). Any other
   exception, or a `null` result, is logged with the request ID and answered with
   the generic 500 problem body, in memory and over HTTP.
+- A group can register its own handlers with `group.error(type, handler)`
+  ([group-scoped handlers](errors.md#group-scoped-handlers)).
 - Unmapped exceptions behave as before: `AxiomException`s become problem
   responses, others propagate from `app.handle` and `TestClient` and become the
   generic 500 over HTTP.
@@ -260,7 +261,6 @@ the Jakarta adapter can be passed directly; `Validation.require` is unchanged.
 
 ## Limitations
 
-- Error handlers are application-wide; there are no group-scoped handlers.
 - Middleware are synchronous and run after admission; they cannot influence
   admission, run before the body is received, or see listener errors.
 - `Next` and the context are confined to the request thread; a middleware cannot

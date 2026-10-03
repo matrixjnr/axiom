@@ -156,6 +156,43 @@ them override `Middleware.afterError`, which runs for every such response (probl
 responses, error handler responses, the generic 500 and the 406; see
 [middleware](middleware.md#middleware)). `SecurityHeaders` and `Cors` do.
 
+### Decorating the standard problem response
+
+`ctx.problem(exception)` builds the response the runtime sends for an `AxiomException` when no
+handler is registered: its status, the typed headers it carries (`Allow`, `Retry-After`,
+`WWW-Authenticate`), `application/problem+json` and the body with only status, code, request ID
+and violations. A handler for `AxiomException` can add to it instead of replacing it, and any
+handler can answer with the standard problem for a status of its choosing:
+
+```java
+app.error(AxiomException.class, (ctx, failure) -> ctx.problem(failure).withHeader("Cache-Control", "no-store"));
+app.error(PaymentGatewayDown.class, (ctx, failure) -> ctx.problem(new ServiceUnavailableException("payments_down")));
+```
+
+It builds a response only: it neither logs nor changes the context's status.
+
+### Group-scoped handlers
+
+`group.error(type, handler)` registers a handler for the routes of a [group](middleware.md#registration)
+and its nested groups, with the same rules as `app.error` (one handler per class in a scope; the
+built-in problem mapping of `AxiomException` stays unless a handler for `AxiomException` or a
+subclass is registered). Resolution is inner scope first: the group that owns the matched route is
+searched, then each enclosing group, then the application, and the first scope with a handler for the
+exception's class or a superclass wins, even when an outer scope registered a nearer class.
+
+```java
+app.error(Exception.class, (ctx, failure) -> ctx.problem(new InternalServerErrorException()));
+app.group("/api/v1", api -> {
+    api.error(QuotaExceeded.class, (ctx, failure) -> ctx.status(429).json(new Quota(failure.limit())));
+    api.get("/orders", listOrders);
+});
+```
+
+All exceptions of a request, including those of global middleware, use the scopes of the route that
+matched. A request no route serves has no group, so only the application's handlers apply to
+exceptions of the custom `notFound`, `methodNotAllowed` and `notImplemented` handlers and global
+middleware. Like group routes, a group's handlers are removed if its configuration callback throws.
+
 ### Logging of failures
 
 Failures are logged server-side only, never in a response, through the logger named

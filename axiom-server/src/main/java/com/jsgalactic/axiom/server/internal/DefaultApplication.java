@@ -57,7 +57,6 @@ final class DefaultApplication implements Application {
     // Configuration state; guarded by this until startup publishes a runtime snapshot.
     private final Map<Route, Registration> registrations = new LinkedHashMap<>();
     private final Scope root = new Scope(null, "");
-    private final Map<Class<?>, ErrorHandler<?>> errorHandlers = new LinkedHashMap<>();
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
     private final Set<String> recognizedMethods = new java.util.TreeSet<>();
@@ -258,13 +257,8 @@ final class DefaultApplication implements Application {
     }
 
     @Override
-    public synchronized <E extends Exception> Application error(Class<E> type, ErrorHandler<? super E> handler) {
-        requireState(State.CONFIGURING);
-        Objects.requireNonNull(type, "type");
-        Objects.requireNonNull(handler, "handler");
-        if (errorHandlers.putIfAbsent(type, handler) != null) {
-            throw new IllegalArgumentException("An error handler is already registered for " + type.getName());
-        }
+    public <E extends Exception> Application error(Class<E> type, ErrorHandler<? super E> handler) {
+        root.error(type, handler);
         return this;
     }
 
@@ -292,6 +286,7 @@ final class DefaultApplication implements Application {
         private final Scope parent;
         private final String prefix;
         private final List<Middleware> middleware = new ArrayList<>();
+        private final Map<Class<?>, ErrorHandler<?>> errors = new LinkedHashMap<>();
         private boolean open = true;
 
         private Scope(Scope parent, String prefix) {
@@ -313,6 +308,27 @@ final class DefaultApplication implements Application {
                 middleware.add(added);
             }
             return this;
+        }
+
+        @Override
+        public <E extends Exception> RouteGroup error(Class<E> type, ErrorHandler<? super E> handler) {
+            Objects.requireNonNull(type, "type");
+            Objects.requireNonNull(handler, "handler");
+            synchronized (DefaultApplication.this) {
+                requireState(State.CONFIGURING);
+                requireOpen();
+                if (errors.putIfAbsent(type, handler) != null) {
+                    throw new IllegalArgumentException("An error handler is already registered for " + type.getName());
+                }
+            }
+            return this;
+        }
+
+        /** Error handlers of this scope and its enclosing ones, innermost first. */
+        private List<ErrorHandlers> errorScopes() {
+            var scopes = new ArrayList<ErrorHandlers>();
+            for (var scope = this; scope != null; scope = scope.parent) { scopes.add(new ErrorHandlers(scope.errors)); }
+            return scopes;
         }
 
         @Override
@@ -373,6 +389,7 @@ final class DefaultApplication implements Application {
             removed.remove();
         }
         scope.middleware.clear();
+        scope.errors.clear();
     }
 
     /** Template shape with capture names erased; templates of equal shape match the same paths. */
@@ -405,18 +422,19 @@ final class DefaultApplication implements Application {
         }
         var codecs = Codecs.discover();
         var global = List.copyOf(root.middleware);
-        var scopes = List.of(new ErrorHandlers(errorHandlers));
+        var rootScopes = root.errorScopes();
         var chains = new LinkedHashMap<Route, Handler>();
         registrations.forEach((route, registration) -> {
             var chain = new ArrayList<>(global);
             registration.scope().collectGroupMiddleware(chain);
             chain.addAll(registration.middleware());
-            chains.put(route, Pipeline.compose(chain, registration.handler(), scopes, failureLog));
+            chains.put(route, Pipeline.compose(chain, registration.handler(),
+                    registration.scope().errorScopes(), failureLog));
         });
         var router = CompiledRouter.compile(chains, Set.copyOf(recognizedMethods));
         // Answers the router produces itself are wrapped by global middleware only.
         var unmatched = Pipeline.compose(global, unmatchedTerminal(notFoundHandler, methodNotAllowedHandler,
-                notImplementedHandler), scopes, failureLog);
+                notImplementedHandler), rootScopes, failureLog);
         runtime = snapshot(router, unmatched, codecs);
         registrations.clear();
         shapes.clear();
@@ -631,7 +649,7 @@ final class DefaultApplication implements Application {
             state = State.CLOSED;
             registrations.clear();
             root.middleware.clear();
-            errorHandlers.clear();
+            root.errors.clear();
             recognizedMethods.clear();
             notFoundHandler = null;
             methodNotAllowedHandler = null;
