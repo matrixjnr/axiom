@@ -25,7 +25,7 @@ public final class Problems {
      * Maps an application or framework exception, including its typed headers.
      *
      * @param failure exception to map
-     * @param requestId framework request identity
+     * @param requestId framework request identity; a non-secret correlation value
      * @return error response
      */
     public static Response response(AxiomException failure, String requestId) {

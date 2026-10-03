@@ -26,7 +26,7 @@ Every framework and application error response uses an
 | --- | --- |
 | `status` | The HTTP status, repeated for clients that lose the status line |
 | `code` | Machine-readable code: `[a-z][a-z0-9_.-]{0,63}`, validated when the exception is created |
-| `requestId` | The `X-Request-ID` of the response, for correlating logs |
+| `requestId` | The `X-Request-ID` of the response, for correlating logs. A correlation value, not a secret: later IDs from the same process can be predicted from an earlier one (see [execution](execution.md)) |
 | `violations` | Present only when non-empty: `code` and, unless the violation concerns the whole value, `field` (property path such as `items[0].name`) |
 
 `type`, `title`, `detail` and `instance` are omitted; RFC 9457 treats a missing
@@ -122,7 +122,7 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   client cannot be told about a failure it did not ask to see in that form, so the
   error is sent as its handler built it (a handler that wants to honor Accept
   reads `ctx.header("Accept")` itself); a successful response of the same type
-  is still answered 406 when Accept excludes it.
+  is still answered 406 when Accept excludes it (for GET, HEAD, OPTIONS and TRACE; Accept is advisory for other methods).
 - `AxiomException`s keep the problem responses above unless a handler is
   registered for `AxiomException` or a subclass: the built-in mapping counts as
   the handler for `AxiomException`, so a handler for `Exception` does not
@@ -282,13 +282,13 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 
 | Status | When | Where |
 | --- | --- | --- |
-| 400 | Malformed request line or headers, a method that is not a token, invalid Host, rejected path or query, an absolute-form target, `*` with a method other than OPTIONS, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked` or naming it twice, more than one Transfer-Encoding line (whatever the values, to avoid ambiguous framing) | Listener |
+| 400 | Malformed request line or headers, a method that is not a token, invalid Host, rejected path or query, an absolute-form target whose scheme, authority or path is invalid or whose authority differs from `Host`, `*` with a method other than OPTIONS, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked` or naming it twice, more than one Transfer-Encoding line (whatever the values, to avoid ambiguous framing) | Listener |
 | 400 | Empty body or codec failure in `ctx.body` | Runtime |
 | 400 | Query parameter or path capture that a typed accessor (`ctx.queryInt`, `queryLong`, `queryUuid`, `pathInt`, `pathLong`, `pathUuid`) cannot convert; code `invalid_query_parameter` or `invalid_path_parameter` (see [typed parameters](routing.md#typed-parameters)) | Runtime |
 | 400 | Path capture that `ctx.pathDecoded` cannot decode safely (malformed UTF-8, or a decoded separator, backslash, NUL or dot segment); code `invalid_path_encoding` | Runtime |
 | 404 | No route matches the path and the method is recognized (see [custom methods](routing.md#custom-methods)) | Runtime |
 | 405 | Route exists for other methods, including every TRACE request to a routed path; `Allow` lists them | Runtime |
-| 406 | Accept excludes the codec response's media type, decided after the handler ran (see [negotiation](bodies.md#accept-negotiation-406)) | Runtime |
+| 406 | Accept excludes the codec response's media type of a safe-method request (`GET`, `HEAD`, `OPTIONS`, `TRACE`), decided after the handler ran; other methods ignore Accept (see [negotiation](bodies.md#accept-negotiation-406)) | Runtime |
 | 408 | Request head not complete within ten seconds, or body not complete by the request deadline | Listener |
 | 413 | Body over `maxRequestBody` | Listener and runtime |
 | 414 | Request line longer than 4 KiB (`maxRequestLine`) | Listener |

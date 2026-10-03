@@ -32,7 +32,9 @@ public interface Context {
     Request request();
 
     /**
-     * Returns immutable identity and deadline metadata for this invocation.
+     * Returns immutable identity and deadline metadata for this invocation. The request ID in it
+     * is a correlation value that appears in response headers, problem bodies and logs; it is
+     * predictable and must never be used as a secret or credential.
      * @return execution context, safe to share with application tasks
      */
     ExecutionContext execution();

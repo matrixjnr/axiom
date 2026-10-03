@@ -43,7 +43,7 @@ final class ErrorBoundary implements Handler {
             var response = (Response) chain.handle(state);
             // A failure to encode happens after every middleware returned: all of them decorate it.
             state.entered(middleware.length);
-            return encode(state.codecs(), state.request(), response, true);
+            return encode(state.codecs(), state.request(), response, safe(state.request().method()));
         } catch (Exception failure) {
             return decorate(state, map(state, failure));
         }
@@ -143,6 +143,14 @@ final class ErrorBoundary implements Handler {
     private static boolean cancelled(DefaultContext context, Exception failure) {
         return failure instanceof InterruptedException || failure instanceof java.util.concurrent.CancellationException
                 || Thread.currentThread().isInterrupted() || context.execution().isExpired();
+    }
+
+    /**
+     * Whether the method is safe (RFC 9110 section 9.2.1), so that a 406 decided after the handler
+     * ran cannot repeat a state change when the client retries. For other methods Accept is advisory.
+     */
+    private static boolean safe(String method) {
+        return method.equals("GET") || method.equals("HEAD") || method.equals("OPTIONS") || method.equals("TRACE");
     }
 
     /**

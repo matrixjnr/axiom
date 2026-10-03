@@ -96,7 +96,7 @@ translate or let propagate.
 
 - The handler's result reaches middleware as a `Response`, mapped exactly as
   today (`String` to text, `null` to 204, the context status). Codec encoding and
-  the Accept check (406) happen once, after the whole chain, so a middleware sees
+  the Accept check (406, safe methods only) happen once, after the whole chain, so a middleware sees
   `ctx.json(value)` bodies unencoded and can short-circuit with `ctx.json(...)` too.
 - `next.run()` may be called at most once, only while the middleware runs and
   only on the request's thread; a second, late or other-thread call throws

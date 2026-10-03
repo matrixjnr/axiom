@@ -5,6 +5,7 @@ import com.jsgalactic.axiom.context.SecurityIdentity;
 import com.jsgalactic.axiom.error.DecodeException;
 import com.jsgalactic.axiom.error.UnsupportedMediaTypeException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.http.HttpStatus;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.observability.TraceContext;
@@ -143,7 +144,7 @@ final class DefaultContext implements Context {
 
     @Override
     public Context status(int status) {
-        Response.validateStatus(status);
+        HttpStatus.reasonPhrase(status); // Rejects anything but a final status (200 to 599).
         this.status = status;
         explicitStatus = true;
         return this;

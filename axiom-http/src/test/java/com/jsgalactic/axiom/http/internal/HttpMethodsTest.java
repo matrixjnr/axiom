@@ -95,7 +95,7 @@ class HttpMethodsTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"GET *", "HEAD *", "POST *", "options *", "PROPFIND *", "OPTIONS *?x=1", "OPTIONS *?",
-            "OPTIONS **", "OPTIONS */a", "OPTIONS *a", "OPTIONS http://a/a", "GET http://a/a", "OPTIONS a",
+            "OPTIONS **", "OPTIONS */a", "OPTIONS *a", "OPTIONS a",
             "OPTIONS //a", "OPTIONS /a/../a", "OPTIONS /a%2Fb"})
     void rejectsOtherAsteriskAbsoluteAndUnsafeTargetsWith400(String requestLine) throws Exception {
         var calls = new AtomicInteger();

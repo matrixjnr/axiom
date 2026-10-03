@@ -487,7 +487,7 @@ final class DefaultApplication implements Application {
 
     @Override public synchronized Application requestTimeout(Duration timeout) {
         requireState(State.CONFIGURING);
-        ExecutionContext.validateTimeout(timeout);
+        ExecutionContext.create(timeout); // Rejects a budget that is not positive or exceeds one day.
         requestTimeout = timeout;
         return this;
     }
