@@ -9,6 +9,9 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/matrixjnr/axiom/badge)](https://scorecard.dev/viewer/?uri=github.com/matrixjnr/axiom)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
+[![Documentation](https://img.shields.io/badge/docs-matrixjnr.github.io%2Faxiom-4f46e5.svg)](https://matrixjnr.github.io/axiom/)
+
+**Documentation: <https://matrixjnr.github.io/axiom/>**
 
 Axiom is an early, pre-release Java 21 framework for HTTP APIs. Applications register
 handlers on compiled routes; an HTTP/1.1 listener built on Netty runs each request on
