@@ -31,6 +31,11 @@ handlers are interrupted; then execution and I/O threads stop. Await
 interruption; termination cannot complete while a handler refuses to stop.
 Direct in-memory `app.handle` calls remain the caller's responsibility.
 
+Open [streams](streaming.md#shutdown) are the exception to the grace period: they are cancelled
+as soon as `close()` begins, because they may never end by themselves. Their handlers' writes
+fail with `SHUTDOWN`, and their connections close without a final chunk, so the client sees the
+body cut off rather than completed.
+
 A failed bind releases its resources before reporting `IOException`. The
 application remains running, so binding another address is safe. Missing or
 multiple transport providers fail before startup. Closed applications cannot bind.
@@ -56,13 +61,15 @@ connection's peer is `ctx.request().remoteAddress()` (forwarding headers are nev
 to it; see [trusted proxies](security.md#client-address-and-trusted-proxies)), and
 request bodies are read up to the application's limit; see
 [request bodies](bodies.md). Responses support UTF-8 strings, byte arrays, empty
-bodies and values encoded by an installed codec. Unencodable body objects and
+bodies, values encoded by an installed codec and [streams](streaming.md). Unencodable body objects and
 handler exceptions other than `AxiomException` produce a generic 500 and close the
 connection; exception details are not sent to clients. The in-memory API still
 propagates those exceptions.
 
 The transport controls Content-Length, Transfer-Encoding, connection headers and
 `Date`, which every response carries as an IMF-fixdate with one-second precision.
+A [streamed response](streaming.md) is sent with `Transfer-Encoding: chunked` on HTTP/1.1,
+and unframed until the connection closes on HTTP/1.0; HEAD gets its head only.
 Hop-by-hop headers, including names nominated by Connection, are removed. HEAD
 uses an explicit HEAD route or falls back to GET and sends no body bytes. OPTIONS
 for a routed path without an OPTIONS route is answered 204 with `Allow` and no
@@ -211,7 +218,12 @@ bytes at a time never looks inactive, so without this bound it could hold a
 connection indefinitely. When the bound passes, the connection closes and the
 client receives a truncated response; at the 1 MiB response limit this needs a
 client reading slower than about 35 KB/s. The bound covers final responses, not the
-interim `100 Continue`, which carries no body.
+interim `100 Continue`, which carries no body. A [stream](streaming.md) is not a response of at
+most 1 MiB: its body is limited by its own byte cap (64 MiB by default), by the request
+deadline, and by the same 30 seconds for a client that takes no data, applied to each wait for
+the channel to become writable rather than to the whole stream. The inactivity timeout does not
+interrupt a running stream either; a handler that is writing nothing is bounded by the request
+deadline.
 A request head must arrive within ten seconds of its first byte; otherwise the
 listener answers 408 Request Timeout and closes (after any earlier pipelined
 responses). Trickling bytes does not extend the bound. The
@@ -226,7 +238,7 @@ The default execution deadline is ten seconds, configurable before startup throu
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
-TLS, HTTP/2, streaming request bodies and observability integrations remain future work.
+TLS, HTTP/2, streaming request bodies, WebSocket and observability integrations remain future work.
 
 ## Listener options
 
@@ -280,6 +292,9 @@ Choosing values:
 - `lingerQuietTimeout` longer than `lingerTimeout` has no effect beyond the total bound, and a
   very small `lingerQuietTimeout` raises the chance that a client still sending gets a reset (see
   [wire behavior](#wire-behavior)).
+- `responseTimeout` is also the stall bound of streamed responses. The byte cap of a stream is not a
+  listener option: each response sets its own (`Response.DEFAULT_STREAM_LIMIT` by default); see
+  [streaming](streaming.md).
 - `headTimeout` and `idleTimeout` are the main defense against slow clients; raising them or the
   connection cap widens the exposure to slowloris-style clients.
 
