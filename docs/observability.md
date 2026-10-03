@@ -183,19 +183,41 @@ are logged, never sent.
 ## Trace context
 
 `ctx.traceContext()` returns the caller's `traceparent` as a `TraceContext` (`traceId`,
-`parentId`, `flags`, `sampled()`), or empty. Parsing is strict: only version `00`, exactly
+`parentId`, `flags`, `sampled()`, `traceState`), or empty. Parsing is strict: only version `00`, exactly
 `00-<32 lowercase hex>-<16 lowercase hex>-<2 lowercase hex>`, nonzero ids. Uppercase digits,
 whitespace, extra fields, other versions and joined duplicate headers are ignored and never
-fail the request. `traceContext.child().traceparent()` gives the header for a downstream call.
-The value is chosen by the client: use it for log correlation, not authorization, and never
-as a metric tag. The framework request ID (`ctx.execution().requestId()`, sent as
+fail the request. The value is chosen by the client: use it for log correlation, not authorization,
+and never as a metric tag. The framework request ID (`ctx.execution().requestId()`, sent as
 `X-Request-ID`) is independent of it.
+
+**Passing the trace on.** `traceContext.child()` keeps the trace id, flags and trace state and gives
+this service a new span id; `child().headers()` is the map of `traceparent` (and `tracestate`, when
+there is one) to send on an outgoing call.
+
+**`tracestate`.** The caller's `tracestate` is read together with a valid `traceparent` (and ignored
+without one, as the specification says) into `TraceContext.traceState()`. Parsing is strict and
+all-or-nothing: at most 32 members and 512 characters in all (the size every implementation must
+propagate; a longer header is ignored), lowercase simple or `tenant@system` keys, values of up to 256
+printable ASCII characters without `,` and `=`, unique keys. Anything else leaves the state empty and
+never fails the request. Axiom does not interpret the members; `TraceState.with(key, value)` sets one
+and moves it to the front, as the specification asks of a vendor that changes its entry.
+
+**Logs.** The framework's own log messages about a request (a failing handler, a mapped failure, an
+aborted stream) name the request ID and, when the caller sent a valid `traceparent`, `trace=<trace id>`
+next to it. The id passed validation, so it cannot inject lines, but it remains the caller's choice. There
+is no thread-local map: for your own log lines `ctx.correlation()` returns the same text
+(`<request id>` or `<request id> trace=<trace id>`), for example
+`log.info("charged " + ctx.correlation())`.
+
+**Responses.** Nothing is added to responses unless you ask: `app.use(TraceContext.responseHeader())`
+adds `traceresponse: 00-<trace id>-<span id>-<flags>` to responses to requests that carried a valid
+`traceparent`, with a span id of this service, so a client can find the request in the server's
+logs. Requests without a trace get no header, because Axiom starts no traces of its own. Like all
+middleware it does not decorate responses made from exceptions.
 
 ## Limitations
 
 - No OpenTelemetry integration: Axiom neither creates spans nor exports traces.
-- `tracestate` is not parsed or propagated, and incoming `traceparent` is not copied into
-  responses or log records automatically.
 - There is no JMX, StatsD or OTLP exporter.
 
 These are tracked in the limitations index, [#13](https://github.com/matrixjnr/axiom/issues/13).

@@ -8,6 +8,7 @@ import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
+import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.server.internal.StreamRun;
 import com.jsgalactic.axiom.server.internal.execution.EndpointTag;
 import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
@@ -514,7 +515,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         } catch (RuntimeException unavailable) {
             if (!(unavailable instanceof RejectedExecutionException)) {
                 LOG.log(System.Logger.Level.WARNING,
-                        "HTTP request " + exchange.execution().requestId() + " could not be dispatched", unavailable);
+                        "HTTP request " + correlation(exchange) + " could not be dispatched", unavailable);
             }
             if (active != null) { active.cancel(); active = null; }
             exchange.release();
@@ -605,15 +606,20 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
     }
 
+    /** The request ID for a log line, with the caller's trace id when it sent a valid traceparent. */
+    private static String correlation(Exchange exchange) {
+        return TraceContext.correlation(exchange.execution().requestId(), exchange.request());
+    }
+
     private static void logFailure(Exchange exchange, Throwable failure) {
         if (failure instanceof StreamAbortedException aborted) {
             // Expected outcomes of a stream: a client leaving or shutdown is not an error. The cap is
             // the application's mistake, so it is worth a warning.
             var level = aborted.reason() == StreamAbortedException.Reason.LIMIT_EXCEEDED
                     ? System.Logger.Level.WARNING : System.Logger.Level.DEBUG;
-            LOG.log(level, "HTTP request " + exchange.execution().requestId() + " stream aborted: " + aborted.reason());
+            LOG.log(level, "HTTP request " + correlation(exchange) + " stream aborted: " + aborted.reason());
         } else if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
-            LOG.log(System.Logger.Level.ERROR, "HTTP request " + exchange.execution().requestId() + " failed", failure);
+            LOG.log(System.Logger.Level.ERROR, "HTTP request " + correlation(exchange) + " failed", failure);
         }
     }
 

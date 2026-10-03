@@ -15,6 +15,7 @@ import com.jsgalactic.axiom.http.spi.HttpTransportProvider;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.observability.Metrics;
+import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteGroup;
 import java.io.IOException;
@@ -596,7 +597,7 @@ final class DefaultApplication implements Application {
             response = dispatch(published, request, execution);
         } catch (AxiomException failure) {
             if (failure.status() >= 500) {
-                LOG.log(System.Logger.Level.WARNING, "Request " + execution.requestId() + " failed with "
+                LOG.log(System.Logger.Level.WARNING, "Request " + TraceContext.correlation(execution.requestId(), request) + " failed with "
                         + failure.status() + " " + failure.code(), failure);
             }
             response = Problems.response(failure, execution.requestId());
@@ -670,7 +671,7 @@ final class DefaultApplication implements Application {
         } catch (Exception broken) {
             if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
             broken.addSuppressed(failure);
-            LOG.log(System.Logger.Level.ERROR, "Request " + context.execution().requestId()
+            LOG.log(System.Logger.Level.ERROR, "Request " + context.correlation()
                     + " failed and its error handler failed too", broken);
             return Problems.response(500, context.execution().requestId());
         }
@@ -683,7 +684,7 @@ final class DefaultApplication implements Application {
     private static void logMapped(DefaultContext context, Exception failure, int status) {
         boolean clientError = failure instanceof AxiomException axiom && axiom.status() < 500;
         if (status >= 500 || !clientError) {
-            LOG.log(System.Logger.Level.WARNING, "Request " + context.execution().requestId() + " failed; its error handler"
+            LOG.log(System.Logger.Level.WARNING, "Request " + context.correlation() + " failed; its error handler"
                     + " answered " + status, failure);
         }
     }

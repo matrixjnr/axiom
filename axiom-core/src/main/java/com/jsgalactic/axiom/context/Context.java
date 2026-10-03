@@ -67,15 +67,30 @@ public interface Context {
 
     /**
      * Returns the W3C trace context the caller sent in a {@code traceparent} header, if it is
-     * valid. Parsing is strict (see {@link TraceContext}); an absent, malformed or unsupported
-     * header yields empty and never fails the request. The value is caller-chosen: use it to
+     * valid, with the {@code tracestate} that came with it (empty if absent or invalid). Parsing is
+     * strict (see {@link TraceContext} and {@link com.jsgalactic.axiom.observability.TraceState}); an
+     * absent, malformed or unsupported header yields empty and never fails the request. The value is caller-chosen: use it to
      * correlate logs and downstream calls, never for authorization, and do not use it as a
      * metric tag. {@code ctx.execution().requestId()} remains the framework's own identity.
      *
      * @return the caller's trace context, if any
      */
     default Optional<TraceContext> traceContext() {
-        return TraceContext.parse(request().header(TraceContext.HEADER).orElse(null));
+        return TraceContext.parse(request().header(TraceContext.HEADER).orElse(null),
+                request().header(com.jsgalactic.axiom.observability.TraceState.HEADER).orElse(null));
+    }
+
+    /**
+     * Describes this request for a log message without a thread-local map: the framework's request
+     * ID, followed by {@code trace=<trace id>} when the caller sent a valid {@code traceparent}. It is
+     * the text the framework puts in its own log messages, for example
+     * {@code logger.log(INFO, "charged " + ctx.correlation())}. The trace id is the caller's choice
+     * (validated, but not trusted), so it is for correlation only.
+     *
+     * @return {@code requestId} or {@code requestId trace=traceId}
+     */
+    default String correlation() {
+        return TraceContext.correlation(execution().requestId(), traceContext());
     }
 
     /**
