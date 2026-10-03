@@ -22,6 +22,7 @@ import java.security.spec.PSSParameterSpec;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -29,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -76,7 +78,10 @@ import javax.crypto.spec.SecretKeySpec;
  * </ol>
  * The identity's principal is {@code sub}. Roles come from the {@code roles} claim and permissions
  * from the {@code scope} claim by default; each may be a space-separated string or an array of
- * strings, at most 256 entries. Other claims are not exposed.
+ * strings, at most 256 entries. Other claims are not exposed unless the application asks:
+ * {@link Builder#exposeClaims} copies named scalar claims to {@link SecurityIdentity#attributes()},
+ * {@link Builder#attributes} maps claims with application code, and {@link Builder#tokenCheck}
+ * adds a revocation or {@code jti} replay check that runs last (see {@link TokenCheck}).
  *
  * <p><b>Credentials.</b> A request without an {@code Authorization} header, or with a scheme other
  * than {@code Bearer}, carries no credentials for this authenticator: {@link #authenticate} returns
@@ -99,6 +104,9 @@ public final class JwtAuthenticator implements Authenticator {
     private final int maxTokenLength;
     private final String rolesClaim;
     private final String permissionsClaim;
+    private final Set<String> exposedClaims;
+    private final List<Function<JwtClaims, Map<String, String>>> attributeMappers;
+    private final List<TokenCheck> checks;
     private final Clock clock;
     private final String challenge;
     private final String invalidChallenge;
@@ -112,6 +120,9 @@ public final class JwtAuthenticator implements Authenticator {
         maxTokenLength = builder.maxTokenLength;
         rolesClaim = builder.rolesClaim;
         permissionsClaim = builder.permissionsClaim;
+        exposedClaims = Set.copyOf(builder.exposedClaims);
+        attributeMappers = List.copyOf(builder.attributeMappers);
+        checks = List.copyOf(builder.checks);
         clock = builder.clock;
         challenge = "Bearer realm=\"" + builder.realm + "\"";
         invalidChallenge = challenge + ", error=\"invalid_token\"";
@@ -233,10 +244,21 @@ public final class JwtAuthenticator implements Authenticator {
         if (!(claims.get("sub") instanceof String subject) || subject.isEmpty()) { throw invalid("Missing subject"); }
         var roles = grants(claims, rolesClaim);
         var permissions = grants(claims, permissionsClaim);
+        var verified = new JwtClaims(claims);
+        for (var check : checks) {
+            if (!check.accept(verified)) { throw invalid("Rejected by a token check"); }
+        }
+        var attributes = new HashMap<String, String>();
+        for (var name : exposedClaims) { verified.text(name).ifPresent(value -> attributes.put(name, value)); }
+        for (var mapper : attributeMappers) {
+            var mapped = mapper.apply(verified);
+            if (mapped == null) { throw new IllegalStateException("An attribute mapper returned null"); }
+            attributes.putAll(mapped);
+        }
         try {
-            return new SecurityIdentity(subject, roles, permissions);
+            return new SecurityIdentity(subject, roles, permissions, attributes);
         } catch (IllegalArgumentException | NullPointerException unusable) {
-            throw invalid("Subject or grants are not usable names");
+            throw invalid("Subject, grants or attributes are not usable names");
         }
     }
 
@@ -340,6 +362,9 @@ public final class JwtAuthenticator implements Authenticator {
         private int maxTokenLength = 8192;
         private String rolesClaim = "roles";
         private String permissionsClaim = "scope";
+        private final Set<String> exposedClaims = new LinkedHashSet<>();
+        private final List<Function<JwtClaims, Map<String, String>>> attributeMappers = new ArrayList<>();
+        private final List<TokenCheck> checks = new ArrayList<>();
         private Clock clock = Clock.systemUTC();
         private String realm = "api";
 
@@ -471,6 +496,51 @@ public final class JwtAuthenticator implements Authenticator {
          */
         public Builder permissionsClaim(String claim) {
             permissionsClaim = requireText(claim, "claim");
+            return this;
+        }
+
+        /**
+         * Exposes verified claims as {@linkplain SecurityIdentity#attributes() identity attributes}
+         * under the same names. Only string, number and boolean claims are exposed, as text; a
+         * claim that is absent or JSON {@code null} is skipped, and one that is an array or object
+         * makes the token invalid. Values over 2,048 characters make the token invalid too. Only
+         * claims listed here are exposed; every other claim stays unavailable to handlers.
+         *
+         * @param names claim names, at most 64 in total with the other attribute settings
+         * @return this builder
+         */
+        public Builder exposeClaims(String... names) {
+            for (var name : Objects.requireNonNull(names, "names")) { exposedClaims.add(requireText(name, "claim")); }
+            if (exposedClaims.size() > 64) { throw new IllegalArgumentException("At most 64 claims can be exposed"); }
+            return this;
+        }
+
+        /**
+         * Maps verified claims to identity attributes with application code, for example to
+         * flatten a nested or array claim. Runs after the {@linkplain #tokenCheck token checks}
+         * accepted the token; its entries are added to those of {@link #exposeClaims} and replace
+         * same-named ones. An {@link IllegalArgumentException} from the function, or an attribute
+         * that {@link SecurityIdentity} refuses, makes the token invalid; other exceptions
+         * propagate.
+         *
+         * @param mapper thread-safe function from verified claims to attribute names and values
+         * @return this builder
+         */
+        public Builder attributes(Function<JwtClaims, Map<String, String>> mapper) {
+            attributeMappers.add(Objects.requireNonNull(mapper, "mapper"));
+            return this;
+        }
+
+        /**
+         * Adds a check that runs after signature, time, issuer, audience and subject verification,
+         * for revocation or {@code jti} replay detection. See {@link TokenCheck} for the
+         * outcomes. Checks run in registration order.
+         *
+         * @param check thread-safe check
+         * @return this builder
+         */
+        public Builder tokenCheck(TokenCheck check) {
+            checks.add(Objects.requireNonNull(check, "check"));
             return this;
         }
 

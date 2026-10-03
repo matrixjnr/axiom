@@ -30,10 +30,13 @@ app.group("/admin", admin -> {
 
 ## Identity
 
-`SecurityIdentity(principal, roles, permissions)` is an immutable record (core,
-`com.jsgalactic.axiom.context`). The sets are unmodifiable copies; names are 1 to 256
-characters without control characters and compare exactly. `toString()` shows the principal
-and grant counts, not the grants.
+`SecurityIdentity(principal, roles, permissions, attributes)` is an immutable record (core,
+`com.jsgalactic.axiom.context`). The sets and the attribute map are unmodifiable copies;
+names are 1 to 256 characters without control characters and compare exactly. Attributes are
+further verified facts as text (a tenant, an e-mail address): at most 64, values up to 2,048
+characters without control characters, read with `identity.attribute(name)`; no policy
+reads them. The three-argument constructor creates an identity without attributes.
+`toString()` shows the principal and the counts, not the grants or attributes.
 
 | Method | Meaning |
 | --- | --- |
@@ -140,6 +143,37 @@ builder refuses to build without at least one key, issuer and audience. The iden
 principal is `sub`; roles come from `roles` and permissions from `scope` (configurable
 with `rolesClaim` and `permissionsClaim`), each a space-separated string or an array of
 strings, at most 256 entries. `clock(Clock)` makes time checks deterministic in tests.
+
+### Further claims, revocation and replay
+
+Only `sub`, the roles claim and the permissions claim reach the identity by default.
+
+```java
+JwtAuthenticator.builder()
+        ...
+        .exposeClaims("tenant", "email", "email_verified")   // string, number, boolean claims as text
+        .attributes(claims -> Map.of("groups", String.join(",", claims.strings("groups"))))
+        .tokenCheck(claims -> !revoked.contains(claims.id().orElse("")))      // revocation
+        .tokenCheck(claims -> seenJti.add(claims.id().orElseThrow()))        // replay, last
+        .build();
+// handler: ctx.identity().orElseThrow().attribute("tenant")
+```
+
+- `exposeClaims` copies named scalar claims; an array or object claim, or a value that is
+  not a valid attribute, makes the token invalid (401), and absent or `null` claims are
+  skipped. `attributes(fn)` maps claims with application code through `JwtClaims`, whose
+  typed accessors (`string`, `strings`, `number`, `bool`, `text`, `id`, `subject`, `issuer`,
+  `expiresAt`) expose no JSON library type; a claim of the wrong type is an
+  `IllegalArgumentException`, answered 401.
+- `tokenCheck(TokenCheck)` runs **after** signature, expiry, issuer, audience and subject
+  verification and before attributes are built. `false` is 401 `invalid_token` with no
+  hint to the client. Checks run in registration order and stop at the first rejection, so
+  register one that records a `jti` last. Any exception other than
+  `IllegalArgumentException` propagates (500) so an unreachable revocation store fails
+  closed rather than accepting the token.
+- Axiom keeps no revocation or replay state: the application owns the store, its size
+  and its pruning (drop a `jti` after `claims.expiresAt()` plus the clock skew), and
+  shares it between instances if it runs more than one.
 
 The authenticator is immutable and thread-safe; it holds its keys (including HMAC
 secrets) for its lifetime. `verify(token)` is public for tokens that do not arrive in
@@ -279,8 +313,6 @@ app.use(Cors.builder()
 
 - Keys are configured statically: no JWKS fetching or rotation
   ([#118](https://github.com/matrixjnr/axiom/issues/118)).
-- JWT claims other than `sub` and the grant claims are not exposed, and there is no
-  revocation or replay check (`jti`) ([#120](https://github.com/matrixjnr/axiom/issues/120)).
 - Security headers and other middleware headers are missing on problem responses
   ([#96](https://github.com/matrixjnr/axiom/issues/96)).
 - No sessions, cookies, CSRF protection or OAuth flows; authentication is
