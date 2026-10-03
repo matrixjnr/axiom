@@ -82,6 +82,9 @@ tasks.register<CheckSiteLinks>("checkSiteLinks") {
     group = "verification"
     description = "Fails when the built site (build/site, Jekyll output plus api/) has a broken link or anchor."
     siteDir = layout.buildDirectory.dir("site")
-    siteUrl = "https://matrixjnr.github.io/axiom"
-    baseUrl = "/axiom"
+    // The project address by default; the Docs workflow passes the address GitHub Pages reports so a
+    // site served from a custom domain (no base path) is checked against that (docs/site.md).
+    siteUrl = providers.gradleProperty("axiom.site.url").orElse("https://matrixjnr.github.io")
+        .zip(providers.gradleProperty("axiom.site.baseUrl").orElse("/axiom")) { origin, base -> origin + base }
+    baseUrl = providers.gradleProperty("axiom.site.baseUrl").orElse("/axiom")
 }

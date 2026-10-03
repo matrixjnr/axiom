@@ -40,6 +40,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -57,8 +60,36 @@ jobs:
           ruby-version: '3.3.6'
           bundler-cache: true
           working-directory: site
+      # The address GitHub Pages serves the site at: the project address (base path /axiom) or a custom
+      # domain (empty base path). Without it every stylesheet and link of a site on a custom domain
+      # would point under /axiom and return 404. Pull requests that cannot read the Pages settings fall
+      # back to the project address.
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        continue-on-error: true
+      - name: Site address
+        id: address
+        env:
+          PAGES_OUTCOME: ${{ steps.pages.outcome }}
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          if [ "$PAGES_OUTCOME" = success ] && [ -n "$PAGES_ORIGIN" ]; then
+            origin="$PAGES_ORIGIN"; base="$PAGES_BASE_PATH"
+          else
+            origin=https://matrixjnr.github.io; base=/axiom
+          fi
+          echo "Serving the site at ${origin}${base}/"
+          echo "origin=$origin" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
       - run: site/build.sh
-      - run: ./gradlew checkSiteLinks
+        env:
+          AXIOM_SITE_URL: ${{ steps.address.outputs.origin }}
+          AXIOM_SITE_BASEURL: ${{ steps.address.outputs.base }}
+      - run: ./gradlew checkSiteLinks -Paxiom.site.url="$ORIGIN" -Paxiom.site.baseUrl="$BASE"
+        env:
+          ORIGIN: ${{ steps.address.outputs.origin }}
+          BASE: ${{ steps.address.outputs.base }}
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: build/site
