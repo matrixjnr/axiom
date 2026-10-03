@@ -16,6 +16,7 @@ to Maven Central yet.
 
 ## Hello, world
 
+<!-- snippet: examples/readme/src/main/java/Hello.java -->
 ```java
 import com.jsgalactic.axiom.Axiom;
 
@@ -36,6 +37,7 @@ public class Hello {
 Records as bodies, a path parameter, a query parameter, a route group with middleware,
 an error handler and a validated body. It needs only the starter.
 
+<!-- snippet: examples/readme/src/main/java/TasksApi.java -->
 ```java
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
@@ -86,6 +88,7 @@ public final class TasksApi {
 
 Tested without a socket:
 
+<!-- snippet: examples/readme/src/test/java/TasksApiTest.java#tested -->
 ```java
 try (var client = TestClient.start(TasksApi.create())) {
     var created = client.post("/tasks", "application/json", "{\"title\":\"Buy milk\"}");
@@ -94,6 +97,8 @@ try (var client = TestClient.start(TasksApi.create())) {
 }
 ```
 
+These three blocks are quoted from [`examples/readme`](examples/readme), which the build compiles and
+tests; `checkReadmeSnippets` fails when the README and the source differ.
 [`examples/rest-api`](examples/rest-api) is a complete version with tests.
 
 ## What works today

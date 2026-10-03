@@ -4,10 +4,26 @@ import java.nio.ByteBuffer;
 import java.util.Set;
 
 /**
- * Converts request and response bodies for a fixed set of media types. Implementations are
- * discovered with {@link java.util.ServiceLoader} when an application starts; two installed
- * codecs that declare the same media type fail startup. Codecs are shared by all requests and
- * must be thread-safe.
+ * Converts request and response bodies for a fixed set of media types.
+ * <p>
+ * <b>Registration.</b> Implementations are discovered with {@link java.util.ServiceLoader}
+ * (through the thread context class loader) once, when an application starts. A codec is
+ * selected by the exact lowercase {@code type/subtype} it declares in {@link #mediaTypes()}:
+ * there is no priority order, and wildcards ({@code application/*}), structured-syntax suffix
+ * aliases (a codec for {@code application/json} does not serve {@code application/vnd.api+json})
+ * and parameters are not matched, so a codec lists every type it serves. Several codecs may be
+ * installed as long as their media types are disjoint. Two codecs declaring the same media type,
+ * or a declaration that is not an exact {@code type/subtype}, fail startup with an
+ * {@link IllegalStateException} naming the type and the classes, and the application stays
+ * configurable.
+ * <p>
+ * <b>Lifecycle and threading.</b> The runtime creates a codec through its public no-argument
+ * constructor, never closes it, and keeps one instance for the application's lifetime. That
+ * instance is shared by every request and may be called from many threads at the same time (on
+ * virtual threads, so a call should not pin a carrier thread for long): implementations must be
+ * thread-safe, must not keep per-request state in fields, and should be immutable after
+ * construction. The runtime reads {@link #mediaTypes()} once, at startup, and routes by that index;
+ * it does not call {@link #supports(String)}.
  * <p>
  * This SPI is experimental. Failures must never expose input or parser messages: decoding
  * reports {@link com.jsgalactic.axiom.error.DecodeException} with a safe code, and encoding failures are

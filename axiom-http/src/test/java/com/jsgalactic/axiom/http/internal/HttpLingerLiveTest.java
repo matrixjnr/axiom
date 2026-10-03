@@ -39,6 +39,9 @@ class HttpLingerLiveTest {
             // in the server's send buffer when the server is done writing it.
             client.setReceiveBufferSize(4096);
             client.setSendBufferSize(64 * 1024);
+            // The premise, checked: the buffers in the client's way hold a small part of its upload.
+            assertThat(client.getReceiveBufferSize()).as("effective client receive buffer").isLessThanOrEqualTo(64 * 1024);
+            assertThat(client.getSendBufferSize()).as("effective client send buffer").isLessThan(1024 * 1024);
             client.connect(server.localAddress(), 30_000);
             client.setSoTimeout(30_000);
             var out = client.getOutputStream();

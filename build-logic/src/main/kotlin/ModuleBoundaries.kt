@@ -10,7 +10,8 @@ object ModuleBoundaries {
         "axiom-starter" to setOf("axiom-core", "axiom-server", "axiom-http", "axiom-json"),
         // Black-box tests of the real codec over TestClient and a listener. Test-only: it has
         // no production code, and no module may depend on it.
-        "integration-tests" to setOf("axiom-core", "axiom-http", "axiom-json", "axiom-test"),
+        "integration-tests" to setOf("axiom-core", "axiom-http", "axiom-json", "axiom-test", "axiom-validation",
+            "axiom-validation-jakarta"),
         "axiom-validation" to setOf("axiom-core"),
         "axiom-validation-jakarta" to setOf("axiom-core", "axiom-validation"),
         // Authentication, policies and HTTP security helpers; the JWT adapter builds on them and,
