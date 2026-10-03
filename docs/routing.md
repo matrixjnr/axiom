@@ -61,6 +61,34 @@ body's encoded length, and the listener sends that header with no body bytes.
 
 ## Methods
 
+This table is the reference for every method. "Routed" means at least one template
+matches the complete path; "Allow" is the union of the methods registered on all
+templates that match it, plus `HEAD` wherever `GET` is registered, sorted
+alphabetically.
+
+| Method | Registration | Routed, a matching template has the method | Routed, no matching template has it | Not routed |
+| --- | --- | --- | --- | --- |
+| `GET`, `POST`, `PUT`, `PATCH`, `DELETE` | `get`, `post`, `put`, `patch`, `delete` or `route` | Handler runs | 405, `Allow` | 404 |
+| `HEAD` | `head` or `route`; otherwise the `GET` route of the same template serves it | Handler runs; no body bytes, `Content-Length` of the representation | 405, `Allow`; no body | 404; no body |
+| `OPTIONS` | `options` or `route` | Handler runs | 204, `Allow` plus `OPTIONS` ([automatic](#automatic-options)) | 404 |
+| `OPTIONS *` | Not possible (`*` is not a template) | 204, `Allow` = every registered method, `HEAD` if `GET` is registered, `OPTIONS` ([details](#options-)) | | |
+| `TRACE` | Refused: `IllegalArgumentException` ([why](#trace)) | | 405, `Allow` | 404 |
+| `CONNECT` | Refused: `IllegalArgumentException` | | 501 ([why](#connect)); the listener closes the connection | 501, likewise |
+| Extension method (`PROPFIND`, `REPORT`, `QUERY`, ...) | `route` | Handler runs | 405, `Allow` | 404 if registered on any route, else 501 ([custom methods](#custom-methods)) |
+| Any other token, including `get` and `Get` | `route` (then it is an extension method) | | 405, `Allow` | 501 |
+| Not a token (`G(T`, `G T`, empty) | Refused: `IllegalArgumentException` | 400 from the listener, which closes the connection; `new Request` throws | | |
+
+`Allow` on a 405 lists only registered methods (and `HEAD` for `GET`); it never lists
+`TRACE` or `CONNECT`, and lists `OPTIONS` only where an OPTIONS route is registered,
+although the path also answers OPTIONS automatically. Every error in the table is an
+`application/problem+json` response (see [errors](errors.md)); 400 and the listener's
+501 for CONNECT close the connection, the others keep it open. Request bodies are
+accepted and limited the same way for every method (see
+[request bodies](bodies.md#limits)), and method-override headers are
+[ignored](#method-override-headers). `app.handle`, `TestClient` and the listener give
+the same answers, except that a request the listener rejects with 400 cannot be built
+in memory.
+
 A method is an RFC 9110 token: one or more ASCII letters, digits and the characters
 ``!#$%&'*+-.^_`|~``.
 `app.route(method, path, handler)` throws `IllegalArgumentException` ("Invalid HTTP
@@ -291,8 +319,12 @@ bound is claimed for adversarial overlapping templates.
 
 Tests cover raw and rejected paths, conflicts, method fallback and mismatches, HEAD, deep paths,
 10,000 routes, and concurrent captures. An independent exhaustive template scanner
-checks 640 method/path combinations (including HEAD) to catch differences in matching and precedence,
-and confirms that the generated paths with empty segments are rejected.
+checks 1,600 method/path combinations to catch differences in matching and precedence:
+ten methods (`GET`, `HEAD`, `POST`, `DELETE`, `OPTIONS`, `TRACE`, `CONNECT`, the
+registered extension method `PROPFIND`, the unrecognized `FOO` and a lowercase `get`)
+against every generated path, including explicit and automatic OPTIONS, 404 versus
+501, 405 `Allow` contents and `OPTIONS *`. It also confirms that the generated paths
+with empty segments are rejected.
 
 The [JMH harness](../benchmarks/http/README.md) exercises the public in-memory
 dispatcher. No timing threshold is enforced by CI.

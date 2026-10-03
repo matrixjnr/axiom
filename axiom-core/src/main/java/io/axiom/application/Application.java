@@ -17,6 +17,31 @@ import java.util.Optional;
  * Registers routes before startup and owns their execution lifecycle.
  * Registration, startup, and shutdown are thread-safe. Handlers may execute concurrently
  * and are responsible for synchronizing shared application state.
+ *
+ * <p>Methods are case-sensitive RFC 9110 tokens and are handled as follows. "Allow" is the union of
+ * the methods registered on every template matching the path, plus HEAD wherever GET is. The same
+ * answers come from {@link #handle(Request)}, the test client and HTTP listeners.
+ * <table class="striped">
+ * <caption>Method handling</caption>
+ * <thead><tr><th>Method</th><th>Registration</th><th>Path routed, method not registered there</th>
+ * <th>Path not routed</th></tr></thead>
+ * <tbody>
+ * <tr><td>GET, POST, PUT, PATCH, DELETE</td><td>shortcut or {@link #route}</td><td>405 with Allow</td>
+ * <td>404</td></tr>
+ * <tr><td>HEAD</td><td>{@link #head} or the GET route of the same template</td>
+ * <td>405 with Allow</td><td>404</td></tr>
+ * <tr><td>OPTIONS</td><td>{@link #options}</td><td>204 with Allow plus OPTIONS, no handler</td>
+ * <td>404</td></tr>
+ * <tr><td>OPTIONS *</td><td>not possible</td>
+ * <td colspan="2">204 with every registered method (HEAD if GET is registered) plus OPTIONS</td></tr>
+ * <tr><td>TRACE</td><td>refused</td><td>405 with Allow</td><td>404</td></tr>
+ * <tr><td>CONNECT</td><td>refused</td><td colspan="2">501</td></tr>
+ * <tr><td>extension token, e.g. PROPFIND or QUERY</td><td>{@link #route}</td><td>405 with Allow</td>
+ * <td>404 if registered on any route, otherwise 501</td></tr>
+ * </tbody>
+ * </table>
+ * Request bodies are accepted and limited alike for every method, HEAD responses never carry a
+ * body, and method-override headers such as {@code X-HTTP-Method-Override} are ignored.
  */
 public interface Application extends AutoCloseable {
     /** Application lifecycle; a closed application cannot be restarted. */

@@ -87,6 +87,8 @@ for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 
 ## Framework statuses
 
+The [method table](routing.md#methods) shows which of these each HTTP method receives.
+
 | Status | When | Where |
 | --- | --- | --- |
 | 400 | Malformed request line or headers, a method that is not a token, invalid Host, rejected path or query, an absolute-form target, `*` with a method other than OPTIONS, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked`, more than one Transfer-Encoding line | Listener |
