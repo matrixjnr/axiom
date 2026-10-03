@@ -7,6 +7,7 @@ import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.routing.Route;
@@ -313,7 +314,20 @@ public interface Application extends RouteGroup, AutoCloseable {
      * @throws IOException if binding fails; the application remains running
      * @throws IllegalStateException if closed or no unique transport provider is installed
      */
-    Server listen(InetSocketAddress address) throws IOException;
+    default Server listen(InetSocketAddress address) throws IOException {
+        return listen(address, ListenerOptions.defaults());
+    }
+
+    /**
+     * Starts this application and binds an HTTP listener with explicit limits and timeouts, such as
+     * the shutdown grace period or the connection cap. The options apply to this listener only.
+     * @param address bind address
+     * @param options immutable listener options; see {@link ListenerOptions#defaults()}
+     * @return application-owned listener
+     * @throws IOException if binding fails; the application remains running
+     * @throws IllegalStateException if closed or no unique transport provider is installed
+     */
+    Server listen(InetSocketAddress address, ListenerOptions options) throws IOException;
 
     /**
      * Executes a request synchronously on the calling thread with a fresh context.
