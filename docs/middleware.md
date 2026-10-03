@@ -1,6 +1,7 @@
 # Middleware, route groups and error handlers
 
-Status: design. Sections are marked as implemented when the code lands.
+Status: middleware, route groups and framework answers are implemented; error
+handlers and validated bodies are the next steps of this design.
 
 ## Goals
 

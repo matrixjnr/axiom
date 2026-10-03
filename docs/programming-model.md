@@ -28,6 +28,21 @@ registration order. Duplicate method/template pairs fail without replacing a han
 Equally shaped templates for the same method also fail at registration, regardless
 of capture names. No partially compiled router is published on failure.
 
+Routes can share a path prefix and middleware in a group, and any scope can add
+middleware that runs around its handlers:
+
+```java
+app.use((ctx, next) -> next.run().withHeader("X-Content-Type-Options", "nosniff"));
+app.group("/api/v1", api -> {
+    api.use(requestLog);                          // every route of the group
+    api.get("/notes/:id", getNote);               // GET /api/v1/notes/:id
+    api.post("/notes", createNote, requireAuth);  // route-level middleware
+});
+```
+
+Middleware run global first, then group (outer to inner), then route, then the
+handler; `start()` composes each chain once. See [middleware](middleware.md).
+
 Matching is case-sensitive and preserves the raw path. Paths with empty or dot
 segments, backslashes, NUL, malformed percent-escapes, or encoded dots, slashes,
 backslashes or NUL are rejected with `InvalidRequestPathException` (400 over HTTP). Whole-segment `:name`
@@ -82,7 +97,9 @@ policies, codecs and the body limit; request acceptance, `resolve`, and `admissi
 without taking the lock. `listen` discovers the transport and binds outside the
 lock; if the application closes meanwhile, the new listener is closed and `listen`
 throws `IllegalStateException`.
-Handlers can run concurrently and each invocation receives a fresh context. A
+Handlers and middleware can run concurrently and each invocation receives a fresh
+context, shared by the request's middleware and handler. One middleware instance
+serves every request and must be thread-safe. A
 context is thread-confined: use it only on the handler's thread and only until the
 handler returns; pass `ctx.execution()`, `ctx.request()`, or extracted values to
 other tasks instead.
@@ -132,7 +149,8 @@ throws an `AxiomException` (for example `NotFoundException` or
 status, code, request ID and field violations, in memory and over HTTP; see
 [errors](errors.md). Other handler exceptions propagate unchanged to in-memory
 callers, and the HTTP transport maps them, and unencodable body objects, to a
-generic 500. No middleware or general exception mappers exist.
+generic 500. Exceptions thrown by middleware are handled the same way. No general
+exception mappers exist.
 
 ## Testing without ports
 

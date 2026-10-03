@@ -4,8 +4,8 @@ Axiom is an early Java API framework targeting Java 21. The current implementati
 supports compiled routing with parameters and wildcards, HTTP/1.1 listeners,
 virtual-thread execution with request deadlines and bounded admission, bounded
 request bodies with a strict JSON codec, problem+json error responses, and
-in-memory testing through the same dispatcher. Bodies are buffered in memory (no
-streaming), and there is no middleware, TLS or HTTP/2 yet.
+in-memory testing through the same dispatcher, middleware and route groups. Bodies
+are buffered in memory (no streaming), and there is no TLS or HTTP/2 yet.
 
 ```java
 import io.axiom.Axiom;

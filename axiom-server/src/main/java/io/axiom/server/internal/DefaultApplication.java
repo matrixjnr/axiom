@@ -2,6 +2,7 @@ package io.axiom.server.internal;
 
 import io.axiom.application.Application;
 import io.axiom.context.Handler;
+import io.axiom.context.Middleware;
 import io.axiom.error.AxiomException;
 import io.axiom.error.NotAcceptableException;
 import io.axiom.error.PayloadTooLargeException;
@@ -12,6 +13,7 @@ import io.axiom.http.Response;
 import io.axiom.http.spi.HttpTransportProvider;
 import io.axiom.lifecycle.Server;
 import io.axiom.routing.Route;
+import io.axiom.routing.RouteGroup;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
@@ -25,26 +27,32 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.ServiceLoader;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 final class DefaultApplication implements Application {
     /**
      * Immutable configuration published at startup. The request path reads it through one
      * volatile field and takes no lock; {@code router} is null once the application closes.
      */
-    private record Runtime(CompiledRouter router, List<Route> routes, Set<Route> routeSet,
+    private record Runtime(CompiledRouter router, Handler unmatched, List<Route> routes, Set<Route> routeSet,
                            Map<Route, AdmissionPolicy> routePolicies, AdmissionPolicy defaultPolicy,
                            Codecs codecs, int maxRequestBody) {
+        /** Drops every reference to application handlers and middleware. */
         Runtime withoutRouter() {
-            return new Runtime(null, routes, routeSet, routePolicies, defaultPolicy, codecs, maxRequestBody);
+            return new Runtime(null, null, routes, routeSet, routePolicies, defaultPolicy, codecs, maxRequestBody);
         }
     }
+
+    /** One registered route before startup: its handler, scope and route-level middleware. */
+    private record Registration(Handler handler, Scope scope, List<Middleware> middleware) {}
 
     /** Largest configurable request body; bodies are buffered in memory before the handler runs. */
     static final int MAX_REQUEST_BODY_LIMIT = 64 * 1024 * 1024;
     private static final System.Logger LOG = System.getLogger(DefaultApplication.class.getName());
 
     // Configuration state; guarded by this until startup publishes a runtime snapshot.
-    private final Map<Route, Handler> registrations = new LinkedHashMap<>();
+    private final Map<Route, Registration> registrations = new LinkedHashMap<>();
+    private final Scope root = new Scope(null, "");
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
     private final List<Server> listeners = new ArrayList<>();
@@ -80,9 +88,33 @@ final class DefaultApplication implements Application {
     }
 
     @Override
-    public synchronized Route route(String method, String path, Handler handler) {
+    public Route route(String method, String path, Handler handler, Middleware... middleware) {
+        return register(root, method, path, handler, middleware);
+    }
+
+    @Override
+    public Application use(Middleware middleware) {
+        root.use(middleware);
+        return this;
+    }
+
+    @Override
+    public Application group(String prefix, Consumer<RouteGroup> configure) {
+        root.group(prefix, configure);
+        return this;
+    }
+
+    private synchronized Route register(Scope scope, String method, String relativePath, Handler handler,
+                                        Middleware[] middleware) {
         requireState(State.CONFIGURING);
+        scope.requireOpen();
         Objects.requireNonNull(handler, "handler");
+        Objects.requireNonNull(relativePath, "path");
+        var routeMiddleware = List.of(Objects.requireNonNull(middleware, "middleware"));
+        if (scope != root && !relativePath.isEmpty() && !relativePath.startsWith("/")) {
+            throw new IllegalArgumentException("A path in a route group must be empty or start with '/': " + relativePath);
+        }
+        var path = scope.prefix + relativePath;
         var route = new Route(method, path);
         if (method.equals("TRACE")) {
             // A TRACE response reflects the request, including credentials (cross-site tracing).
@@ -100,8 +132,85 @@ final class DefaultApplication implements Application {
             throw new IllegalArgumentException("Ambiguous routes for " + method + ": "
                     + previous.path() + " and " + path);
         }
-        registrations.put(route, handler);
+        registrations.put(route, new Registration(handler, scope, routeMiddleware));
         return route;
+    }
+
+    /**
+     * Validates a group prefix appended to its parent's prefix: empty, or starting with '/', not
+     * ending with '/', without a wildcard, and valid as a template on its own.
+     */
+    private static String groupPrefix(String parent, String prefix) {
+        Objects.requireNonNull(prefix, "prefix");
+        if (prefix.isEmpty()) { return parent; }
+        if (!prefix.startsWith("/") || prefix.endsWith("/") || prefix.contains("/*")) {
+            throw new IllegalArgumentException("A group prefix must be empty or start with '/', must not end with '/'"
+                    + " and must not contain a wildcard: " + prefix);
+        }
+        var composed = parent + prefix;
+        new Route("GET", composed);
+        return composed;
+    }
+
+    /**
+     * The application (root) or a route group. Mutable state is guarded by the application's
+     * lifecycle lock; a group closes when its configuration callback returns.
+     */
+    private final class Scope implements RouteGroup {
+        private final Scope parent;
+        private final String prefix;
+        private final List<Middleware> middleware = new ArrayList<>();
+        private boolean open = true;
+
+        private Scope(Scope parent, String prefix) {
+            this.parent = parent;
+            this.prefix = prefix;
+        }
+
+        @Override
+        public Route route(String method, String path, Handler handler, Middleware... routeMiddleware) {
+            return register(this, method, path, handler, routeMiddleware);
+        }
+
+        @Override
+        public RouteGroup use(Middleware added) {
+            Objects.requireNonNull(added, "middleware");
+            synchronized (DefaultApplication.this) {
+                requireState(State.CONFIGURING);
+                requireOpen();
+                middleware.add(added);
+            }
+            return this;
+        }
+
+        @Override
+        public RouteGroup group(String childPrefix, Consumer<RouteGroup> configure) {
+            Objects.requireNonNull(configure, "configure");
+            Scope child;
+            synchronized (DefaultApplication.this) {
+                requireState(State.CONFIGURING);
+                requireOpen();
+                child = new Scope(this, groupPrefix(prefix, childPrefix));
+            }
+            // User code runs outside the lifecycle lock; each registration takes it again.
+            try {
+                configure.accept(child);
+            } finally {
+                synchronized (DefaultApplication.this) { child.open = false; }
+            }
+            return this;
+        }
+
+        private void requireOpen() {
+            if (!open) { throw new IllegalStateException("Route group configuration has ended; register inside its callback"); }
+        }
+
+        /** Middleware of the enclosing groups and this one, outermost first, without the global ones. */
+        private void collectGroupMiddleware(List<Middleware> into) {
+            if (parent == null) { return; }
+            parent.collectGroupMiddleware(into);
+            into.addAll(middleware);
+        }
     }
 
     /** Template shape with capture names erased; templates of equal shape match the same paths. */
@@ -129,17 +238,27 @@ final class DefaultApplication implements Application {
         }
         requireState(State.CONFIGURING);
         var codecs = Codecs.discover();
-        var router = CompiledRouter.compile(registrations);
-        runtime = snapshot(router, codecs);
+        var global = List.copyOf(root.middleware);
+        var chains = new LinkedHashMap<Route, Handler>();
+        registrations.forEach((route, registration) -> {
+            var chain = new ArrayList<>(global);
+            registration.scope().collectGroupMiddleware(chain);
+            chain.addAll(registration.middleware());
+            chains.put(route, Pipeline.compose(chain, registration.handler()));
+        });
+        var router = CompiledRouter.compile(chains);
+        // Answers the router produces itself are wrapped by global middleware only.
+        var unmatched = Pipeline.compose(global, context -> ((DefaultContext) context).frameworkAnswer());
+        runtime = snapshot(router, unmatched, codecs);
         registrations.clear();
         shapes.clear();
         state = State.RUNNING;
         return this;
     }
 
-    private Runtime snapshot(CompiledRouter router, Codecs codecs) {
+    private Runtime snapshot(CompiledRouter router, Handler unmatched, Codecs codecs) {
         var routes = List.copyOf(registrations.keySet());
-        return new Runtime(router, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
+        return new Runtime(router, unmatched, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
                 codecs, maxRequestBody);
     }
 
@@ -262,18 +381,30 @@ final class DefaultApplication implements Application {
         // CONNECT requests a tunnel, which is not supported for any target (RFC 9110 15.6.2).
         if (request.method().equals("CONNECT")) { return Problems.response(501, execution.requestId()); }
         var match = published.router().match(request);
+        DefaultContext context;
+        Handler chain;
+        if (match != null && match.methodAllowed()) {
+            context = new DefaultContext(request, match, execution, published.codecs(), null);
+            chain = match.handler();
+        } else {
+            context = new DefaultContext(request, null, execution, published.codecs(),
+                    frameworkAnswer(published.router(), request, match, execution));
+            chain = published.unmatched();
+        }
+        // Composed chains always return a Response; encoding runs once, after every middleware.
+        return encode(published.codecs(), request, (Response) chain.handle(context));
+    }
+
+    /** The router's own answer when no route serves the request method on its path. */
+    private static Response frameworkAnswer(CompiledRouter router, Request request, CompiledRouter.Match match,
+                                            ExecutionContext execution) {
         if (match == null) {
             // RFC 9110 15.6.2: a method the server does not recognize for any resource is 501.
-            return Problems.response(published.router().recognizes(request.method()) ? 404 : 501, execution.requestId());
+            return Problems.response(router.recognizes(request.method()) ? 404 : 501, execution.requestId());
         }
-        if (!match.methodAllowed()) {
-            // OPTIONS *, or a routed path where no matching template registered OPTIONS: no handler runs.
-            if (request.method().equals("OPTIONS")) { return Response.of(204, null).withHeader("Allow", match.allow()); }
-            return Problems.response(405, execution.requestId()).withHeader("Allow", match.allow());
-        }
-        var context = new DefaultContext(request, match, execution, published.codecs());
-        var result = match.handler().handle(context);
-        return encode(published.codecs(), request, result instanceof Response explicit ? explicit : context.response(result));
+        // OPTIONS *, or a routed path where no matching template registered OPTIONS: no handler runs.
+        if (request.method().equals("OPTIONS")) { return Response.of(204, null).withHeader("Allow", match.allow()); }
+        return Problems.response(405, execution.requestId()).withHeader("Allow", match.allow());
     }
 
     /**
@@ -303,9 +434,10 @@ final class DefaultApplication implements Application {
     public void close() {
         List<Server> owned;
         synchronized (this) {
-            runtime = runtime == null ? snapshot(null, Codecs.of(List.of())) : runtime.withoutRouter();
+            runtime = runtime == null ? snapshot(null, null, Codecs.of(List.of())) : runtime.withoutRouter();
             state = State.CLOSED;
             registrations.clear();
+            root.middleware.clear();
             shapes.clear();
             routePolicies.clear();
             owned = List.copyOf(listeners);
