@@ -9,7 +9,8 @@ Two optional modules check values in handlers and report failures as the
   annotations through Hibernate Validator. Jakarta and Hibernate types stay
   inside this module.
 
-Neither module changes core. Validation is an explicit call in the handler.
+Validation is an explicit call in the handler: `ctx.validatedBody(type, validator)`
+for request bodies, or `Validation.require` for any value.
 
 ## Validators and `Validation.require`
 
@@ -37,6 +38,24 @@ app.post("/orders", ctx -> {
     return ctx.status(201).json(orders.create(order));
 });
 ```
+
+## Validated request bodies
+
+Core's `Context.validatedBody(type, validator)` decodes the body like
+`ctx.body(type)` and then checks it, throwing `ValidationException` (422) when
+there are violations:
+
+```java
+app.post("/orders", ctx -> ctx.status(201).json(orders.create(ctx.validatedBody(Order.class, ORDER))));
+```
+
+The validator is core's `BodyValidator<T>` (`List<Violation> validate(T value)`).
+`Validator<T>` extends it, so rule sets, `and` combinations and the Jakarta
+adapter (a `Validator<Object>`) are accepted directly; without the validation
+modules a lambda works. Decoding failures (400, 415) come first and the
+validator then does not run. A validator that returns `null` or a `null`
+violation fails with `IllegalStateException`; more than 100 violations are cut
+to the first 100, as by `Validation.require`.
 
 The response contains only field paths and codes. Messages, invalid values,
 map keys and exception text never reach it. `and` runs validators in order,
@@ -202,9 +221,6 @@ which also bounds collection sizes.
 
 ## Not covered yet
 
-- `Context` integration such as `ctx.validatedBody(Type.class)`. This needs a
-  hook in core and will follow the middleware work. `Validation.require` keeps
-  working when that lands.
 - Service-loaded default validators. Instances are created explicitly.
 - OpenAPI or JSON Schema generation from rules or annotations.
 - Route type metadata: declaring request and response types on routes, which

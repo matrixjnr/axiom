@@ -1,6 +1,7 @@
 package io.axiom.context;
 
 import io.axiom.error.BadRequestException;
+import io.axiom.error.ValidationException;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
@@ -8,6 +9,7 @@ import io.axiom.routing.Route;
 import io.axiom.internal.PercentDecoding;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -106,6 +108,39 @@ public interface Context {
     <T> T body(Class<T> type);
 
     /**
+     * Decodes the request body as {@link #body(Class)} does, then checks it.
+     *
+     * <pre>{@code
+     * var order = ctx.validatedBody(Order.class, ORDER_RULES);
+     * }</pre>
+     *
+     * Decoding failures come first and the validator then does not run. When the validator
+     * reports violations this throws {@link ValidationException}, answered 422 with a problem
+     * body that lists only each violation's field and code (at most the first 100).
+     *
+     * @param type target type, for example a record
+     * @param validator thread-safe check, such as an {@code axiom-validation} {@code Validator}
+     * @param <T> target type
+     * @return the decoded, valid value, never null
+     * @throws ValidationException if the validator reports violations
+     * @throws IllegalStateException if the validator returns null or a null violation
+     */
+    default <T> T validatedBody(Class<T> type, BodyValidator<? super T> validator) {
+        Objects.requireNonNull(validator, "validator");
+        var value = body(type);
+        var violations = validator.validate(value);
+        if (violations == null) {
+            throw new IllegalStateException("Validator returned null instead of a violation list");
+        }
+        for (var violation : violations) {
+            if (violation == null) { throw new IllegalStateException("Validator returned a null violation"); }
+        }
+        if (violations.isEmpty()) { return value; }
+        // ValidationException accepts at most 100 violations.
+        throw new ValidationException(violations.size() > 100 ? violations.subList(0, 100) : violations);
+    }
+
+    /**
      * Maps a value to a JSON response using the current status (200 by default). The value is
      * encoded by the installed {@code application/json} codec when the response is prepared,
      * after the handler returns. A {@code String} or {@code byte[]} value is sent verbatim as
@@ -136,9 +171,23 @@ public interface Context {
 
     /**
      * Returns the matched route identity, including its template rather than request values.
+     * Handlers, group middleware and route middleware always have one. Global middleware also run
+     * for answers the router produces itself (404, 405, automatic OPTIONS, 501), where no route
+     * matched; there this method throws, so global middleware should use {@link #matchedRoute()}.
      * @return matched route
+     * @throws IllegalStateException if no route matched this request
      */
     Route route();
+
+    /**
+     * Returns the matched route identity, or empty when the router answers the request itself
+     * (404, 405, automatic OPTIONS, {@code OPTIONS *}, 501). Never throws, so global middleware
+     * can use it for every request, for example to log the route template.
+     * @return matched route, if any
+     */
+    default Optional<Route> matchedRoute() {
+        return Optional.of(route());
+    }
 
     /**
      * Reads a raw path capture without percent-decoding or normalization.

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `Context.validatedBody(type, validator)` with core's `BodyValidator`, which axiom-validation's `Validator` now extends.
+- Map exceptions to responses with `app.error(type, handler)`; the nearest registered superclass wins, problem responses stay the default for AxiomException, and a failing error handler produces the generic 500.
+- Add middleware (`app.use`, route-level arguments) and route groups with path prefixes and scoped middleware, composed once at startup; global middleware also wrap 404, 405, automatic OPTIONS and 501 answers. **Binary incompatible (pre-release):** `route`, `get`, `post`, `put`, `patch`, `delete`, `head` and `options` moved to the new `RouteGroup` interface and gained a trailing `Middleware...` parameter. Existing source compiles unchanged, but code compiled against the previous `Application` methods must be recompiled.
 - Answer OPTIONS for routed paths and `OPTIONS *` automatically with 204 and Allow, refuse TRACE and CONNECT routes, answer CONNECT with 501 everywhere, answer unrecognized methods on unrouted paths with 501, and document every method in one table.
 - Send no body with listener errors for HEAD requests.
 - Add opt-in validation modules: annotation-free rules in axiom-validation and a Jakarta Validation adapter in axiom-validation-jakarta, reported as 422 field violations.

@@ -1,17 +1,21 @@
 package io.axiom.application;
 
+import io.axiom.context.ErrorHandler;
 import io.axiom.context.Handler;
+import io.axiom.context.Middleware;
 import io.axiom.execution.AdmissionPolicy;
 import io.axiom.execution.ExecutionContext;
 import io.axiom.http.Request;
 import io.axiom.http.Response;
 import io.axiom.lifecycle.Server;
 import io.axiom.routing.Route;
+import io.axiom.routing.RouteGroup;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * Registers routes before startup and owns their execution lifecycle.
@@ -43,7 +47,7 @@ import java.util.Optional;
  * Request bodies are accepted and limited alike for every method, HEAD responses never carry a
  * body, and method-override headers such as {@code X-HTTP-Method-Override} are ignored.
  */
-public interface Application extends AutoCloseable {
+public interface Application extends RouteGroup, AutoCloseable {
     /** Application lifecycle; a closed application cannot be restarted. */
     enum State {
         /** Routes may be registered. */
@@ -55,7 +59,8 @@ public interface Application extends AutoCloseable {
     }
 
     /**
-     * Registers a method/path template. Methods and static segments are case-sensitive.
+     * Registers a method/path template with optional route-level middleware. Methods and
+     * static segments are case-sensitive.
      * The method must be an RFC 9110 token (one or more of {@code A-Z a-z 0-9} and
      * {@code !#$%&'*+-.^_`|~}); {@code get} and {@code GET} are different methods. Extension
      * methods such as {@code PROPFIND} or {@code QUERY} are registered here; there is no
@@ -68,6 +73,7 @@ public interface Application extends AutoCloseable {
      * @param method case-sensitive HTTP method token
      * @param path absolute path template without query or fragment
      * @param handler callback invoked for matching requests
+     * @param middleware route-level middleware, outermost first; see {@link RouteGroup}
      * @return the registered route identity
      * @throws IllegalArgumentException for a method that is not a token, for {@code TRACE} (whose
      *         echo of the request would expose credentials; TRACE requests are answered 405 or 404),
@@ -75,86 +81,55 @@ public interface Application extends AutoCloseable {
      *         for an invalid template, or for a duplicate or same-shape route for one method
      * @throws IllegalStateException if configuration has ended
      */
-    Route route(String method, String path, Handler handler);
+    @Override
+    Route route(String method, String path, Handler handler, Middleware... middleware);
 
     /**
-     * Registers a route for this HTTP method.
+     * Adds global middleware. It runs first for every route, and also wraps the answers the
+     * router produces itself (404, 405, automatic OPTIONS, 501 for an unrecognized method); for
+     * those, {@code ctx.matchedRoute()} is empty and {@code ctx.route()} throws
+     * {@link IllegalStateException}. Requests rejected before
+     * routing (413, CONNECT, listener errors) do not run middleware.
      *
-     * @param path route path
-     * @param handler callback
-     * @return registered route
+     * @param middleware shared, thread-safe middleware
+     * @return this application
+     * @throws IllegalStateException if configuration has ended
      */
-    default Route get(String path, Handler handler) {
-        return route("GET", path, handler);
-    }
+    @Override
+    Application use(Middleware middleware);
 
     /**
-     * Registers a route for this HTTP method.
+     * Creates a top-level route group; see {@link RouteGroup#group(String, Consumer)}.
      *
-     * @param path route path
-     * @param handler callback
-     * @return registered route
+     * @param prefix group path prefix, or empty for a group that only scopes middleware
+     * @param configure registers the group's routes, middleware and nested groups
+     * @return this application
      */
-    default Route post(String path, Handler handler) {
-        return route("POST", path, handler);
-    }
+    @Override
+    Application group(String prefix, Consumer<RouteGroup> configure);
 
     /**
-     * Registers a route for this HTTP method.
+     * Maps exceptions of a class and its subclasses to responses before startup. When a handler
+     * or middleware throws, the registered class nearest to the exception's class in its
+     * superclass chain wins, after every middleware has unwound. {@link io.axiom.error.AxiomException}
+     * keeps its built-in problem response unless a handler is registered for
+     * {@code AxiomException} or one of its subclasses: the built-in mapping counts as registered
+     * for {@code AxiomException}, so a handler for {@code Exception} does not replace it.
+     * Exceptions without a handler behave as described for {@link #handle(Request)}. Requests
+     * rejected before routing (413, CONNECT) and listener errors are not offered to handlers.
+     * Only exceptions can be mapped; {@link Error}s are never handled. Handlers do not run for a
+     * request that was cancelled (its thread interrupted) or whose deadline expired, and
+     * {@link InterruptedException} and {@link java.util.concurrent.CancellationException} are
+     * never offered to them.
      *
-     * @param path route path
-     * @param handler callback
-     * @return registered route
+     * @param type exception class
+     * @param handler shared, thread-safe mapping
+     * @param <E> exception type
+     * @return this application
+     * @throws IllegalArgumentException if a handler is already registered for the class
+     * @throws IllegalStateException if configuration has ended
      */
-    default Route put(String path, Handler handler) {
-        return route("PUT", path, handler);
-    }
-
-    /**
-     * Registers a route for this HTTP method.
-     *
-     * @param path route path
-     * @param handler callback
-     * @return registered route
-     */
-    default Route patch(String path, Handler handler) {
-        return route("PATCH", path, handler);
-    }
-
-    /**
-     * Registers a route for this HTTP method.
-     *
-     * @param path route path
-     * @param handler callback
-     * @return registered route
-     */
-    default Route delete(String path, Handler handler) {
-        return route("DELETE", path, handler);
-    }
-
-    /**
-     * Registers a route for this HTTP method.
-     *
-     * @param path route path
-     * @param handler callback
-     * @return registered route
-     */
-    default Route head(String path, Handler handler) {
-        return route("HEAD", path, handler);
-    }
-
-    /**
-     * Registers an OPTIONS route. Without one, OPTIONS for a routed path is answered
-     * automatically with 204 and an Allow header; an explicit route replaces that answer for the
-     * paths it matches.
-     *
-     * @param path route path
-     * @param handler callback
-     * @return registered route
-     */
-    default Route options(String path, Handler handler) {
-        return route("OPTIONS", path, handler);
-    }
+    <E extends Exception> Application error(Class<E> type, ErrorHandler<? super E> handler);
 
     /**
      * Returns an immutable snapshot in registration order.
@@ -285,7 +260,9 @@ public interface Application extends AutoCloseable {
      * {@code application/problem+json} responses with only status, code, request ID and
      * violations. Responses whose Content-Type has an installed codec are checked against the
      * request's Accept header (406 when nothing matches) and non-String, non-byte[] bodies are
-     * encoded by that codec. Other handler exceptions propagate unchanged; this method is not a
+     * encoded by that codec. Exceptions from handlers and middleware are first offered to the
+     * handlers registered with {@link #error}; a failing error handler produces the generic 500
+     * problem response. Other handler exceptions propagate unchanged; this method is not a
      * network error boundary.
      *
      * @param request request to execute

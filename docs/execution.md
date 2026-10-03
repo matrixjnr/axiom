@@ -1,7 +1,7 @@
 # Request execution and deadlines
 
-HTTP handlers and response preparation run on one Java 21 virtual thread per
-admitted request. Blocking a handler does not occupy a Netty I/O thread. The
+HTTP handlers, their [middleware](middleware.md), error handlers and response
+preparation run on one Java 21 virtual thread per admitted request. Blocking a handler does not occupy a Netty I/O thread. The
 protocol-neutral dispatcher lives in `axiom-server`; `axiom-http` uses it as an
 implementation dependency. Core remains independent of both modules.
 

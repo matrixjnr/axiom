@@ -1,5 +1,6 @@
 package io.axiom.validation;
 
+import io.axiom.context.BodyValidator;
 import io.axiom.error.Violation;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -18,16 +19,22 @@ import java.util.Objects;
  * whose response carries no internal detail; other exceptions reach the server's generic 500
  * handling.
  *
+ * <p>A validator is also core's {@link BodyValidator}, so it can check request bodies directly:
+ * {@code ctx.validatedBody(Order.class, ORDER)}.
+ *
  * @param <T> type of value checked
  */
 @FunctionalInterface
-public interface Validator<T> {
+public interface Validator<T> extends BodyValidator<T> {
     /**
      * Checks a value.
      *
-     * @param value value to check; may be null
-     * @return immutable or caller-owned violations, empty when the value is valid; never null
+     * @param value value to check; may be null, but never null when called by
+     *        {@code ctx.validatedBody}
+     * @return immutable or caller-owned violations, empty when the value is valid; never null and
+     *         without null elements (callers fail with {@link IllegalStateException} otherwise)
      */
+    @Override
     List<Violation> validate(T value);
 
     /**

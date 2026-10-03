@@ -9,30 +9,56 @@ import io.axiom.http.Response;
 import io.axiom.routing.Route;
 import java.util.Map;
 
+/**
+ * The context of one request. For a request no route serves ({@code match} is null), global
+ * middleware run with this context around the router's own answer.
+ */
 final class DefaultContext implements Context {
     private final Request request;
     private final ExecutionContext execution;
     private final CompiledRouter.Match match;
+    private final Response frameworkAnswer;
     private int status = 200;
     private boolean explicitStatus;
 
     private final Codecs codecs;
 
-    DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution, Codecs codecs) {
+    DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution, Codecs codecs,
+                   Response frameworkAnswer) {
         this.request = request;
         this.codecs = codecs;
         this.execution = execution;
         this.match = match;
+        this.frameworkAnswer = frameworkAnswer;
+    }
+
+    /** The router's answer (404, 405, automatic OPTIONS, 501) for a request no route serves. */
+    Response frameworkAnswer() { return frameworkAnswer; }
+
+    @Override
+    public Route route() {
+        if (match == null) {
+            throw new IllegalStateException("No route serves this request; the router answers it itself."
+                    + " Use matchedRoute() in global middleware");
+        }
+        return match.route();
     }
 
     @Override
-    public Route route() { return match.route(); }
+    public java.util.Optional<Route> matchedRoute() {
+        return match == null ? java.util.Optional.empty() : java.util.Optional.of(match.route());
+    }
 
     @Override
-    public String path(String name) { return match.parameter(name); }
+    public String path(String name) {
+        if (match == null) {
+            throw new IllegalArgumentException("Unknown path parameter: " + java.util.Objects.requireNonNull(name, "name"));
+        }
+        return match.parameter(name);
+    }
 
     @Override
-    public Map<String, String> pathParameters() { return match.parameters(); }
+    public Map<String, String> pathParameters() { return match == null ? Map.of() : match.parameters(); }
 
     @Override
     public Request request() { return request; }
@@ -57,6 +83,12 @@ final class DefaultContext implements Context {
         return value;
     }
 
+    /** Forgets the status the handler or middleware set, before an error handler runs. */
+    void resetStatus() {
+        status = 200;
+        explicitStatus = false;
+    }
+
     @Override
     public Context status(int status) {
         Response.validateStatus(status);
@@ -68,8 +100,9 @@ final class DefaultContext implements Context {
     @Override
     public Response response(Object body) {
         if (body != null && (status == 204 || status == 205 || status == 304)) {
-            var route = match.route();
-            throw new IllegalStateException("Route " + route.method() + " " + route.path() + " set status "
+            var route = match == null ? "unmatched request " + request.method() : "Route " + match.route().method()
+                    + " " + match.route().path();
+            throw new IllegalStateException(route + " set status "
                     + status + ", which cannot carry a body, but produced a " + body.getClass().getName()
                     + " body; return null or a Response without a body");
         }

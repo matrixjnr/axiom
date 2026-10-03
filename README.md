@@ -4,8 +4,8 @@ Axiom is an early Java API framework targeting Java 21. The current implementati
 supports compiled routing with parameters and wildcards, HTTP/1.1 listeners,
 virtual-thread execution with request deadlines and bounded admission, bounded
 request bodies with a strict JSON codec, problem+json error responses, and
-in-memory testing through the same dispatcher. Bodies are buffered in memory (no
-streaming), and there is no middleware, TLS or HTTP/2 yet.
+in-memory testing through the same dispatcher, middleware and route groups. Bodies
+are buffered in memory (no streaming), and there is no TLS or HTTP/2 yet.
 
 ```java
 import io.axiom.Axiom;
@@ -48,7 +48,7 @@ JSON notes API on the same port.
 - `axiom-bom`: aligned library versions
 - `integration-tests`: end-to-end JSON tests with the real codec, through `TestClient` and a live listener
 - `examples/hello`: runnable HTTP server and network smoke example
-- `examples/rest-api`: small JSON API with validation and error responses, and its tests
+- `examples/rest-api`: small JSON API with a route group, timing middleware, an error handler, validated bodies and error responses, and its tests
 - `benchmarks/http`: JMH routing, JSON, negotiation, admission and problem benchmarks ([docs](docs/benchmarks.md))
 
 Core uses JDK service loading to discover the runtime. Applications depending on
