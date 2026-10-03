@@ -80,8 +80,8 @@ Tests are split into two Gradle tasks per module, both part of `check`:
 - `integrationTest` runs the test classes tagged `@Tag("integration")`: every class that
   opens a real socket or starts a live listener (`ServerSocket`, `Socket`, `NettyServer.bind`,
   `app.listen`, `HttpClient`). It exists only in modules that apply the
-  `axiom.integration-test` convention: `axiom-http`, `integration-tests` and
-  `examples/rest-api`. It runs from the same test source set and classpath as `test`.
+  `axiom.integration-test` convention: `axiom-http`, `integration-tests`,
+  `examples/readme` and `examples/rest-api`. It runs from the same test source set and classpath as `test`.
 
 The tag is set per class, so a class that mixes embedded-channel and live-listener cases cannot
 be split by tag. Such classes are kept in two: `HttpLingerTest` and `HttpPipelineErrorTest` hold the
@@ -115,8 +115,9 @@ ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 te
 | axiom-security-jwt | 2 / 27 | - |
 | axiom-metrics | 2 / 11 | - |
 | integration-tests | disabled | 5 / 66 |
+| examples/readme | 1 / 2 | 1 / 1 |
 | examples/rest-api | 1 / 3 | 1 / 1 |
-| total | 76 / 834 | 18 / 211 |
+| total | 77 / 836 | 19 / 212 |
 
 `build-logic` has its own `test` task (2 / 20) that the root `check` runs through the included build.
 
@@ -174,6 +175,25 @@ commit that introduced coverage (parent `bf8e50b`), as covered lines and branche
 modules); "own tests" is the module's `jacocoTestReport`. `axiom-starter` has no classes.
 Of the total, `test` alone covers 90.7% of lines and 81.8% of branches, `integrationTest`
 alone 68.3% and 54.6%.
+
+## README examples
+
+The README's Hello world, tasks API and `TestClient` snippet are quoted from compiled sources in
+`examples/readme` (`Hello.java`, `TasksApi.java`, and the `tested` region of `TasksApiTest.java`).
+`TasksApiTest` runs the snippet through `TestClient`; `TasksApiLiveTest` (tagged `integration`)
+starts `TasksApi` on a real socket (on an ephemeral port: its `main` binds 8080). A README block is
+tied to its source by a marker line directly before the fence:
+
+```
+<!-- snippet: examples/readme/src/main/java/TasksApi.java -->
+<!-- snippet: examples/readme/src/test/java/TasksApiTest.java#tested -->
+```
+
+The first form quotes a whole file; the second the lines between `// region tested` and
+`// endregion tested`, dedented. The root `checkReadmeSnippets` task (part of `check`) fails,
+naming the README line, when a block differs from its source, the source or region is missing,
+or no marker exists at all. Its logic has unit tests in `build-logic`. To change an example,
+edit the source and copy it into the README.
 
 ## Allocation-based tests
 
