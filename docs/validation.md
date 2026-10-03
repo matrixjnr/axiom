@@ -66,7 +66,15 @@ drops duplicate violations and stops once the cap is reached.
 `FieldPath` builds the paths: `name`, `address.postcode`, `items[2].sku`. A
 property segment is an ASCII letter or `_` followed by ASCII letters, digits,
 `_` or `-`. Indexes are zero-based. A check on the whole value is reported as
-`_root`. Paths come from developer-defined names and element positions, never
+the empty field (`FieldPath.ROOT`, `new Violation("", code)`), which the problem
+response represents by leaving the `field` member out:
+
+```json
+{"status":422,"code":"validation_failed","requestId":"q3J0bW9yZS1yYW5k-1a",
+ "violations":[{"code":"end_before_start"},{"field":"items[0].sku","code":"not_blank"}]}
+```
+
+Paths come from developer-defined names and element positions, never
 from client input.
 
 ## Rules without annotations
@@ -118,9 +126,9 @@ Behavior of `Rules`:
 - `nested`, `each` and `eachNested` skip a `null` object or list, and
   `eachNested` skips `null` elements. Require presence explicitly with
   `field(name, accessor, notNull())` or `each(name, accessor, notNull())`.
-- Paths from nested validators are prefixed: a nested `_root` violation is
+- Paths from nested validators are prefixed: a nested whole-value violation is
   reported at the nested field itself, for example `items[3]`.
-- Validating `null` reports `not_null` at `_root`.
+- Validating `null` reports `not_null` on the whole value (empty field).
 - `include(validator)` adds any other validator, such as the Jakarta adapter.
 - Exceptions thrown by accessors, predicates or nested validators propagate
   unchanged and become a generic 500 over HTTP.
@@ -148,15 +156,26 @@ class, which uses only JDK and Axiom types.
   client-chosen keys are never echoed. The code is the annotation's simple
   name in snake case: `NotBlank` becomes `not_blank`, `DecimalMin` becomes
   `decimal_min` and `URL` becomes `url`. Custom constraints follow the same rule.
-  Class-level constraints are reported at the object's path, or at `_root` for
-  the validated value. Results are sorted by field and code, deduplicated and
+  Class-level constraints are reported at the object's path, or with the empty
+  field for the validated value itself. Results are sorted by field and code, deduplicated and
   capped at 100.
 - **Records and cascading.** Constraints on record components apply to the
   component's field. `@Valid` cascades into nested records. For containers,
-  put it on the type argument (`List<@Valid Item>`). Hibernate Validator
-  deprecates `@Valid List<Item>` and logs a warning for it.
+  put it on the type argument (`List<@Valid Item>`). `@Valid List<Item>` still
+  cascades, but Hibernate Validator deprecates it and logs warning `HV000271`
+  (through its own logging, once per type and validator instance). The adapter
+  deliberately does not hide the warning, because it names the element to fix;
+  move the annotation to the type argument.
 - **Groups.** `JakartaValidation.create(Publishing.class)` checks only those
-  groups. With no argument, it checks the default group.
+  groups. With no argument, it checks the default group. A group sequence is
+  passed like any group (`create(BasicThenCostly.class)` for an interface
+  annotated with `@GroupSequence`): checking stops at the first group with
+  violations. A `@GroupSequence` on a class that redefines its default group is
+  honored when the default group is checked.
+- **Method validation.** Jakarta's executable validation (constraints on method
+  parameters and return values, `ExecutableValidator`) is out of scope: the
+  adapter validates values through `Validator<Object>`, and handler inputs are
+  validated as values (`ctx.validatedBody`, `Validation.require`).
 - **Lifecycle.** Create one instance at startup and share it: it is
   thread-safe, and bootstrapping is relatively expensive. Close it when the
   application stops. `validate` fails with `IllegalStateException` after close.
@@ -225,6 +244,5 @@ which also bounds collection sizes.
 - OpenAPI or JSON Schema generation from rules or annotations.
 - Route type metadata: declaring request and response types on routes, which
   would let tools and documentation read them.
-- Validation of path parameters, query parameters and headers, method
-  parameters and return values (Jakarta executable validation), and
+- Validation of path parameters, query parameters and headers, and
   localized messages.

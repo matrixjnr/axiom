@@ -7,7 +7,17 @@ import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.regex.Pattern;
 
-/** Codec discovery and content negotiation over an immutable media-type index. */
+/**
+ * Codec discovery and content negotiation over an immutable media-type index.
+ * <p>
+ * Registry rules: a codec is found by the exact lowercase {@code type/subtype} that it declares.
+ * There is no priority and no fallback: wildcards ({@code application/*}), structured-syntax
+ * suffix aliases (a codec for {@code application/json} does not serve {@code application/vnd.x+json})
+ * and parameters are not matched, so a codec lists each type it serves. Any number of codecs may be
+ * installed while their media types are disjoint; a type claimed twice fails discovery, because
+ * {@link ServiceLoader} order is not a contract that could break the tie. The index never changes
+ * after it is built, and each codec instance is shared by all requests.
+ */
 final class Codecs {
     private static final Pattern MEDIA_TYPE =
             Pattern.compile("[!#$%&'*+.^_`|~0-9a-z-]+/[!#$%&'*+.^_`|~0-9a-z-]+");
@@ -32,9 +42,9 @@ final class Codecs {
         var index = new HashMap<String, BodyCodec>();
         for (var codec : codecs) {
             for (var type : codec.mediaTypes()) {
-                if (!MEDIA_TYPE.matcher(type).matches()) {
+                if (!MEDIA_TYPE.matcher(type).matches() || type.indexOf('*') >= 0) {
                     throw new IllegalStateException("Codec " + codec.getClass().getName()
-                            + " declares an invalid media type; use lowercase type/subtype");
+                            + " declares an invalid media type; use an exact lowercase type/subtype without wildcards");
                 }
                 var previous = index.putIfAbsent(type, codec);
                 if (previous != null) {

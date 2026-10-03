@@ -11,6 +11,17 @@ tasks.named("check") { dependsOn(modules.map { "${it.path}:check" }) }
 tasks.named("check") { dependsOn(gradle.includedBuild("build-logic").task(":check")) }
 tasks.named("assemble") { dependsOn(modules.map { "${it.path}:assemble" }) }
 
+// README examples: a code block marked `<!-- snippet: path -->` must equal the compiled source it
+// quotes (see docs/build.md), so the examples cannot go stale silently.
+val checkReadmeSnippets = tasks.register<CheckReadmeSnippets>("checkReadmeSnippets") {
+    group = "verification"
+    description = "Fails when a README code block differs from the compiled example source it quotes."
+    readme = layout.projectDirectory.file("README.md")
+    root = layout.projectDirectory
+    sources.from(fileTree("examples/readme/src") { include("**/*.java") })
+}
+tasks.named("check") { dependsOn(checkReadmeSnippets) }
+
 // Test split (see docs/build.md): `unitTest` runs every module's `test` (no real sockets),
 // `integrationTest` every module's `integrationTest` (tests tagged integration, plus the whole
 // integration-tests module). Both are part of each module's check.

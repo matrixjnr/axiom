@@ -635,8 +635,13 @@ class HttpConnectionTest {
 
     /** Heap bytes allocated by the calling thread, which runs every embedded channel task. */
     private static long allocatedByThisThread() {
-        return ((com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean())
-                .getCurrentThreadAllocatedBytes();
+        var threads = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+        boolean measurable = threads.isThreadAllocatedMemorySupported() && threads.isThreadAllocatedMemoryEnabled();
+        if (Boolean.getBoolean("axiom.requireAllocationTests")) {
+            assertThat(measurable).as("thread allocation measurement is required by axiom.requireAllocationTests").isTrue();
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(measurable, "per-thread allocation is not measurable on this JVM");
+        return threads.getCurrentThreadAllocatedBytes();
     }
 
     @Test void stalledDeclaredBodyAllocatesOnlyWhatArrived() {

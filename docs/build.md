@@ -80,8 +80,8 @@ Tests are split into two Gradle tasks per module, both part of `check`:
 - `integrationTest` runs the test classes tagged `@Tag("integration")`: every class that
   opens a real socket or starts a live listener (`ServerSocket`, `Socket`, `NettyServer.bind`,
   `app.listen`, `HttpClient`). It exists only in modules that apply the
-  `axiom.integration-test` convention: `axiom-http`, `integration-tests` and
-  `examples/rest-api`. It runs from the same test source set and classpath as `test`.
+  `axiom.integration-test` convention: `axiom-http`, `integration-tests`,
+  `examples/readme` and `examples/rest-api`. It runs from the same test source set and classpath as `test`.
 
 The tag is set per class, so a class that mixes embedded-channel and live-listener cases cannot
 be split by tag. Such classes are kept in two: `HttpLingerTest` and `HttpPipelineErrorTest` hold the
@@ -115,16 +115,24 @@ ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 te
 | axiom-security-jwt | 2 / 27 | - |
 | axiom-metrics | 2 / 11 | - |
 | integration-tests | disabled | 5 / 66 |
-| examples/rest-api | 0 / 0 | 1 / 4 |
-| total | 75 / 831 | 18 / 214 |
+| examples/readme | 1 / 2 | 1 / 1 |
+| examples/rest-api | 1 / 3 | 1 / 1 |
+| total | 77 / 836 | 19 / 212 |
 
 `build-logic` has its own `test` task (2 / 20) that the root `check` runs through the included build.
 
 ## Coverage
 
 The `axiom.java-test` convention applies the Gradle `jacoco` plugin with the JaCoCo version
-pinned in the version catalog (`jacoco`). Every test task (`test` and `integrationTest`) runs
-with the JaCoCo agent and writes `build/jacoco/<task>.exec` in its module.
+pinned in the version catalog (`jacoco`). The agent is attached to a test task (`test` and
+`integrationTest`) only when the requested build contains a JaCoCo report task
+(`coverageReport`, a module's `jacocoTestReport`, `testCodeCoverageReport` and so on); such a
+task then writes `build/jacoco/<task>.exec` in its module. Plain `check`, `test`,
+`unitTest` and `integrationTest` runs (local, the CI test jobs and the per-commit job) run
+without the agent, so timing- and allocation-sensitive tests are not instrumented. Decision:
+the agent is a coverage-only concern; the `quality` job is where it runs. Test tasks are
+cached separately with and without the agent, so a coverage run executes the tests once under
+the agent even when the same tests passed without it.
 
 - Per module: `./gradlew :axiom-http:jacocoTestReport` runs the module's test tasks and writes
   `build/reports/jacoco/test/html/` and `build/reports/jacoco/test/jacocoTestReport.xml` from
@@ -139,6 +147,11 @@ with the JaCoCo agent and writes `build/jacoco/<task>.exec` in its module.
   the root merges the `test` and `integrationTest` aggregates (also available on their own
   as `testCodeCoverageReport` and `integrationTestCodeCoverageReport`). The BOM has no code;
   examples and benchmarks are not library code and are not aggregated.
+
+Examples are deliberately not in the coverage report: they are usage samples, not shipped
+code, and including them would dilute the numbers of the libraries without testing more of
+them. Their own tests (`TestClient` cases in `test`, live-listener cases in `integrationTest`)
+still run in `check`.
 
 No class is excluded from coverage. Coverage is reported, not enforced: there is no
 minimum yet. Per-module floors will be introduced later, starting from the baseline below,
@@ -163,6 +176,25 @@ modules); "own tests" is the module's `jacocoTestReport`. `axiom-starter` has no
 Of the total, `test` alone covers 90.7% of lines and 81.8% of branches, `integrationTest`
 alone 68.3% and 54.6%.
 
+## README examples
+
+The README's Hello world, tasks API and `TestClient` snippet are quoted from compiled sources in
+`examples/readme` (`Hello.java`, `TasksApi.java`, and the `tested` region of `TasksApiTest.java`).
+`TasksApiTest` runs the snippet through `TestClient`; `TasksApiLiveTest` (tagged `integration`)
+starts `TasksApi` on a real socket (on an ephemeral port: its `main` binds 8080). A README block is
+tied to its source by a marker line directly before the fence:
+
+```
+<!-- snippet: examples/readme/src/main/java/TasksApi.java -->
+<!-- snippet: examples/readme/src/test/java/TasksApiTest.java#tested -->
+```
+
+The first form quotes a whole file; the second the lines between `// region tested` and
+`// endregion tested`, dedented. The root `checkReadmeSnippets` task (part of `check`) fails,
+naming the README line, when a block differs from its source, the source or region is missing,
+or no marker exists at all. Its logic has unit tests in `build-logic`. To change an example,
+edit the source and copy it into the README.
+
 ## Allocation-based tests
 
 The no-copy tests measure allocation per thread through `com.sun.management.ThreadMXBean`
@@ -170,9 +202,11 @@ and are skipped (JUnit assumption) on a JVM that cannot measure it. Passing
 `-Daxiom.requireAllocationTests=true` to Gradle turns that skip into a failure; the Build
 workflow sets it, and the `axiom.java-test` convention forwards it to every test JVM
 (`test` and `integrationTest` alike).
-Locally it is off by default so a different JDK does not break `check`. Currently only
-the `axiom-json` test (`decodesFromAReadOnlyViewWithoutCopyingIt`) honors the flag; the
-`axiom-server` `CodecViewTest` case still skips silently (tracked as a limitation).
+Locally it is off by default so a different JDK does not break `check`. Every allocation-based
+test honors the flag, so none of them can be skipped (or pass vacuously) in CI: the `axiom-json`
+read-only-view test, the `axiom-server` `CodecViewTest` case and the `axiom-http`
+`HttpConnectionTest` allocation case. The `unit`, `integration`, `quality` and per-commit jobs
+pass the flag on Temurin 21, which supports the measurement.
 
 ## Hygiene and deferred items
 
