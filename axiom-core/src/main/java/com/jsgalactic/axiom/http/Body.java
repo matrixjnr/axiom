@@ -1,5 +1,6 @@
 package com.jsgalactic.axiom.http;
 
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Locale;
@@ -17,10 +18,6 @@ import java.util.regex.Pattern;
  * length and media type, never content.
  */
 public final class Body {
-    static {
-        com.jsgalactic.axiom.internal.OwnedBodies.install(Body::new);
-    }
-
     private static final Body EMPTY = new Body(null, new byte[0]);
     private static final Pattern MEDIA_TYPE =
             Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+");
@@ -78,6 +75,112 @@ public final class Body {
             offset += length;
         }
         return new Body(contentType, bytes);
+    }
+
+    /**
+     * Starts a body whose array is filled incrementally and then handed to the body without
+     * another copy. Transports use it to read network buffers straight into the array that
+     * becomes the request body, so a body is copied exactly once on its way in.
+     *
+     * @param contentType Content-Type header value, or null when absent
+     * @param capacity initial capacity in bytes; not negative
+     * @return an empty builder
+     * @throws IllegalArgumentException for a negative or oversized capacity
+     */
+    public static Builder builder(String contentType, int capacity) {
+        return new Builder(contentType, capacity);
+    }
+
+    /**
+     * Collects bytes into a private array and turns it into a {@link Body} without copying it
+     * again. The builder owns its array until {@link #build()}; it never exposes it, so the body's
+     * immutability cannot be broken through the builder. Not thread-safe, single use: after
+     * {@code build()} every method throws {@link IllegalStateException}.
+     */
+    public static final class Builder {
+        private final String contentType;
+        private byte[] array;
+        private int length;
+
+        private Builder(String contentType, int capacity) {
+            if (capacity < 0 || capacity > Integer.MAX_VALUE - 8) {
+                throw new IllegalArgumentException("Invalid capacity: " + capacity);
+            }
+            this.contentType = contentType;
+            array = new byte[capacity];
+        }
+
+        /**
+         * Returns the number of bytes written so far.
+         *
+         * @return length in bytes
+         */
+        public int length() {
+            open();
+            return length;
+        }
+
+        /**
+         * Returns the number of bytes that can be written before the capacity must grow.
+         *
+         * @return capacity in bytes
+         */
+        public int capacity() { return open().length; }
+
+        /**
+         * Grows the capacity to exactly {@code capacity} bytes, keeping the content. The old and
+         * the new array coexist while the content is moved.
+         *
+         * @param capacity new capacity; at least the current length
+         * @return this builder
+         * @throws IllegalArgumentException if the capacity is below the current length
+         */
+        public Builder capacity(int capacity) {
+            var current = open();
+            if (capacity < length || capacity > Integer.MAX_VALUE - 8) {
+                throw new IllegalArgumentException("Invalid capacity: " + capacity);
+            }
+            if (capacity != current.length) { array = Arrays.copyOf(current, capacity); }
+            return this;
+        }
+
+        /**
+         * Appends the remaining bytes of a buffer, which are consumed, so one read goes straight
+         * from the source into the array.
+         *
+         * @param source bytes to append
+         * @return this builder
+         * @throws BufferOverflowException if the bytes do not fit in the capacity
+         */
+        public Builder write(ByteBuffer source) {
+            var current = open();
+            int count = source.remaining();
+            if (count > current.length - length) { throw new BufferOverflowException(); }
+            source.get(current, length, count);
+            length += count;
+            return this;
+        }
+
+        /**
+         * Finishes the body. When the array is exactly full it becomes the body as is; otherwise
+         * it is trimmed once.
+         *
+         * @return the body
+         * @throws IllegalArgumentException if the content type contains control or non-Latin-1 characters
+         * @throws IllegalStateException if the builder was already used
+         */
+        public Body build() {
+            var current = open();
+            var bytes = length == current.length ? current : Arrays.copyOf(current, length);
+            var body = new Body(contentType, bytes);
+            array = null;
+            return body;
+        }
+
+        private byte[] open() {
+            if (array == null) { throw new IllegalStateException("Builder already built"); }
+            return array;
+        }
     }
 
     /**
