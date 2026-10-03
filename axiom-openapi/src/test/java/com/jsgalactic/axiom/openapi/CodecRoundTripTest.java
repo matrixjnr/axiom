@@ -28,8 +28,8 @@ class CodecRoundTripTest {
         private String firstName;
         private boolean admin;
         private Boolean subscribed;
-        private String URL;
-        private int HTTPCode;
+        private String url;
+        private int httpCode;
         private String secret;
         private String internalName;
 
@@ -39,10 +39,10 @@ class CodecRoundTripTest {
         public void setAdmin(boolean value) { this.admin = value; }
         public Boolean getSubscribed() { return subscribed; }
         public void setSubscribed(Boolean value) { this.subscribed = value; }
-        public String getURL() { return URL; }
-        public void setURL(String value) { this.URL = value; }
-        public int getHTTPCode() { return HTTPCode; }
-        public void setHTTPCode(int value) { this.HTTPCode = value; }
+        public String getURL() { return url; }
+        public void setURL(String value) { this.url = value; }
+        public int getHTTPCode() { return httpCode; }
+        public void setHTTPCode(int value) { this.httpCode = value; }
         @JsonIgnore public String getSecret() { return secret; }
         public void setSecret(String value) { this.secret = value; }
         @JsonProperty("display_name") public String getInternalName() { return internalName; }

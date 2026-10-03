@@ -41,7 +41,7 @@ final class Fixtures {
         private String name;
         private boolean active;
         private Boolean verified;
-        private String URL;
+        private String url;
         private List<String> roles;
         private int loginCount;
 
@@ -53,8 +53,8 @@ final class Fixtures {
         public void setActive(boolean active) { this.active = active; }
         public Boolean getVerified() { return verified; }
         public void setVerified(Boolean verified) { this.verified = verified; }
-        public String getURL() { return URL; }
-        public void setURL(String url) { this.URL = url; }
+        public String getURL() { return url; }
+        public void setURL(String url) { this.url = url; }
         public List<String> getRoles() { return roles; }
         public void setRoles(List<String> roles) { this.roles = roles; }
         public int getLoginCount() { return loginCount; }
@@ -65,10 +65,10 @@ final class Fixtures {
         @Override public boolean equals(Object o) {
             return o instanceof Account a && a.canEqual(this) && active == a.active && loginCount == a.loginCount
                     && Objects.equals(name, a.name) && Objects.equals(verified, a.verified)
-                    && Objects.equals(URL, a.URL) && Objects.equals(roles, a.roles);
+                    && Objects.equals(url, a.url) && Objects.equals(roles, a.roles);
         }
 
-        @Override public int hashCode() { return Objects.hash(name, active, verified, URL, roles, loginCount); }
+        @Override public int hashCode() { return Objects.hash(name, active, verified, url, roles, loginCount); }
 
         @Override public String toString() { return "Fixtures.Account(name=" + name + ")"; }
     }

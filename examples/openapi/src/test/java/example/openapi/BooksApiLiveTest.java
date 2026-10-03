@@ -21,9 +21,9 @@ class BooksApiLiveTest {
         var password = UUID.randomUUID().toString();
         var authorization = "Basic " + Base64.getEncoder().encodeToString(
                 ("docs:" + password).getBytes(StandardCharsets.UTF_8));
-        try (var app = BooksApi.create(DocsAccess.requirePassword(password));
-             var http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
-                     .connectTimeout(Duration.ofSeconds(5)).build()) {
+        var app = BooksApi.create(DocsAccess.requirePassword(password));
+        try (var http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(5)).build()) {
             var server = app.listen(0);
             var base = "http://127.0.0.1:" + server.localAddress().getPort();
 
@@ -45,6 +45,8 @@ class BooksApiLiveTest {
             var document = http.send(request(base + "/openapi.json", authorization), HttpResponse.BodyHandlers.ofString());
             assertThat(document.statusCode()).isEqualTo(200);
             assertThat(document.body()).contains("\"openapi\": \"3.1.0\"");
+        } finally {
+            app.close();
         }
     }
 
