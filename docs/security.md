@@ -149,14 +149,16 @@ var origin = PROXIES.resolve(ctx.request());      // Optional<ClientOrigin>(addr
 ```
 
 - Forwarding headers are believed only when the **peer** is a configured proxy.
-  Otherwise the client is the peer and the scheme `http`; headers are ignored, so a client
+  Otherwise the client is the peer and the scheme is that of the connection (`https` on a TLS
+  listener, else `http`); headers are ignored, so a client
   cannot spoof its address by sending `X-Forwarded-For`.
 - From a trusted peer, `X-Forwarded-For` is walked right to left; trusted hops are skipped
   and the first untrusted entry is the client (all trusted: the leftmost). The walk stops
   at an entry that is not an IP literal and after 32 entries, keeping the last vouched
   address. Entries are parsed as literals only, never resolved through DNS; ports and
   brackets are accepted.
-- `X-Forwarded-Proto` is used only when it is exactly `http` or `https`.
+- `X-Forwarded-Proto` is used only when it is exactly `http` or `https`; without it the scheme
+  is that of the connection (`Request.isSecure()`, true only on a TLS listener).
 - Ranges are IP literals or CIDR blocks with zero host bits; anything else is rejected at
   configuration time.
 
@@ -175,9 +177,14 @@ names only.
 `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`,
 `Referrer-Policy: no-referrer` and `Cross-Origin-Resource-Policy: same-origin`. Headers the
 response already has are kept, so a handler can loosen one. `with(name, value)` and
-`without(name)` return copies; `Strict-Transport-Security` is not a default because the
-listener has no TLS, so add it only behind a TLS-terminating proxy that serves the whole
-host over HTTPS.
+`without(name)` return copies; `Strict-Transport-Security` is not a default because it is only
+meaningful, and only safe, where the whole host is served over HTTPS and stays that way: a
+browser that has seen the header refuses plain HTTP for the host until `max-age` runs out.
+Add it with `with("Strict-Transport-Security", "max-age=31536000")` once the listener has
+[TLS](tls.md) (or sits behind a proxy that terminates it) and every client of the host can
+speak HTTPS; start with a short `max-age`, and add `includeSubDomains` or `preload` only when
+every subdomain is ready. Browsers ignore the header on plain HTTP, and
+`Request.isSecure()` tells a handler which kind of connection it is on.
 
 Registered globally it also decorates router answers (404, 405, OPTIONS, 501). It does
 **not** decorate responses mapped from exceptions, including the 401 and 403 of policies,

@@ -77,7 +77,9 @@ class PublicApiTest {
             if (value.isArray()) { check(value.getComponentType(), visited); return; }
             if (value.isPrimitive()) { return; }
             assertThat(value.getName()).doesNotContain(".internal.");
-            assertThat(value.getName().startsWith("java.") || value.getName().startsWith("com.jsgalactic.axiom."))
+            // javax.net.ssl is part of the JDK; TlsOptions accepts an SSLContext from the application.
+            assertThat(value.getName().startsWith("java.") || value.getName().startsWith("javax.net.ssl.")
+                    || value.getName().startsWith("com.jsgalactic.axiom."))
                     .as("Public signature must not expose third-party type %s", value.getName()).isTrue();
             assertThat(Modifier.isPublic(value.getModifiers()))
                     .as("Public signature type %s must be accessible", value.getName()).isTrue();

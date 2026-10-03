@@ -31,15 +31,18 @@ import java.util.regex.Pattern;
  * the HTTP listener. It is {@code null} for requests created in memory unless a test sets it with
  * {@link #withRemoteAddress(InetSocketAddress)}. Behind a reverse proxy it is the proxy's address;
  * forwarded client addresses are headers and must only be believed from trusted proxies.
+ * <p>The {@code tls} flag is true when the transport received the request over a TLS connection,
+ * set by the HTTP listener and never derived from a header; see {@link #isSecure()}.
  * @param method case-sensitive HTTP method token
  * @param path absolute raw path without query or fragment, or {@code *} for {@code OPTIONS *}
  * @param query raw query without the leading {@code ?}; {@code ""} when absent
  * @param headers request header fields; copied into an immutable case-insensitive map
  * @param body request content; never null, {@link Body#empty()} when absent
  * @param remoteAddress resolved transport peer address, or {@code null} when unknown
+ * @param tls whether the connection that carried the request uses TLS
  */
 public record Request(String method, String path, String query, Map<String, String> headers, Body body,
-                      InetSocketAddress remoteAddress) {
+                      InetSocketAddress remoteAddress, boolean tls) {
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
     /** Longest accepted raw query, in characters. */
     public static final int MAX_QUERY_LENGTH = 4096;
@@ -87,7 +90,26 @@ public record Request(String method, String path, String query, Map<String, Stri
      * @throws InvalidRequestPathException for a rejected path
      */
     public Request(String method, String path, String query, Map<String, String> headers, Body body) {
-        this(method, path, query, headers, body, null);
+        this(method, path, query, headers, body, null, false);
+    }
+
+    /**
+     * Creates a request received over a plain connection, validating it as described by the
+     * canonical constructor.
+     *
+     * @param method HTTP token
+     * @param path absolute raw path
+     * @param query raw query without the leading {@code ?}; {@code ""} when absent
+     * @param headers header fields
+     * @param body request content
+     * @param remoteAddress resolved transport peer address, or {@code null} when unknown
+     * @throws IllegalArgumentException for an invalid method, query, header or an unresolved
+     *         remote address
+     * @throws InvalidRequestPathException for a rejected path
+     */
+    public Request(String method, String path, String query, Map<String, String> headers, Body body,
+                   InetSocketAddress remoteAddress) {
+        this(method, path, query, headers, body, remoteAddress, false);
     }
 
     /**
@@ -120,6 +142,7 @@ public record Request(String method, String path, String query, Map<String, Stri
      * @param headers header fields
      * @param body request content
      * @param remoteAddress resolved transport peer address, or {@code null} when unknown
+     * @param tls whether the connection uses TLS
      * @throws IllegalArgumentException for an invalid method, query, header or an unresolved
      *         remote address
      * @throws InvalidRequestPathException for a rejected path
@@ -204,7 +227,7 @@ public record Request(String method, String path, String query, Map<String, Stri
      * @return request with the headers
      */
     public Request withHeaders(Map<String, String> headers) {
-        return new Request(method, path, query, headers, body, remoteAddress);
+        return new Request(method, path, query, headers, body, remoteAddress, tls);
     }
 
     /**
@@ -214,7 +237,7 @@ public record Request(String method, String path, String query, Map<String, Stri
      * @return request with the body
      */
     public Request withBody(Body body) {
-        return new Request(method, path, query, headers, body, remoteAddress);
+        return new Request(method, path, query, headers, body, remoteAddress, tls);
     }
 
     /**
@@ -226,8 +249,36 @@ public record Request(String method, String path, String query, Map<String, Stri
      * @throws IllegalArgumentException for an unresolved address
      */
     public Request withRemoteAddress(InetSocketAddress remoteAddress) {
-        return new Request(method, path, query, headers, body, remoteAddress);
+        return new Request(method, path, query, headers, body, remoteAddress, tls);
     }
+
+    /**
+     * Returns a copy that records whether the carrying connection uses TLS. Transports call this
+     * for connections they secured; tests use it to simulate HTTPS.
+     *
+     * @param tls whether the connection uses TLS
+     * @return request with the flag
+     */
+    public Request withTls(boolean tls) {
+        return new Request(method, path, query, headers, body, remoteAddress, tls);
+    }
+
+    /**
+     * Reports whether the request arrived over a TLS connection to this server. This describes the
+     * hop from the peer only: behind a reverse proxy that terminates TLS it is false even though
+     * the client used HTTPS, and {@code X-Forwarded-Proto} is a header anyone can send. Use
+     * {@code TrustedProxies} in axiom-security to decide the client-facing scheme.
+     *
+     * @return true when the transport connection is TLS
+     */
+    public boolean isSecure() { return tls; }
+
+    /**
+     * Returns the scheme of the transport connection.
+     *
+     * @return {@code https} when {@link #isSecure()}, otherwise {@code http}
+     */
+    public String scheme() { return tls ? "https" : "http"; }
 
     /**
      * Describes the request without its query, header values, body content or remote address.

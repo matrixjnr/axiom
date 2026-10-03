@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.lifecycle;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Transport limits and timeouts of one HTTP listener, passed to
@@ -33,6 +34,8 @@ public final class ListenerOptions {
     private final Duration lingerTimeout;
     private final Duration lingerQuietTimeout;
     private final Duration shutdownLingerTimeout;
+    private final Duration handshakeTimeout;
+    private final TlsOptions tls;
     private final int maxDiscardedInput;
     private final int maxConnections;
     private final int maxLingeringConnections;
@@ -49,6 +52,8 @@ public final class ListenerOptions {
         lingerTimeout = b.lingerTimeout;
         lingerQuietTimeout = b.lingerQuietTimeout;
         shutdownLingerTimeout = b.shutdownLingerTimeout;
+        handshakeTimeout = b.handshakeTimeout;
+        tls = b.tls;
         maxDiscardedInput = b.maxDiscardedInput;
         maxConnections = b.maxConnections;
         maxLingeringConnections = b.maxLingeringConnections;
@@ -83,6 +88,8 @@ public final class ListenerOptions {
         b.lingerTimeout = lingerTimeout;
         b.lingerQuietTimeout = lingerQuietTimeout;
         b.shutdownLingerTimeout = shutdownLingerTimeout;
+        b.handshakeTimeout = handshakeTimeout;
+        b.tls = tls;
         b.maxDiscardedInput = maxDiscardedInput;
         b.maxConnections = maxConnections;
         b.maxLingeringConnections = maxLingeringConnections;
@@ -107,6 +114,10 @@ public final class ListenerOptions {
     public Duration lingerQuietTimeout() { return lingerQuietTimeout; }
     /** @return total linger bound once the listener is closing */
     public Duration shutdownLingerTimeout() { return shutdownLingerTimeout; }
+    /** @return bound on the TLS handshake of a new connection; applies only when {@link #tls()} is present */
+    public Duration handshakeTimeout() { return handshakeTimeout; }
+    /** @return the TLS settings; empty when the listener serves plain HTTP */
+    public Optional<TlsOptions> tls() { return Optional.ofNullable(tls); }
     /** @return bytes discarded unread after an error or last response before the connection is closed */
     public int maxDiscardedInput() { return maxDiscardedInput; }
     /** @return open connections per listener */
@@ -127,7 +138,8 @@ public final class ListenerOptions {
         return "ListenerOptions[shutdownGrace=" + shutdownGrace + ", idleTimeout=" + idleTimeout
                 + ", headTimeout=" + headTimeout + ", responseTimeout=" + responseTimeout
                 + ", lingerTimeout=" + lingerTimeout + ", lingerQuietTimeout=" + lingerQuietTimeout
-                + ", shutdownLingerTimeout=" + shutdownLingerTimeout + ", maxDiscardedInput=" + maxDiscardedInput
+                + ", shutdownLingerTimeout=" + shutdownLingerTimeout + ", handshakeTimeout=" + handshakeTimeout
+                + ", tls=" + tls + ", maxDiscardedInput=" + maxDiscardedInput
                 + ", maxConnections=" + maxConnections + ", maxLingeringConnections=" + maxLingeringConnections
                 + ", maxPipelinedRequests=" + maxPipelinedRequests + ", maxRequestLine=" + maxRequestLine
                 + ", maxHeaderBytes=" + maxHeaderBytes + ", ioThreads=" + ioThreads + "]";
@@ -146,6 +158,8 @@ public final class ListenerOptions {
         private Duration lingerTimeout = Duration.ofSeconds(2);
         private Duration lingerQuietTimeout = Duration.ofMillis(500);
         private Duration shutdownLingerTimeout = Duration.ofMillis(500);
+        private Duration handshakeTimeout = Duration.ofSeconds(10);
+        private TlsOptions tls;
         private int maxDiscardedInput = 16 * 1024 * 1024;
         private int maxConnections = 128;
         private int maxLingeringConnections = 32;
@@ -240,6 +254,31 @@ public final class ListenerOptions {
          */
         public Builder shutdownLingerTimeout(Duration timeout) {
             shutdownLingerTimeout = duration("shutdownLingerTimeout", timeout);
+            return this;
+        }
+
+        /**
+         * Sets how long a new connection may take to finish its TLS handshake. A client that is
+         * slower, or that sends something other than TLS, loses the connection; until then it
+         * holds a connection slot (see {@link #maxConnections(int)}) but no admission capacity.
+         * Ignored without {@link #tls(TlsOptions)}.
+         * @param timeout 1 millisecond to one day; the default is 10 seconds
+         * @return this builder
+         * @throws IllegalArgumentException if out of range
+         */
+        public Builder handshakeTimeout(Duration timeout) {
+            handshakeTimeout = duration("handshakeTimeout", timeout);
+            return this;
+        }
+
+        /**
+         * Serves HTTPS instead of plain HTTP on this listener. The material is validated when the
+         * listener starts. Null serves plain HTTP, which is the default.
+         * @param options the TLS settings, or null
+         * @return this builder
+         */
+        public Builder tls(TlsOptions options) {
+            tls = options;
             return this;
         }
 

@@ -126,6 +126,22 @@ class RequestTest {
     }
 
     @Test
+    void recordsTheTransportSchemeThroughCopies() {
+        var plain = Request.get("/");
+        assertThat(plain.isSecure()).isFalse();
+        assertThat(plain.scheme()).isEqualTo("http");
+        var secure = plain.withTls(true);
+        assertThat(secure.isSecure()).isTrue();
+        assertThat(secure.scheme()).isEqualTo("https");
+        assertThat(secure.withHeaders(java.util.Map.of("A", "b")).withBody(Body.empty())
+                .withRemoteAddress(null).isSecure()).isTrue();
+        assertThat(secure.withTls(false).isSecure()).isFalse();
+        assertThat(new Request("GET", "/", "", java.util.Map.of(), Body.empty(), null).isSecure()).isFalse();
+        // A header can never make a request secure.
+        assertThat(plain.withHeaders(java.util.Map.of("X-Forwarded-Proto", "https")).isSecure()).isFalse();
+    }
+
+    @Test
     void rejectsAnUnresolvedRemoteAddressSoNothingLooksItUp() {
         assertThatThrownBy(() -> Request.get("/").withRemoteAddress(java.net.InetSocketAddress.createUnresolved("example.org", 80)))
                 .isInstanceOf(IllegalArgumentException.class);

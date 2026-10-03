@@ -23,8 +23,8 @@ import java.util.Optional;
  * <p><b>Rules.</b> Forwarding headers are client input and anyone can send them, so:
  * <ul>
  * <li>When the transport peer ({@link Request#remoteAddress()}) is not a trusted proxy, the client
- * is the peer and the scheme is {@code http} (the listener has no TLS); forwarding headers are
- * ignored entirely.</li>
+ * is the peer and the scheme is that of the connection ({@link Request#scheme()}: {@code https} on
+ * a TLS listener, otherwise {@code http}); forwarding headers are ignored entirely.</li>
  * <li>When the peer is trusted, {@code X-Forwarded-For} is read from right to left, the order in
  * which proxies appended to it. Entries that are trusted proxies are skipped; the first untrusted
  * entry is the client. If every entry is trusted, the leftmost one is the client. The walk stops at
@@ -33,7 +33,7 @@ import java.util.Optional;
  * proxy. Addresses are never resolved through DNS. Entries may carry a port
  * ({@code 192.0.2.1:4711}, {@code [2001:db8::1]:4711}), which is ignored.</li>
  * <li>When the peer is trusted, {@code X-Forwarded-Proto} supplies the scheme if it is exactly one
- * value, {@code http} or {@code https} (any case); otherwise the scheme is {@code http}.</li>
+ * value, {@code http} or {@code https} (any case); otherwise the scheme is that of the connection.</li>
  * </ul>
  * Trust only proxies that overwrite or append to these headers; a trusted proxy that passes a
  * client's {@code X-Forwarded-For} through unchanged lets the client choose its address. The RFC
@@ -98,7 +98,7 @@ public final class TrustedProxies {
         var peer = Objects.requireNonNull(request, "request").remoteAddress();
         if (peer == null) { return Optional.empty(); }
         var client = peer.getAddress();
-        if (!isTrusted(client)) { return Optional.of(new ClientOrigin(client, "http", false)); }
+        if (!isTrusted(client)) { return Optional.of(new ClientOrigin(client, request.scheme(), false)); }
         boolean forwarded = false;
         var chain = request.header("X-Forwarded-For").orElse("");
         int end = chain.length();
@@ -111,7 +111,7 @@ public final class TrustedProxies {
             if (!isTrusted(hop)) { break; }
             end = comma < 0 ? 0 : comma;
         }
-        var scheme = "http";
+        var scheme = request.scheme();
         var proto = request.header("X-Forwarded-Proto").map(value -> value.trim().toLowerCase(Locale.ROOT));
         if (proto.isPresent() && (proto.get().equals("http") || proto.get().equals("https"))) {
             scheme = proto.get();
