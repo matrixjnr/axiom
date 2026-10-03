@@ -76,7 +76,7 @@ connection closes. Handler-side memory is additional: `ctx.body(...)` passes the
 codec a read-only view of the running body, so the JSON codec reads it without a
 copy, but a codec that implements only the array method receives one copy (up to
 `L`); the decoded value lives until the handler drops it, and `Body.bytes()` copies
-on every call.
+on every call. [Handler-side cost by access pattern](#handler-side-cost) lists each.
 
 On top of the per-connection bounds, each listener has a **budget of request body bytes held at
 once across all its connections**: `maxInFlightBodyBytes` in the [listener options](http.md#listener-options),
@@ -144,10 +144,31 @@ body size if that is smaller) and doubles as bytes arrive, so a client that decl
 large Content-Length and then stalls holds only what it has sent. A declared body's
 array is capped at the declared length and ends exactly full; a chunked body's array
 is capped at the limit and trimmed once at the end. The finished array is handed to the
-`Body` without another copy. The body keeps the request's
+`Body` without another copy, through `Body.Builder`, which owns the array until
+`build()` and never exposes it. The body keeps the request's
 `Content-Type`; `mediaType()` and `charset()` parse it. Request headers are
 available through `ctx.header(name)` (one value per name; repeated fields are joined
 with `", "`). `Request.toString` omits header values.
+
+### Handler-side cost
+
+What each way of reading a request body costs beyond the listener's bound above
+(`L` = `maxRequestBody`, `n` = the body's length):
+
+| Access | Extra memory | Notes |
+| --- | --- | --- |
+| `ctx.body(Type.class)` with a codec that overrides `decode(ByteBuffer, Class)` (the JSON codec) | the decoded value only | Reads a read-only view of the body; no copy of the bytes. |
+| `ctx.body(Type.class)` with an array-only codec | `n` for the call, plus the value | The default `decode(ByteBuffer, Class)` copies the bytes once per call. Override it to avoid this. |
+| `ctx.body(...)` called again | the same again | Each call decodes anew; keep the first value instead of decoding twice. |
+| `body.asReadOnlyBuffer()`, `length()`, `isEmpty()`, `contentType()` | a few small objects | Never copies the content. |
+| `body.bytes()` | `n` per call | Always a fresh copy, so call it once and keep the array. Prefer the view. |
+| The decoded value | its own size, until the handler drops it | Additional to the connection bound, and held until the handler returns if it keeps a reference. |
+
+A test measures the difference: building a body from a buffer allocates its array once,
+`asReadOnlyBuffer()` allocates under a kilobyte for any size, and `bytes()` allocates the
+whole content (`BodyTest`, `CodecViewTest`). A cached view is not
+needed because the view is already a constant-size wrapper, and sharing one buffer between
+callers would share its position.
 
 ## Decoding
 

@@ -2,8 +2,8 @@ package com.jsgalactic.axiom.http.internal;
 
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.HttpStatus;
-import com.jsgalactic.axiom.internal.OwnedBodies;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
@@ -159,11 +159,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private boolean streamKeepAlive;
     private final StreamMetrics streamMetrics;
     private ScheduledFuture<?> headTimer;
-    // Body of the request being received, copied out of each Netty buffer as it arrives. The array
+    // Body of the request being received, copied out of each Netty buffer as it arrives. Its array
     // grows by doubling as bytes arrive, capped at the declared Content-Length or, for chunked
     // bodies, at the limit, so a stalled sender holds little memory. Dropped on every exit path
     // (see releaseBody).
-    private byte[] bodyBytes;
+    private Body.Builder bodyBuilder;
     private boolean bodyChunked;
     private long declaredLength;
     private int bodyLength;
@@ -228,7 +228,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Releases a partially received body and its deadline timer; idempotent. */
     private void releaseBody() {
-        bodyBytes = null;
+        bodyBuilder = null;
         if (bodyTimer != null) { bodyTimer.cancel(false); bodyTimer = null; }
         bodyLength = 0;
         continuePending = false;
@@ -366,30 +366,32 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // Growth is capped at the declared length, so a complete declared body fills its array exactly.
         long cap = bodyChunked ? bodyLimit : declaredLength;
         if (total > cap) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
-        if (bodyBytes == null) {
+        if (bodyBuilder == null) {
             int capacity = (int) Math.min(cap, Math.max(INITIAL_BODY_CAPACITY, total));
             if (bodyChunked && !receivingReservation.grow(capacity)) { fail(ctx, 503); return false; }
-            bodyBytes = new byte[capacity];
-        } else if (total > bodyBytes.length) {
+            bodyBuilder = Body.builder(receiving.request().header("Content-Type").orElse(null), capacity);
+        } else if (total > bodyBuilder.capacity()) {
             // Doubling keeps the copying linear in the body size.
-            int capacity = (int) Math.min(cap, Math.max(total, 2L * bodyBytes.length));
-            if (bodyChunked && !receivingReservation.grow(capacity - bodyBytes.length)) { fail(ctx, 503); return false; }
-            bodyBytes = Arrays.copyOf(bodyBytes, capacity);
+            int capacity = (int) Math.min(cap, Math.max(total, 2L * bodyBuilder.capacity()));
+            if (bodyChunked && !receivingReservation.grow(capacity - bodyBuilder.capacity())) { fail(ctx, 503); return false; }
+            bodyBuilder.capacity(capacity);
         }
-        content.readBytes(bodyBytes, bodyLength, readable);
+        // Straight from the network buffer into the array that becomes the body.
+        for (var part : content.nioBuffers(content.readerIndex(), readable)) { bodyBuilder.write(part); }
+        content.skipBytes(readable);
         bodyLength = (int) total;
         return true;
     }
 
     private void completeRequest(ChannelHandlerContext ctx) {
         var exchange = receiving;
-        if (bodyBytes != null) {
+        if (bodyBuilder != null) {
             if (bodyLength != declaredLength && !bodyChunked) { fail(ctx, 400); return; }
             try {
                 // The array is handed over, not copied again unless it is larger than the body.
-                var bytes = bodyLength == bodyBytes.length ? bodyBytes : Arrays.copyOf(bodyBytes, bodyLength);
-                bodyBytes = null;
-                var body = OwnedBodies.adopt(exchange.request().header("Content-Type").orElse(null), bytes);
+                var builder = bodyBuilder;
+                bodyBuilder = null;
+                var body = builder.build();
                 exchange = new Exchange(exchange.request().withBody(body), exchange.keepAlive(),
                         exchange.http10(), exchange.execution(), null);
             } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
