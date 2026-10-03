@@ -183,7 +183,13 @@ returning a response are outside these limits. Connections close after 30 second
 without network read/write activity, including idle keep-alive connections and a
 response write stalled by a client that stopped reading. A request waiting for
 admission or a running handler is not interrupted by inactivity; its queue wait
-and execution deadline bound it instead.
+and execution deadline bound it instead. Writing one response must also finish
+within 30 seconds of handing it to the socket: a client that keeps reading a few
+bytes at a time never looks inactive, so without this bound it could hold a
+connection indefinitely. When the bound passes, the connection closes and the
+client receives a truncated response; at the 1 MiB response limit this needs a
+client reading slower than about 35 KB/s. The bound covers final responses, not the
+interim `100 Continue`, which carries no body.
 A request head must arrive within ten seconds of its first byte; otherwise the
 listener answers 408 Request Timeout and closes (after any earlier pipelined
 responses). Trickling bytes does not extend the bound. The

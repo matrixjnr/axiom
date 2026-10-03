@@ -440,6 +440,83 @@ class HttpConnectionTest {
         }
     }
 
+    @Test void responseWriteThatDoesNotFinishWithinTheResponseTimeoutClosesTheConnection() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> "unread");
+            app.start();
+            var written = new java.util.concurrent.atomic.AtomicReference<Object>();
+            // Holds writes without completing them, like a client that reads too slowly. Unlike the
+            // inactivity timeout, the bound holds even if the write makes some progress meanwhile.
+            var stalled = new io.netty.channel.ChannelOutboundHandlerAdapter() {
+                @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
+                        io.netty.channel.ChannelPromise pending) { written.set(message); }
+            };
+            var channel = new EmbeddedChannel(stalled, new HttpConnection(app, executor));
+            channel.freezeTime();
+            try {
+                request(channel);
+                awaitWritten(channel, written);
+                channel.advanceTimeBy(HttpConnection.RESPONSE_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isFalse();
+            } finally {
+                io.netty.util.ReferenceCountUtil.release(written.get());
+                channel.finishAndReleaseAll();
+            }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void theResponseTimeoutBoundsEachResponseWriteNotTheConnection() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> "read");
+            app.start();
+            var written = new java.util.concurrent.atomic.AtomicReference<Object>();
+            var promise = new java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelPromise>();
+            var held = new io.netty.channel.ChannelOutboundHandlerAdapter() {
+                @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
+                        io.netty.channel.ChannelPromise pending) { written.set(message); promise.set(pending); }
+            };
+            var channel = new EmbeddedChannel(held, new HttpConnection(app, executor));
+            channel.freezeTime();
+            try {
+                request(channel);
+                awaitWritten(channel, written);
+                // The client takes the response just before the bound.
+                channel.advanceTimeBy(HttpConnection.RESPONSE_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+                channel.runScheduledPendingTasks();
+                io.netty.util.ReferenceCountUtil.release(written.getAndSet(null));
+                promise.get().setSuccess();
+                // A completed write leaves no deadline behind on the keep-alive connection.
+                channel.advanceTimeBy(HttpConnection.RESPONSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+            } finally {
+                io.netty.util.ReferenceCountUtil.release(written.get());
+                channel.finishAndReleaseAll();
+            }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void awaitWritten(EmbeddedChannel channel, java.util.concurrent.atomic.AtomicReference<Object> written) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (written.get() == null) {
+            assertThat(System.nanoTime()).as("response written").isLessThan(deadline);
+            channel.runPendingTasks();
+            Thread.onSpinWait();
+        }
+    }
+
     /** Runs tasks posted from handler threads until a response is written; bounded by the handler's progress. */
     private static <T> T awaitResponse(EmbeddedChannel channel) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

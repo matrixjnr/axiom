@@ -377,6 +377,43 @@ class HttpListenerTest {
         }
     }
 
+    @Test void closesTheConnectionOfAClientThatStopsReadingOnceTheResponseTimeoutPasses() throws Exception {
+        var body = new byte[1024 * 1024];
+        var served = new CountDownLatch(1);
+        try (var app = Axiom.create()) {
+            app.get("/big", ctx -> { served.countDown(); return body; });
+            app.start();
+            // Small fixed socket buffers keep most of the response out of the kernel whatever its
+            // defaults, and the inactivity timeout is far away: only the response bound can close.
+            var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                    TransportSettings.DEFAULTS.withSocketBuffers(8192, 8192)
+                            .withIdleTimeout(java.time.Duration.ofHours(1))
+                            .withResponseTimeout(java.time.Duration.ofMillis(200)));
+            try (var client = new java.net.Socket()) {
+                client.setReceiveBufferSize(4096);
+                client.connect(server.localAddress(), 5000);
+                client.setSoTimeout(30_000);
+                client.getOutputStream().write("GET /big HTTP/1.1\r\nHost: a\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                assertThat(served.await(30, TimeUnit.SECONDS)).isTrue();
+                // The client reads nothing until the server has given up on it.
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                while (server.connections() != 0) {
+                    assertThat(System.nanoTime()).as("connection closed by the response bound").isLessThan(deadline);
+                    Thread.onSpinWait();
+                }
+                long received = 0;
+                try {
+                    var buffer = new byte[65536];
+                    for (int read; (read = client.getInputStream().read(buffer)) != -1;) { received += read; }
+                } catch (java.net.SocketException reset) { /* Also an end of the truncated response. */ }
+                assertThat(received).isLessThan(body.length);
+            } finally {
+                server.close();
+                server.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     private static void awaitQueued(Server server) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (server.admission().queued() == 0) {

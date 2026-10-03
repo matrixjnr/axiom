@@ -74,12 +74,20 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * of a reset.
      */
     static final Duration LINGER_TIMEOUT = Duration.ofSeconds(2);
+    /**
+     * Bound on writing one response: from handing it to the socket until the operating system has
+     * accepted its last byte. A client that reads too slowly to take a whole response (at most 1 MiB
+     * of body) in this time loses the connection. The inactivity timeout alone would let a client
+     * that reads a few bytes now and then hold the connection indefinitely.
+     */
+    static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(30);
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
     private final RequestDispatcher executor;
     private final long headTimeoutNanos;
     private final long lingerNanos;
+    private final long responseNanos;
     /**
      * True once the listener has started closing. Read on every response, from the moment the
      * listener's close begins, so a response sent after that carries {@code Connection: close} even
@@ -106,6 +114,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** Output is shut down after an error response; input is discarded until the connection closes. */
     private boolean lingering;
     private ScheduledFuture<?> lingerTimer;
+    /** Bounds the response write in progress; at most one response is written at a time. */
+    private ScheduledFuture<?> responseTimer;
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
     private ScheduledFuture<?> headTimer;
@@ -139,6 +149,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         this.executor = executor;
         this.headTimeoutNanos = settings.headTimeout().toNanos();
         this.lingerNanos = settings.linger().toNanos();
+        this.responseNanos = settings.responseTimeout().toNanos();
     }
 
     /**
@@ -442,7 +453,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             if (keepAlive && exchange.http10()) { message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive"); }
             if (!keepAlive) { closing = true; pending.clear(); queuedBodyBytes = 0; releaseBody(); }
             owned = null;
-            ctx.writeAndFlush(message).addListener(future -> {
+            var written = ctx.writeAndFlush(message);
+            // Most responses are taken by the socket at once; only a pending write needs a bound.
+            if (!written.isDone()) {
+                responseTimer = ctx.executor().schedule(() -> { responseTimer = null; abort(ctx); },
+                        responseNanos, TimeUnit.NANOSECONDS);
+            }
+            written.addListener(future -> {
+                if (responseTimer != null) { responseTimer.cancel(false); responseTimer = null; }
                 active = null;
                 if (!future.isSuccess()) { ctx.close(); return; }
                 if (!keepAlive || ending) { linger(ctx); return; }
@@ -546,6 +564,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     @Override public void channelInactive(ChannelHandlerContext ctx) {
         closing = true;
         if (lingerTimer != null) { lingerTimer.cancel(false); lingerTimer = null; }
+        if (responseTimer != null) { responseTimer.cancel(false); responseTimer = null; }
         headComplete();
         releaseBody();
         receiving = null;
