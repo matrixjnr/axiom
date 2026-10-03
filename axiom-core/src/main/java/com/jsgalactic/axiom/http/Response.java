@@ -1,11 +1,16 @@
 package com.jsgalactic.axiom.http;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 /**
@@ -25,6 +30,8 @@ import java.util.regex.Pattern;
  * returns that {@code StreamBody}; it is never encoded by a codec.
  */
 public final class Response {
+    /** Longest lifetime of a stream (see {@link #withStreamLifetime}): one day. */
+    public static final Duration MAX_STREAM_LIFETIME = Duration.ofDays(1);
     /** Default cap on the bytes of a streamed response body: 64 MiB. */
     public static final long DEFAULT_STREAM_LIMIT = 64L * 1024 * 1024;
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
@@ -32,8 +39,20 @@ public final class Response {
     private final Object body;
     private final Map<String, String> headers;
 
-    /** The body of a streamed response: what writes it and the most bytes it may write. */
-    private record Streaming(StreamBody writer, long maxBytes) { }
+    /**
+     * The body of a streamed response: what writes it, the most bytes it may write, its own
+     * lifetime (null for the request deadline) and the observers told how it ended.
+     */
+    private record Streaming(StreamBody writer, long maxBytes, Duration lifetime,
+            List<Consumer<StreamOutcome>> observers) {
+        Streaming withWriter(StreamBody replacement) { return new Streaming(replacement, maxBytes, lifetime, observers); }
+        Streaming withLifetime(Duration replacement) { return new Streaming(writer, maxBytes, replacement, observers); }
+        Streaming withObserver(Consumer<StreamOutcome> observer) {
+            var all = new ArrayList<>(observers);
+            all.add(observer);
+            return new Streaming(writer, maxBytes, lifetime, List.copyOf(all));
+        }
+    }
 
     private Response(int status, Object body, Map<String, String> headers) {
         validateStatus(status);
@@ -101,7 +120,7 @@ public final class Response {
     public static Response stream(int status, String contentType, long maxBytes, StreamBody body) {
         Objects.requireNonNull(body, "body");
         if (maxBytes <= 0) { throw new IllegalArgumentException("Stream limit must be positive"); }
-        return new Response(status, new Streaming(body, maxBytes), Map.of()).withHeader("Content-Type", contentType);
+        return new Response(status, new Streaming(body, maxBytes, null, List.of()), Map.of()).withHeader("Content-Type", contentType);
     }
 
     /**
@@ -224,6 +243,100 @@ public final class Response {
      * @return the cap, or zero when the response is not streaming
      */
     public long streamLimit() { return body instanceof Streaming stream ? stream.maxBytes : 0; }
+
+    /**
+     * Returns the longest time a streamed response may run once its head is sent.
+     *
+     * @return the lifetime set with {@link #withStreamLifetime}, or null when the stream is bound
+     *         by the request deadline (or the response is not streaming)
+     */
+    public Duration streamLifetime() { return body instanceof Streaming stream ? stream.lifetime : null; }
+
+    /**
+     * Returns a streamed response that may run for its own time instead of the request deadline.
+     * The deadline of ordinary requests is not changed. When the runtime has sent the head, the
+     * request's deadline moves to {@code lifetime} from that moment if that is later, so the stream
+     * is aborted with {@code TIMEOUT} when it passes, and the request keeps its admission slot until
+     * then. A lifetime shorter than what remains of the deadline changes nothing: this extends a
+     * stream, it never cuts one short. Use it for server-sent event streams and large downloads that
+     * outlive {@code app.requestTimeout}.
+     *
+     * @param lifetime positive, at most {@link #MAX_STREAM_LIFETIME}
+     * @return a copy with the lifetime
+     * @throws IllegalStateException if the response is not streaming
+     * @throws IllegalArgumentException if the lifetime is not positive or is longer than one day
+     */
+    public Response withStreamLifetime(Duration lifetime) {
+        Objects.requireNonNull(lifetime, "lifetime");
+        var current = streaming();
+        if (lifetime.isZero() || lifetime.isNegative() || lifetime.compareTo(MAX_STREAM_LIFETIME) > 0) {
+            throw new IllegalArgumentException("Stream lifetime must be positive and at most one day");
+        }
+        return new Response(status, current.withLifetime(lifetime), headers);
+    }
+
+    /**
+     * Returns a streamed response whose body is replaced by a wrapper of the current one, for
+     * example to time it, count bytes or transform what it writes. The wrapper runs where the
+     * original would: after the head is sent, on the handler's thread. A wrapping
+     * {@link BodyWriter} should delegate {@code shutdownRequested} and {@code onShutdown} to the
+     * writer it wraps.
+     *
+     * @param wrapper receives the current body and returns the body to run
+     * @return a copy with the wrapped body
+     * @throws IllegalStateException if the response is not streaming
+     */
+    public Response mapStream(UnaryOperator<StreamBody> wrapper) {
+        Objects.requireNonNull(wrapper, "wrapper");
+        var current = streaming();
+        return new Response(status, current.withWriter(Objects.requireNonNull(wrapper.apply(current.writer), "wrapped body")), headers);
+    }
+
+    /**
+     * Returns a streamed response that tells an observer how its body ended, so middleware can
+     * record the outcome of a stream, which is only known after the middleware returned. Observers
+     * run once, on the handler's thread, after the body returned or failed and before the
+     * connection is finished; the first added runs first, so an observer added by inner middleware
+     * runs before one added by outer middleware. They must be quick and must not block, because
+     * the request still holds its admission slot. An observer that throws is logged and ignored;
+     * the others still run. They are not called when the body never ran: a HEAD request, or a
+     * response refused before its head was sent. They cannot change the response or the status.
+     *
+     * @param observer receives the outcome
+     * @return a copy with the observer added
+     * @throws IllegalStateException if the response is not streaming
+     */
+    public Response onStreamEnd(Consumer<StreamOutcome> observer) {
+        Objects.requireNonNull(observer, "observer");
+        return new Response(status, streaming().withObserver(observer), headers);
+    }
+
+    /**
+     * Returns the observer that tells every observer added with {@link #onStreamEnd} how the
+     * body ended. For the runtime, which calls it once per stream that ran. An observer that
+     * throws does not stop the others; the first exception is rethrown after all have run.
+     *
+     * @return the combined observer, which does nothing for a response that is not streaming
+     */
+    public Consumer<StreamOutcome> streamEndObserver() {
+        if (!(body instanceof Streaming stream) || stream.observers.isEmpty()) { return outcome -> { }; }
+        var observers = stream.observers;
+        return outcome -> {
+            RuntimeException first = null;
+            for (var observer : observers) {
+                try { observer.accept(outcome); }
+                catch (RuntimeException failure) {
+                    if (first == null) { first = failure; } else { first.addSuppressed(failure); }
+                }
+            }
+            if (first != null) { throw first; }
+        };
+    }
+
+    private Streaming streaming() {
+        if (body instanceof Streaming stream) { return stream; }
+        throw new IllegalStateException("The response is not a stream");
+    }
 
     /**
      * Returns immutable, case-insensitive header map.

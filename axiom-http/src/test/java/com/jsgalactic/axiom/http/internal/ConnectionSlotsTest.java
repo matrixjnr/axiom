@@ -14,17 +14,17 @@ class ConnectionSlotsTest {
         var slots = new ConnectionSlots(2, 1, probe);
         var first = slots.acquire();
         var second = slots.acquire();
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isEqualTo(2);
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open")).isEqualTo(2);
         first.linger();
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isEqualTo(1);
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isEqualTo(1);
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open")).isEqualTo(1);
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering")).isEqualTo(1);
         first.release();
         second.release();
         second.release();
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isZero();
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isZero();
-        assertThat(probe.tagValues()).containsExactlyInAnyOrder(ConnectionSlots.CONNECTIONS + ":state=open",
-                ConnectionSlots.CONNECTIONS + ":state=lingering");
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open")).isZero();
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering")).isZero();
+        assertThat(probe.tagValues()).containsExactlyInAnyOrder(ConnectionSlots.CONNECTIONS + ":listener=default",
+                ConnectionSlots.CONNECTIONS + ":state=open", ConnectionSlots.CONNECTIONS + ":state=lingering");
 
         var failing = new com.jsgalactic.axiom.observability.Metrics() {
             @Override public Counter counter(String name, String... tags) { throw new IllegalStateException(); }
