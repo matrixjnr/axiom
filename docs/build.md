@@ -275,6 +275,29 @@ versions or import the BOM), and checksums pin the contents. Locking would add l
 files to regenerate with every update without catching anything the checksums do not;
 revisit it if dynamic versions or version ranges are ever introduced.
 
+## Continuous integration
+
+The Build workflow (`.github/workflows/build.yml`, `contents: read`) runs on pushes to
+`main` and on pull requests. A new push to a pull request cancels the run for its previous
+head; runs on `main` are never cancelled. Jobs run in parallel, each on a fresh runner with
+the Gradle cache of `gradle/actions/setup-gradle`:
+
+| Job | Runs | Timeout |
+| --- | --- | --- |
+| `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
+| `unit` | `./gradlew :<module>:test -Daxiom.requireAllocationTests=true`, a matrix over the seven library modules with tests; uploads the module's test report on failure | 20 min |
+| `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure | 30 min |
+| `quality` | `./gradlew coverageReport`, uploads `build/reports/jacoco/coverageReport/` (XML and HTML) as the `coverage-report` artifact, then the hello smoke run `./gradlew :examples:hello:run --args=--smoke` | 30 min |
+| `check` | needs the four jobs above and fails unless each succeeded (it runs even when one failed or was cancelled) | 5 min |
+| `commits` | pull requests only: `./gradlew clean check` on each commit (below) | 90 min |
+
+Branch protection requires the status check named `check`; the aggregate job keeps that
+name, so the required check stays valid. `commits` is not part of `check`, as before. The
+`unit` matrix lists modules by name: a new module with tests must be added to it, while
+`integration` picks up every `integrationTest` task through the root aggregate. The
+workflow graph is only verifiable on GitHub. The scheduled Compatibility workflow and the
+tag-triggered release workflow are separate.
+
 ## Every commit builds
 
 Rule: checksums go in the same commit as the dependency. A commit that adds or changes
