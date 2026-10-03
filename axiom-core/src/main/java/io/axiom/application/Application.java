@@ -87,7 +87,8 @@ public interface Application extends RouteGroup, AutoCloseable {
     /**
      * Adds global middleware. It runs first for every route, and also wraps the answers the
      * router produces itself (404, 405, automatic OPTIONS, 501 for an unrecognized method); for
-     * those, {@code ctx.route()} throws {@link IllegalStateException}. Requests rejected before
+     * those, {@code ctx.matchedRoute()} is empty and {@code ctx.route()} throws
+     * {@link IllegalStateException}. Requests rejected before
      * routing (413, CONNECT, listener errors) do not run middleware.
      *
      * @param middleware shared, thread-safe middleware

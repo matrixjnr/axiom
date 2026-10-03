@@ -244,6 +244,31 @@ class MiddlewareTest {
     }
 
     @Test
+    void globalMiddlewareCanAlwaysAskWhetherARouteMatched() throws Exception {
+        var seen = java.util.Collections.synchronizedList(new ArrayList<String>());
+        try (var app = Axiom.create()) {
+            app.use((ctx, next) -> {
+                var response = next.run();
+                seen.add(ctx.method() + " " + ctx.path() + " " + response.status() + " "
+                        + ctx.matchedRoute().map(Route::path).orElse("-"));
+                return response;
+            });
+            app.get("/items/:id", ctx -> "item " + ctx.matchedRoute().orElseThrow().path());
+            app.start();
+            assertThat(app.handle(Request.get("/missing")).status()).isEqualTo(404);
+            assertThat(app.handle(new Request("DELETE", "/items/1")).status()).isEqualTo(405);
+            assertThat(app.handle(new Request("OPTIONS", "/items/1")).status()).isEqualTo(204);
+            assertThat(app.handle(new Request("OPTIONS", "*")).status()).isEqualTo(204);
+            assertThat(app.handle(new Request("BREW", "/missing")).status()).isEqualTo(501);
+            assertThat(app.handle(Request.get("/items/1")).body()).isEqualTo("item /items/:id");
+            assertThat(app.handle(new Request("HEAD", "/items/1")).status()).isEqualTo(200);
+            assertThat(seen).containsExactly("GET /missing 404 -", "DELETE /items/1 405 -", "OPTIONS /items/1 204 -",
+                    "OPTIONS * 204 -", "BREW /missing 501 -", "GET /items/1 200 /items/:id",
+                    "HEAD /items/1 200 /items/:id");
+        }
+    }
+
+    @Test
     void globalMiddlewareCanReplaceRouterAnswers() throws Exception {
         try (var app = Axiom.create()) {
             app.use((ctx, next) -> {

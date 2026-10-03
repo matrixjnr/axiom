@@ -125,7 +125,8 @@ public interface RouteGroup {
      * Adds middleware for every route of this scope, including routes registered before this call
      * and routes of nested groups. On the application it is global: it also wraps the answers the
      * router produces itself (404, 405, automatic OPTIONS, 501 for an unrecognized method), for
-     * which {@code ctx.route()} throws {@link IllegalStateException}.
+     * which {@code ctx.matchedRoute()} is empty and {@code ctx.route()} throws
+     * {@link IllegalStateException}.
      *
      * @param middleware shared, thread-safe middleware
      * @return this scope

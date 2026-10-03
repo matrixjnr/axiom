@@ -171,9 +171,23 @@ public interface Context {
 
     /**
      * Returns the matched route identity, including its template rather than request values.
+     * Handlers, group middleware and route middleware always have one. Global middleware also run
+     * for answers the router produces itself (404, 405, automatic OPTIONS, 501), where no route
+     * matched; there this method throws, so global middleware should use {@link #matchedRoute()}.
      * @return matched route
+     * @throws IllegalStateException if no route matched this request
      */
     Route route();
+
+    /**
+     * Returns the matched route identity, or empty when the router answers the request itself
+     * (404, 405, automatic OPTIONS, {@code OPTIONS *}, 501). Never throws, so global middleware
+     * can use it for every request, for example to log the route template.
+     * @return matched route, if any
+     */
+    default Optional<Route> matchedRoute() {
+        return Optional.of(route());
+    }
 
     /**
      * Reads a raw path capture without percent-decoding or normalization.

@@ -117,7 +117,8 @@ Global middleware also wrap the answers the router produces itself: 404, 405,
 the automatic OPTIONS 204 and 501 for an unrecognized method. That way headers
 added by global middleware (for example security headers) apply to them.
 Group and route middleware run only for the route that matched. In global
-middleware for such a request `ctx.route()` throws `IllegalStateException`
+middleware for such a request `ctx.matchedRoute()` is empty, `ctx.route()`
+throws `IllegalStateException` (so global middleware should use `matchedRoute()`)
 and `ctx.pathParameters()` is empty.
 
 Requests rejected before routing do not run middleware: a body over the limit
@@ -199,8 +200,6 @@ the Jakarta adapter can be passed directly; `Validation.require` is unchanged.
 
 - Middleware that add headers after `next.run()` do not decorate responses for
   exceptions (problem responses and error handler responses).
-- In global middleware, `ctx.route()` throws for router answers; there is no
-  accessor that reports whether a route matched.
 - Error handlers are application-wide; there are no group-scoped handlers.
 - Middleware are synchronous and run after admission; they cannot influence
   admission, run before the body is received, or see listener errors.

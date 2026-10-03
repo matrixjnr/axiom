@@ -38,9 +38,15 @@ final class DefaultContext implements Context {
     @Override
     public Route route() {
         if (match == null) {
-            throw new IllegalStateException("No route serves this request; the router answers it itself");
+            throw new IllegalStateException("No route serves this request; the router answers it itself."
+                    + " Use matchedRoute() in global middleware");
         }
         return match.route();
+    }
+
+    @Override
+    public java.util.Optional<Route> matchedRoute() {
+        return match == null ? java.util.Optional.empty() : java.util.Optional.of(match.route());
     }
 
     @Override
