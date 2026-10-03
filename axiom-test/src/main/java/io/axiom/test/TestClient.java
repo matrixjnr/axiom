@@ -23,7 +23,8 @@ import java.util.concurrent.RejectedExecutionException;
  * listener. Admission outcomes map to the same statuses as the HTTP listener: 503 when capacity or
  * the queue is exhausted or the queue wait expires, and 504 when the request deadline expires.
  * Framework errors use the same {@code application/problem+json} bodies as the listener: request
- * bodies over the application's {@code maxRequestBody} get 413, unknown routes 404, method
+ * bodies over the application's {@code maxRequestBody} get 413, unknown routes 404 (501 for an
+ * unrecognized method), CONNECT 501, method
  * mismatches 405 with {@code Allow}, OPTIONS without an OPTIONS route 204 with {@code Allow}, and {@link io.axiom.error.AxiomException}s thrown by handlers
  * (including body decoding failures) their own status. Other exceptions thrown by a handler
  * propagate to the test instead of becoming a 500 response. After codec encoding, response bodies

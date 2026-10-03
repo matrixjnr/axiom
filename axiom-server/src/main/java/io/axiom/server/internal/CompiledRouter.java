@@ -7,10 +7,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeSet;
 
 /** Immutable segment trie. All mutable construction state is discarded after compilation. */
@@ -19,11 +21,18 @@ final class CompiledRouter {
     private final Map<String, Node> exactPaths;
     /** Allow value for {@code OPTIONS *}: every registered method, HEAD where GET is, and OPTIONS. */
     private final String serverAllow;
+    /** Standard methods and every registered method; others on an unrouted path are 501. */
+    private final Set<String> recognized;
+    private static final Set<String> STANDARD_METHODS =
+            Set.of("GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH");
 
-    private CompiledRouter(Node root, Map<String, Node> exactPaths, String serverAllow) {
+    private CompiledRouter(Node root, Map<String, Node> exactPaths, Set<String> methods) {
         this.root = root;
         this.exactPaths = Map.copyOf(exactPaths);
-        this.serverAllow = serverAllow;
+        this.serverAllow = String.join(", ", methods);
+        var known = new HashSet<>(STANDARD_METHODS);
+        known.addAll(methods);
+        this.recognized = Set.copyOf(known);
     }
 
     static CompiledRouter compile(Map<Route, Handler> registrations) {
@@ -75,7 +84,7 @@ final class CompiledRouter {
         registrations.keySet().forEach(route -> everyMethod.add(route.method()));
         if (everyMethod.contains("GET")) { everyMethod.add("HEAD"); }
         everyMethod.add("OPTIONS");
-        return new CompiledRouter(root.frozen, exactPaths, String.join(", ", everyMethod));
+        return new CompiledRouter(root.frozen, exactPaths, everyMethod);
     }
 
     /**
@@ -139,6 +148,13 @@ final class CompiledRouter {
         }
         return new Match(null, allowed == null ? mismatch.allow() : String.join(", ", allowed), null);
     }
+
+    /**
+     * Whether the method is one this application knows: an RFC 9110 or PATCH method, or a method
+     * registered on any route. Matching is case-sensitive, so {@code get} is not recognized unless
+     * it is registered.
+     */
+    boolean recognizes(String method) { return recognized.contains(method); }
 
     /** HEAD uses an explicit HEAD endpoint on a node, or else that node's GET endpoint. */
     private static Endpoint select(Node node, String method) {

@@ -42,8 +42,10 @@ Methods remain case-sensitive.
 
 When no complete match is registered for the method, the response is **405**. Its
 `Allow` header is the union of the methods registered on every template that
-matches the complete path, sorted alphabetically. An unknown path returns 404. Both
-use `application/problem+json` bodies (see [errors](errors.md)). OPTIONS is the
+matches the complete path, sorted alphabetically. An unknown path returns 404, or
+501 for a method the application does not recognize (see
+[custom methods](#custom-methods)). All use `application/problem+json` bodies (see
+[errors](errors.md)). OPTIONS is the
 exception: when no matching template registered it, the application answers it
 itself (see [automatic OPTIONS](#automatic-options)).
 
@@ -135,6 +137,33 @@ a resource of the application. The listener rejects CONNECT as soon as its head
 arrives and closes the connection after the response: bytes after a CONNECT head may
 already be tunnel data, so they are discarded rather than parsed as further
 requests. `app.handle` and `TestClient` also answer 501.
+
+### Custom methods
+
+Any other token can be registered with `app.route(method, path, handler)`, for
+example WebDAV's `PROPFIND` and `REPORT` or `QUERY` (a safe method with a request
+body, still an IETF draft). They are matched exactly like the built-in methods and
+their bodies are read and limited as for any method. There is no `query(...)`
+shortcut while the `QUERY` specification is not final; use
+`app.route("QUERY", path, handler)`.
+
+A method is **recognized** when it is one of the RFC 9110 methods (`GET`, `HEAD`,
+`POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`), `PATCH`, or a method
+registered on any route of the application. A request whose path matches no template
+is answered 404 when its method is recognized and **501 Not Implemented** otherwise
+(RFC 9110 section 15.6.2: the server does not support the method for any resource).
+A request whose path does match is answered 405 with `Allow` whenever no matching
+template has its method, recognized or not. With `PROPFIND /dav` registered:
+
+| Request | Status |
+| --- | --- |
+| `PROPFIND /dav` | handler runs |
+| `FOO /dav`, `get /dav` | 405, `Allow: PROPFIND` |
+| `PROPFIND /missing`, `GET /missing` | 404 |
+| `FOO /missing`, `get /missing` | 501 |
+
+The 501 is a runtime error: over HTTP it keeps a keep-alive connection open, and its
+problem body does not repeat the method.
 
 ## Conflicts and startup
 

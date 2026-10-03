@@ -76,6 +76,20 @@ class TestClientMethodsTest {
     }
 
     @Test
+    void routesCustomMethodsAndAnswersUnrecognizedMethodsWith501() throws Exception {
+        var app = Axiom.create();
+        app.route("REPORT", "/r", ctx -> "report");
+        try (var client = TestClient.start(app)) {
+            assertThat(client.execute(new Request("REPORT", "/r")).body()).isEqualTo("report");
+            assertThat(client.execute(new Request("FOO", "/r")).status()).isEqualTo(405);
+            assertThat(client.execute(new Request("REPORT", "/missing")).status()).isEqualTo(404);
+            assertThat(client.execute(new Request("FOO", "/missing")).status()).isEqualTo(501);
+            assertThat(client.execute(new Request("get", "/missing")).status()).isEqualTo(501);
+            assertThat(client.get("/missing").status()).isEqualTo(404);
+        }
+    }
+
+    @Test
     void admitsAutomaticOptionsUnderTheDefaultPolicy() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);

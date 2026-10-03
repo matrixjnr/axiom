@@ -262,7 +262,10 @@ final class DefaultApplication implements Application {
         // CONNECT requests a tunnel, which is not supported for any target (RFC 9110 15.6.2).
         if (request.method().equals("CONNECT")) { return Problems.response(501, execution.requestId()); }
         var match = published.router().match(request);
-        if (match == null) { return Problems.response(404, execution.requestId()); }
+        if (match == null) {
+            // RFC 9110 15.6.2: a method the server does not recognize for any resource is 501.
+            return Problems.response(published.router().recognizes(request.method()) ? 404 : 501, execution.requestId());
+        }
         if (!match.methodAllowed()) {
             // OPTIONS *, or a routed path where no matching template registered OPTIONS: no handler runs.
             if (request.method().equals("OPTIONS")) { return Response.of(204, null).withHeader("Allow", match.allow()); }

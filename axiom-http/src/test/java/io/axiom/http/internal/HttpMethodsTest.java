@@ -147,6 +147,40 @@ class HttpMethodsTest {
         }
     }
 
+    @Test void routesCustomMethodsAndAnswersUnrecognizedMethodsWith501() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.route("PROPFIND", "/dav", ctx -> "propfind");
+            fixture.app.route("QUERY", "/search", ctx -> "query " + new String(ctx.request().body().bytes(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("QUERY /search HTTP/1.1\r\nHost: a\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nq=abc");
+                assertThat(wire.read(false).text()).isEqualTo("query q=abc");
+                wire.write("PROPFIND /dav HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).text()).isEqualTo("propfind");
+
+                wire.write("FOO /dav HTTP/1.1\r\nHost: a\r\n\r\n");
+                var mismatch = wire.read(false);
+                assertThat(mismatch.status()).isEqualTo(405);
+                assertThat(mismatch.headers()).containsEntry("Allow", "PROPFIND");
+
+                wire.write("PROPFIND /missing HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).status()).isEqualTo(404);
+
+                wire.write("FOO /missing HTTP/1.1\r\nHost: a\r\n\r\n");
+                var unknown = wire.read(false);
+                assertThat(unknown.status()).isEqualTo(501);
+                assertThat(unknown.headers()).doesNotContainKey("Allow");
+                assertThat(unknown.text()).contains("\"code\":\"not_implemented\"");
+                // An application-level 501 keeps the connection open.
+                assertThat(unknown.headers().get("Connection")).isNotEqualToIgnoringCase("close");
+                wire.write("get /missing HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).status()).isEqualTo(501);
+                wire.write("PROPFIND /dav HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).text()).isEqualTo("propfind");
+            }
+        }
+    }
+
     @Test void matchesMethodTokensCaseSensitively() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.route("M-SEARCH", "/x", ctx -> ctx.method());

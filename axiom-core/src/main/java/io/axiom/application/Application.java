@@ -32,7 +32,9 @@ public interface Application extends AutoCloseable {
     /**
      * Registers a method/path template. Methods and static segments are case-sensitive.
      * The method must be an RFC 9110 token (one or more of {@code A-Z a-z 0-9} and
-     * {@code !#$%&'*+-.^_`|~}); {@code get} and {@code GET} are different methods.
+     * {@code !#$%&'*+-.^_`|~}); {@code get} and {@code GET} are different methods. Extension
+     * methods such as {@code PROPFIND} or {@code QUERY} are registered here; there is no
+     * {@code query} shortcut while that method is still a draft.
      * Named parameters match one non-empty segment; named terminal wildcards match the remainder.
      * Templates that differ only in capture names have the same shape and match the same paths;
      * registering a second one for the same method fails here.
@@ -245,7 +247,8 @@ public interface Application extends AutoCloseable {
      * a successful HEAD response (2xx other than 204 and 205) instead carries
      * {@code Content-Length} set to the encoded length of the body it would have had, and keeps a
      * body the HTTP transport could not send, so that HEAD fails where GET would.
-     * Returns 404 for an unknown path, and 405 when no matching template has the method, with
+     * Returns 404 for an unknown path (501 when the method is neither an RFC 9110 method, PATCH,
+     * nor registered on any route), and 405 when no matching template has the method, with
      * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
      * An OPTIONS request that no matching template registered is answered 204 without invoking
      * a handler, with that Allow list plus OPTIONS. {@code OPTIONS *} is answered 204 without route

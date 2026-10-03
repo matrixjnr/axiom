@@ -182,6 +182,41 @@ class HttpMethodsTest {
     }
 
     @Test
+    void routesCustomMethodsAndAnswersUnrecognizedMethodsOnUnroutedPathsWith501() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/dav/:id", ctx -> "get");
+            app.route("PROPFIND", "/dav/:id", ctx -> "propfind " + ctx.path("id"));
+            app.route("REPORT", "/dav/:id", ctx -> "report");
+            app.route("QUERY", "/search", ctx -> "query " + ctx.request().body().length());
+            app.start();
+            assertThat(app.handle(new Request("PROPFIND", "/dav/7")).body()).isEqualTo("propfind 7");
+            assertThat(app.handle(new Request("QUERY", "/search", Map.of(),
+                    Body.of("application/json", new byte[3]))).body()).isEqualTo("query 3");
+
+            // A routed path: any other method, recognized or not, is 405 with Allow.
+            for (var method : new String[] {"FOO", "PROPPATCH", "QUERY", "get", "DELETE"}) {
+                var mismatch = app.handle(new Request(method, "/dav/7"));
+                assertThat(mismatch.status()).as(method).isEqualTo(405);
+                assertThat(mismatch.headers()).as(method).containsEntry("Allow", "GET, HEAD, PROPFIND, REPORT");
+            }
+            // An unrouted path: 404 for standard methods and methods registered anywhere, 501 otherwise.
+            for (var method : new String[] {"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE",
+                    "PROPFIND", "REPORT", "QUERY"}) {
+                assertThat(app.handle(new Request(method, "/missing")).status()).as(method).isEqualTo(404);
+            }
+            for (var method : new String[] {"FOO", "PROPPATCH", "get", "Get", "query", "M-SEARCH"}) {
+                var unknown = app.handle(new Request(method, "/missing"));
+                assertThat(unknown.status()).as(method).isEqualTo(501);
+                assertThat(unknown.headers()).as(method).doesNotContainKey("Allow")
+                        .containsEntry("Content-Type", "application/problem+json");
+                assertThat(new String((byte[]) unknown.body(), java.nio.charset.StandardCharsets.UTF_8))
+                        .contains("\"code\":\"not_implemented\"").doesNotContain(method);
+            }
+            assertThat(app.resolve(new Request("FOO", "/missing"))).isEmpty();
+        }
+    }
+
+    @Test
     void doesNotFoldTheCaseOfMethods() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/x", ctx -> "upper");
