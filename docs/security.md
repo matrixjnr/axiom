@@ -6,7 +6,7 @@ the Axiom API; versions come from the BOM.
 | Module | Package | Contents |
 | --- | --- | --- |
 | `axiom-security` | `com.jsgalactic.axiom.security` | `Authenticator`, policies (`Security`), `TrustedProxies`, `HeaderRedaction`, `SecurityHeaders`, `Cors` |
-| `axiom-security-jwt` | `com.jsgalactic.axiom.security.jwt` | `JwtAuthenticator`: strict JWT bearer tokens (HMAC, RSA, ECDSA) |
+| `axiom-security-jwt` | `com.jsgalactic.axiom.security.jwt` | `JwtAuthenticator`: strict JWT bearer tokens (HMAC, RSA, RSA-PSS, ECDSA, EdDSA) |
 
 Core contributes the identity itself: `SecurityIdentity` and two `Context` methods, so
 handlers read the caller without depending on a security module.
@@ -114,8 +114,10 @@ Checks, in order:
 5. Key selection: by `kid` when present, otherwise the key registered without a key ID for
    the token's algorithm. The key must be registered for exactly that algorithm, so a
    public key can never be used as an HMAC secret (algorithm confusion).
-6. Signature: HMAC tags compared in constant time; RSA PKCS#1 v1.5; ECDSA in the JWS
-   fixed-length format (DER signatures are rejected).
+6. Signature: HMAC tags compared in constant time; RSA PKCS#1 v1.5; RSASSA-PSS with the
+   hash, MGF1 hash and salt length RFC 7518 fixes for the algorithm; ECDSA in the JWS
+   fixed-length format (DER signatures are rejected); Ed25519 with exactly 64 signature
+   bytes.
 7. Claims (only parsed after the signature verified): `exp` required; `exp`, `nbf`, `iat`
    are integer NumericDates checked with the clock skew (30 s by default, 0 to 5 min);
    `iss` must equal a configured issuer; `aud` (string or array of strings) must contain a
@@ -125,7 +127,13 @@ Checks, in order:
 | --- | --- | --- |
 | HS256, HS384, HS512 | `hmacKey(alg, secret)` | secret of at least 32, 48, 64 bytes |
 | RS256, RS384, RS512 | `publicKey(alg, rsaKey)` | RSA, at least 2048 bits |
+| PS256, PS384, PS512 | `publicKey(alg, rsaKey)` | RSA, at least 2048 bits; salt length equals the digest length |
 | ES256, ES384, ES512 | `publicKey(alg, ecKey)` | EC on P-256, P-384, P-521 respectively |
+| EdDSA | `publicKey(alg, edKey)` | Ed25519 only; Ed448 keys are refused |
+
+An RSA key registered for RS256 is not usable for PS256 (and the reverse): the registration
+names exactly one algorithm, and a token whose `kid` selects a key of another algorithm is
+refused.
 
 Each key method has an overload with a key ID. Issuer and audience are mandatory: the
 builder refuses to build without at least one key, issuer and audience. The identity's
@@ -136,6 +144,15 @@ strings, at most 256 entries. `clock(Clock)` makes time checks deterministic in 
 The authenticator is immutable and thread-safe; it holds its keys (including HMAC
 secrets) for its lifetime. `verify(token)` is public for tokens that do not arrive in
 `Authorization`.
+
+### Encrypted tokens (JWE) are a non-goal
+
+Axiom authenticates signed tokens only. A five-part compact JWE, a header with `enc`, and
+key-management algorithms (`dir`, `RSA-OAEP`, `A256KW`, `ECDH-ES`, ...) are rejected with the
+same 401 `invalid_token` as any other invalid token; tests cover each. Decrypting needs
+private key handling, content-encryption algorithms and a second parser surface that a
+bearer-token verifier should not carry. If tokens must be confidential, decrypt them at a
+gateway, or use opaque tokens and introspection, and hand Axiom the signed JWT.
 
 ## Client address and trusted proxies
 
@@ -262,8 +279,6 @@ app.use(Cors.builder()
 
 - Keys are configured statically: no JWKS fetching or rotation
   ([#118](https://github.com/matrixjnr/axiom/issues/118)).
-- Only HS, RS and ES algorithms; no PS256 or EdDSA, no encrypted tokens (JWE)
-  ([#119](https://github.com/matrixjnr/axiom/issues/119)).
 - JWT claims other than `sub` and the grant claims are not exposed, and there is no
   revocation or replay check (`jti`) ([#120](https://github.com/matrixjnr/axiom/issues/120)).
 - Security headers and other middleware headers are missing on problem responses

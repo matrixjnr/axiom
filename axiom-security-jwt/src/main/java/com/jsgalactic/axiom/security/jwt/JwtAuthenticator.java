@@ -12,9 +12,13 @@ import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.interfaces.ECPublicKey;
+import java.security.interfaces.EdECPublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.ECParameterSpec;
+import java.security.spec.MGF1ParameterSpec;
+import java.security.spec.NamedParameterSpec;
+import java.security.spec.PSSParameterSpec;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Base64;
@@ -49,7 +53,8 @@ import javax.crypto.spec.SecretKeySpec;
  * <ol>
  * <li>The token is at most {@link Builder#maxTokenLength(int)} characters (8 KiB by default),
  * checked before anything is decoded.</li>
- * <li>Three non-empty, unpadded, canonical base64url parts; JWE (five parts) is rejected.</li>
+ * <li>Three non-empty, unpadded, canonical base64url parts. Encrypted tokens (JWE, five parts or an
+ * {@code enc} header) are a documented non-goal and are rejected like any invalid token.</li>
  * <li>The header is a strict JSON object (well-formed UTF-8, no duplicate names). Its {@code alg}
  * must be an algorithm a key was registered for: the allow-list is exactly the registered
  * algorithms, so {@code none} and anything unconfigured are refused. A {@code crit} or
@@ -60,7 +65,8 @@ import javax.crypto.spec.SecretKeySpec;
  * without a key ID for the token's algorithm. The key must have been registered for exactly that
  * algorithm, so an RSA or EC public key can never be used as an HMAC secret (algorithm
  * confusion).</li>
- * <li>The signature is verified; HMAC tags are compared in constant time.</li>
+ * <li>The signature is verified; HMAC tags are compared in constant time. RSASSA-PSS uses the
+ * digest, MGF1 digest and salt length of RFC 7518, and EdDSA means Ed25519 only.</li>
  * <li>Only then is the claims set parsed. {@code exp} is required; {@code exp}, {@code nbf} and
  * {@code iat} are integer NumericDates, checked with the configured clock skew (30 seconds by
  * default, at most five minutes): the token is rejected at or after {@code exp + skew}, before
@@ -293,13 +299,32 @@ public final class JwtAuthenticator implements Authenticator {
                 if (algorithm.family() == JwsAlgorithm.Family.EC && signature.length != 2 * algorithm.size()) {
                     return false;
                 }
+                if (algorithm.family() == JwsAlgorithm.Family.EDDSA && signature.length != algorithm.size()) {
+                    return false;
+                }
                 var verifier = Signature.getInstance(algorithm.jcaName());
+                if (algorithm.family() == JwsAlgorithm.Family.RSA_PSS) { verifier.setParameter(pss(algorithm)); }
                 verifier.initVerify((PublicKey) key);
                 verifier.update(signed);
                 return verifier.verify(signature);
             } catch (GeneralSecurityException | IllegalArgumentException unverifiable) {
                 return false;
             }
+        }
+
+        /** RFC 7518 section 3.5: the digest, MGF1 with the same digest, and a salt as long as the digest. */
+        private static PSSParameterSpec pss(JwsAlgorithm algorithm) {
+            var digest = switch (algorithm) {
+                case PS256 -> "SHA-256";
+                case PS384 -> "SHA-384";
+                default -> "SHA-512";
+            };
+            var mgf = switch (algorithm) {
+                case PS256 -> MGF1ParameterSpec.SHA256;
+                case PS384 -> MGF1ParameterSpec.SHA384;
+                default -> MGF1ParameterSpec.SHA512;
+            };
+            return new PSSParameterSpec(digest, "MGF1", mgf, algorithm.size(), 1);
         }
     }
 
@@ -348,10 +373,11 @@ public final class JwtAuthenticator implements Authenticator {
         }
 
         /**
-         * Registers an RSA or EC public key used for tokens without a {@code kid}.
+         * Registers a public key used for tokens without a {@code kid}.
          *
-         * @param algorithm an RS or ES algorithm matching the key
-         * @param key RSA key of at least 2048 bits, or EC key on the algorithm's curve
+         * @param algorithm an RS, PS, ES or EdDSA algorithm matching the key
+         * @param key RSA key of at least 2048 bits (RS and PS), EC key on the algorithm's curve (ES)
+         *        or Ed25519 key (EdDSA)
          * @return this builder
          * @throws IllegalArgumentException if the key does not fit the algorithm, or for a second
          *         key without key ID for the algorithm
@@ -361,11 +387,12 @@ public final class JwtAuthenticator implements Authenticator {
         }
 
         /**
-         * Registers an RSA or EC public key for tokens whose {@code kid} is the key ID.
+         * Registers a public key for tokens whose {@code kid} is the key ID.
          *
          * @param keyId key ID, unique within this builder
-         * @param algorithm an RS or ES algorithm matching the key
-         * @param key RSA key of at least 2048 bits, or EC key on the algorithm's curve
+         * @param algorithm an RS, PS, ES or EdDSA algorithm matching the key
+         * @param key RSA key of at least 2048 bits (RS and PS), EC key on the algorithm's curve (ES)
+         *        or Ed25519 key (EdDSA)
          * @return this builder
          * @throws IllegalArgumentException if the key does not fit the algorithm or for a duplicate
          *         key ID
@@ -513,13 +540,19 @@ public final class JwtAuthenticator implements Authenticator {
             Objects.requireNonNull(algorithm, "algorithm");
             Objects.requireNonNull(key, "key");
             switch (algorithm.family()) {
-                case RSA -> {
+                case RSA, RSA_PSS -> {
                     if (!(key instanceof RSAPublicKey rsa)) { throw new IllegalArgumentException(algorithm + " needs an RSA public key"); }
                     if (rsa.getModulus().bitLength() < 2048) { throw new IllegalArgumentException("RSA keys need at least 2048 bits"); }
                 }
                 case EC -> {
                     if (!(key instanceof ECPublicKey ec) || !sameCurve(ec.getParams(), curve(algorithm))) {
                         throw new IllegalArgumentException(algorithm + " needs an EC public key on " + curve(algorithm));
+                    }
+                }
+                case EDDSA -> {
+                    if (!(key instanceof EdECPublicKey ed) || !(ed.getParams() instanceof NamedParameterSpec named)
+                            || !named.getName().equals("Ed25519")) {
+                        throw new IllegalArgumentException(algorithm + " needs an Ed25519 public key");
                     }
                 }
                 case HMAC -> throw new IllegalArgumentException(algorithm + " needs a secret, not a public key");
