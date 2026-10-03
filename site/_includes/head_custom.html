@@ -1,2 +1,3 @@
 <link rel="stylesheet" href="{{ '/assets/css/just-the-docs-dark.css' | relative_url }}" media="(prefers-color-scheme: dark)">
+{% if site.logo_dark %}<style>@media (prefers-color-scheme: dark) { .site-logo { background-image: url("{{ site.logo_dark | relative_url }}"); } }</style>{% endif %}
 {% if site.favicon_svg %}<link rel="icon" href="{{ site.favicon_svg | relative_url }}" type="image/svg+xml">{% endif %}
