@@ -27,6 +27,11 @@ public final class ListenerOptions {
     private static final Duration MIN_DURATION = Duration.ofMillis(1);
     private static final ListenerOptions DEFAULTS = new Builder().build();
 
+    /** Longest listener name. */
+    public static final int MAX_NAME_LENGTH = 32;
+    private static final java.util.regex.Pattern NAME = java.util.regex.Pattern.compile("[a-z][a-z0-9_]*");
+
+    private final String name;
     private final Duration shutdownGrace;
     private final Duration idleTimeout;
     private final Duration headTimeout;
@@ -44,8 +49,11 @@ public final class ListenerOptions {
     private final int maxRequestLine;
     private final int maxHeaderBytes;
     private final int ioThreads;
+    private final RejectionObserver rejectionObserver;
 
     private ListenerOptions(Builder b) {
+        rejectionObserver = b.rejectionObserver;
+        name = b.name;
         shutdownGrace = b.shutdownGrace;
         idleTimeout = b.idleTimeout;
         headTimeout = b.headTimeout;
@@ -83,6 +91,7 @@ public final class ListenerOptions {
      */
     public Builder toBuilder() {
         var b = new Builder();
+        b.name = name;
         b.shutdownGrace = shutdownGrace;
         b.idleTimeout = idleTimeout;
         b.headTimeout = headTimeout;
@@ -100,6 +109,7 @@ public final class ListenerOptions {
         b.maxRequestLine = maxRequestLine;
         b.maxHeaderBytes = maxHeaderBytes;
         b.ioThreads = ioThreads;
+        b.rejectionObserver = rejectionObserver;
         return b;
     }
 
@@ -138,9 +148,15 @@ public final class ListenerOptions {
     /** @return number of I/O threads per listener */
     public int ioThreads() { return ioThreads; }
 
+    /** @return the observer of the listener's own error responses, if one was set */
+    public Optional<RejectionObserver> rejectionObserver() { return Optional.ofNullable(rejectionObserver); }
+
+    /** @return the listener's name, the value of the {@code listener} metric tag */
+    public String name() { return name; }
+
     @Override
     public String toString() {
-        return "ListenerOptions[shutdownGrace=" + shutdownGrace + ", idleTimeout=" + idleTimeout
+        return "ListenerOptions[name=" + name + ", shutdownGrace=" + shutdownGrace + ", idleTimeout=" + idleTimeout
                 + ", headTimeout=" + headTimeout + ", responseTimeout=" + responseTimeout
                 + ", lingerTimeout=" + lingerTimeout + ", lingerQuietTimeout=" + lingerQuietTimeout
                 + ", shutdownLingerTimeout=" + shutdownLingerTimeout + ", handshakeTimeout=" + handshakeTimeout
@@ -157,6 +173,7 @@ public final class ListenerOptions {
      * the built options are immutable.
      */
     public static final class Builder {
+        private String name = "default";
         private Duration shutdownGrace = Duration.ofSeconds(5);
         private Duration idleTimeout = Duration.ofSeconds(30);
         private Duration headTimeout = Duration.ofSeconds(10);
@@ -174,8 +191,29 @@ public final class ListenerOptions {
         private int maxRequestLine = 4096;
         private int maxHeaderBytes = 8192;
         private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
+        private RejectionObserver rejectionObserver;
 
         private Builder() { }
+
+        /**
+         * Names the listener. The name is the value of the {@code listener} tag of the
+         * listener-level metrics (connections, bytes and answers given before admission), so
+         * listeners that share an application can be told apart. It is chosen by the operator, never
+         * by a client, and should come from a small fixed set.
+         * @param name lowercase letters, digits and underscores starting with a letter, at most
+         *        {@value ListenerOptions#MAX_NAME_LENGTH} characters; the default is {@code default}
+         * @return this builder
+         * @throws IllegalArgumentException if invalid
+         */
+        public Builder name(String name) {
+            Objects.requireNonNull(name, "name");
+            if (name.length() > MAX_NAME_LENGTH || !NAME.matcher(name).matches()) {
+                throw new IllegalArgumentException("name must be lowercase letters, digits and underscores starting with a letter, at most "
+                        + MAX_NAME_LENGTH + " characters: " + name);
+            }
+            this.name = name;
+            return this;
+        }
 
         /**
          * Sets how long closing the listener lets running exchanges finish. After it, remaining
@@ -400,6 +438,17 @@ public final class ListenerOptions {
          */
         public Builder ioThreads(int threads) {
             ioThreads = range("ioThreads", threads, 1, 1024);
+            return this;
+        }
+
+        /**
+         * Sets an observer called for each error response the listener generates itself, such as
+         * 413, 431 or 503, for metrics and logging. It is read-only; see {@link RejectionObserver}.
+         * @param observer the observer; one is replaced by the next call
+         * @return this builder
+         */
+        public Builder rejectionObserver(RejectionObserver observer) {
+            rejectionObserver = Objects.requireNonNull(observer, "rejectionObserver");
             return this;
         }
 

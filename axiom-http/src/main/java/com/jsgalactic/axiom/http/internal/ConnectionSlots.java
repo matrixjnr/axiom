@@ -13,9 +13,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * lingering pool is full, the connection lingers on its regular slot. At most
  * {@code maxOpen + maxLingering} connections are therefore open at once. Thread-safe.
  *
- * <p>The gauge {@value #CONNECTIONS}, tagged {@code state=open} or {@code state=lingering}, follows
- * the two pools, so an operator can compare the open sockets with the descriptor limit. The tag takes
- * only these two fixed values.
+ * <p>The gauge {@value #CONNECTIONS}, tagged {@code state=open} or {@code state=lingering} and with the
+ * listener's name, follows the two pools, so an operator can compare the open sockets with the
+ * descriptor limit. The {@code state} tag takes only these two fixed values.
  */
 final class ConnectionSlots {
     static final String CONNECTIONS = "axiom.http.connections";
@@ -30,11 +30,15 @@ final class ConnectionSlots {
     private final Metrics.Gauge openGauge;
     private final Metrics.Gauge lingeringGauge;
     private final AtomicBoolean reported = new AtomicBoolean();
+    private final String listener;
 
     ConnectionSlots(int maxOpen, int maxLingering) { this(maxOpen, maxLingering, Metrics.NOOP); }
 
-    ConnectionSlots(int maxOpen, int maxLingering, Metrics metrics) {
+    ConnectionSlots(int maxOpen, int maxLingering, Metrics metrics) { this(maxOpen, maxLingering, metrics, "default"); }
+
+    ConnectionSlots(int maxOpen, int maxLingering, Metrics metrics, String listener) {
         this.maxOpen = maxOpen;
+        this.listener = listener;
         this.maxLingering = maxLingering;
         if (metrics == Metrics.NOOP) {
             openGauge = null;
@@ -47,7 +51,7 @@ final class ConnectionSlots {
 
     // A failing Metrics implementation never fails a connection: the first failure is logged.
     private Metrics.Gauge gauge(Metrics metrics, String state) {
-        try { return metrics.gauge(CONNECTIONS, "state", state); }
+        try { return metrics.gauge(CONNECTIONS, "listener", listener, "state", state); }
         catch (RuntimeException failure) { dropped(failure); return null; }
     }
 

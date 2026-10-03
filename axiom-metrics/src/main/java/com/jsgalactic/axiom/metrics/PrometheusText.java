@@ -10,7 +10,9 @@ import java.util.Objects;
  *
  * <p>Dots in names become underscores. Counters get a {@code _total} suffix, and timers are
  * exposed in seconds as a histogram: cumulative {@code _bucket} series with an {@code le} tag,
- * {@code _sum} and {@code _count}. Output order is stable. A timer's {@code _count} and its
+ * {@code _sum} and {@code _count}. Every metric with help text (set on the registry, or built in for
+ * the runtime's own metrics) gets a {@code # HELP} line, and the registry's own size and dropped
+ * series are exposed as {@code axiom_metrics_series} and {@code axiom_metrics_dropped_series_total}. Output order is stable. A timer's {@code _count} and its
  * {@code +Inf} bucket are always equal; its {@code _sum} may lag them by observations recorded
  * while the registry was being read. Tag values are escaped; no value is ever interpreted.
  *
@@ -37,22 +39,21 @@ public final class PrometheusText {
             switch (series.kind()) {
                 case COUNTER -> {
                     var name = base + "_total";
-                    family = type(out, family, name, "counter");
+                    family = type(out, family, name, "counter", registry, series.name());
                     sample(out, name, series.tags(), null, ((MetricsRegistry.CounterSeries) series).value.sum());
                 }
                 case GAUGE -> {
-                    family = type(out, family, base, "gauge");
+                    family = type(out, family, base, "gauge", registry, series.name());
                     sample(out, base, series.tags(), null, ((MetricsRegistry.GaugeSeries) series).value.sum());
                 }
                 case TIMER -> {
                     var name = base + "_seconds";
-                    family = type(out, family, name, "histogram");
+                    family = type(out, family, name, "histogram", registry, series.name());
                     var timer = (MetricsRegistry.TimerSeries) series;
                     long cumulative = 0;
                     for (int i = 0; i < timer.buckets.length; i++) {
                         cumulative += timer.buckets[i].sum();
-                        var bound = i < MetricsRegistry.BUCKETS_SECONDS.length
-                                ? bound(MetricsRegistry.BUCKETS_SECONDS[i]) : "+Inf";
+                        var bound = i < timer.bounds.length ? bound(timer.bounds[i]) : "+Inf";
                         sample(out, name + "_bucket", series.tags(), bound, cumulative);
                     }
                     sampleSeconds(out, name + "_sum", series.tags(), timer.totalNanos.sum());
@@ -60,6 +61,12 @@ public final class PrometheusText {
                 }
             }
         }
+        out.append("# HELP axiom_metrics_series Distinct series the registry stores.\n")
+                .append("# TYPE axiom_metrics_series gauge\n")
+                .append("axiom_metrics_series ").append(registry.seriesCount()).append('\n')
+                .append("# HELP axiom_metrics_dropped_series_total Series refused because the registry was full.\n")
+                .append("# TYPE axiom_metrics_dropped_series_total counter\n")
+                .append("axiom_metrics_dropped_series_total ").append(registry.droppedSeries()).append('\n');
         return out.toString();
     }
 
@@ -75,8 +82,20 @@ public final class PrometheusText {
                 .withHeader("Content-Type", CONTENT_TYPE).withHeader("Cache-Control", "no-store");
     }
 
-    private static String type(StringBuilder out, String current, String name, String type) {
-        if (!name.equals(current)) { out.append("# TYPE ").append(name).append(' ').append(type).append('\n'); }
+    private static String type(StringBuilder out, String current, String name, String type,
+            MetricsRegistry registry, String metric) {
+        if (!name.equals(current)) {
+            var text = registry.help(metric).orElseGet(() -> RuntimeHelp.of(metric));
+            if (text != null) {
+                out.append("# HELP ").append(name).append(' ');
+                for (int i = 0; i < text.length(); i++) {
+                    char c = text.charAt(i);
+                    if (c == '\\') { out.append("\\\\"); } else { out.append(c); }
+                }
+                out.append('\n');
+            }
+            out.append("# TYPE ").append(name).append(' ').append(type).append('\n');
+        }
         return name;
     }
 
@@ -114,7 +133,7 @@ public final class PrometheusText {
         }
     }
 
-    private static String bound(double seconds) {
-        return seconds == Math.rint(seconds) ? Long.toString((long) seconds) : Double.toString(seconds);
+    private static String bound(long nanos) {
+        return java.math.BigDecimal.valueOf(nanos, 9).stripTrailingZeros().toPlainString();
     }
 }

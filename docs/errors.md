@@ -14,7 +14,8 @@ when present, field violations. Exception messages, causes, stack traces, class
 names, parser output and request content never reach a response body, in
 production or in tests. Exceptions that are not `AxiomException` and have no
 [error handler](#error-handlers) become a generic **500** over HTTP and are logged
-with the request ID.
+with the request ID. The one exception to the rule is the explicit, loopback-only
+[development mode](#development-errors).
 
 ## Problem responses
 
@@ -106,7 +107,8 @@ typed values (a method set, a `Duration` rounded up to whole seconds and at most
 day, a challenge starting with an auth-scheme token) and validated to visible ASCII,
 so CR/LF injection is rejected when the exception is created. Never build codes,
 fields or challenges from request data. A cause attached with `initCause` is kept
-for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
+for logs only. 5xx `AxiomException`s are logged with the request ID (see
+[logging](#logging-of-failures)).
 
 ## Error handlers
 
@@ -122,7 +124,11 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   wins. One handler per class; registration ends at `start()`.
 - Handlers run after every middleware has unwound, with the request's context
   (status reset to 200). Their responses are encoded by the codecs without an
-  Accept check, like problem responses.
+  Accept check, like problem responses: **an error is never answered 406.** The
+  client cannot be told about a failure it did not ask to see in that form, so the
+  error is sent as its handler built it (a handler that wants to honor Accept
+  reads `ctx.header("Accept")` itself); a successful response of the same type
+  is still answered 406 when Accept excludes it (for GET, HEAD, OPTIONS and TRACE; Accept is advisory for other methods).
 - `AxiomException`s keep the problem responses above unless a handler is
   registered for `AxiomException` or a subclass: the built-in mapping counts as
   the handler for `AxiomException`, so a handler for `Exception` does not
@@ -131,17 +137,15 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   response; it is not offered to error handlers again. Any other exception from
   an error handler, or a `null` result, is logged with the request ID and
   answered with the generic 500 problem body, in memory, in `TestClient` and over
-  HTTP. That 500 keeps a keep-alive connection open.
+  HTTP. That 500 carries `Connection: close` and the listener closes the
+  connection after it, like the listener's own 500 for an unmapped exception.
 - Router answers (404, 405, 501, automatic OPTIONS) are responses, not exceptions,
   and are never offered. Customize them with `app.notFound`, `app.methodNotAllowed`
   and `app.notImplemented` (see [customising router answers](routing.md#customising-router-answers)),
   or with global middleware. Exceptions those handlers throw are offered like any
   handler's. Requests rejected before routing (413, CONNECT) and listener errors are
   not offered either.
-- A mapped failure is logged at WARNING with the request ID and the exception,
-  server-side only, unless it is an `AxiomException` below 500 answered below
-  500 (an expected client error). Translations by throwing an `AxiomException`
-  log the original exception the same way.
+- A mapped failure is logged once; see [logging](#logging-of-failures).
 - Only `Exception` subclasses can be mapped; `Error`s keep failing the request.
 - Error handlers never run for a request that was cancelled or whose deadline
   expired (its outcome is discarded anyway), and `InterruptedException` and
@@ -149,13 +153,134 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   is interrupted, the interrupt flag is restored and the generic 500 is used.
 - Exceptions without a handler behave as before: `AxiomException`s become problem
   responses, others propagate from `app.handle` and `TestClient` and become the
-  generic 500 over HTTP.
+  generic 500 over HTTP (unless [development errors](#development-errors) are on).
+  `TestClient.start(app)` keeps the propagating behavior, which helps debugging;
+  `TestClient.startMappingFailures(app)` answers them like the listener (see
+  [testing](#testing-failures)).
 
 What an error handler returns reaches the client unchanged: never copy exception
 messages, class names or stack traces into it. Headers that middleware add after
-`next.run()` are not on error handler or problem responses, because the exception
-passed through the middleware; a middleware that must decorate them catches the
-exception itself.
+`next.run()` are not added by that code for error handler or problem responses,
+because the exception passed through the middleware; middleware that must decorate
+them override `Middleware.afterError`, which runs for every such response (problem
+responses, error handler responses, the generic 500 and the 406; see
+[middleware](middleware.md#middleware)). `SecurityHeaders` and `Cors` do.
+
+### Decorating the standard problem response
+
+`ctx.problem(exception)` builds the response the runtime sends for an `AxiomException` when no
+handler is registered: its status, the typed headers it carries (`Allow`, `Retry-After`,
+`WWW-Authenticate`), `application/problem+json` and the body with only status, code, request ID
+and violations. A handler for `AxiomException` can add to it instead of replacing it, and any
+handler can answer with the standard problem for a status of its choosing:
+
+```java
+app.error(AxiomException.class, (ctx, failure) -> ctx.problem(failure).withHeader("Cache-Control", "no-store"));
+app.error(PaymentGatewayDown.class, (ctx, failure) -> ctx.problem(new ServiceUnavailableException("payments_down")));
+```
+
+It builds a response only: it neither logs nor changes the context's status.
+
+### Group-scoped handlers
+
+`group.error(type, handler)` registers a handler for the routes of a [group](middleware.md#registration)
+and its nested groups, with the same rules as `app.error` (one handler per class in a scope; the
+built-in problem mapping of `AxiomException` stays unless a handler for `AxiomException` or a
+subclass is registered). Resolution is inner scope first: the group that owns the matched route is
+searched, then each enclosing group, then the application, and the first scope with a handler for the
+exception's class or a superclass wins, even when an outer scope registered a nearer class.
+
+```java
+app.error(Exception.class, (ctx, failure) -> ctx.problem(new InternalServerErrorException()));
+app.group("/api/v1", api -> {
+    api.error(QuotaExceeded.class, (ctx, failure) -> ctx.status(429).json(new Quota(failure.limit())));
+    api.get("/orders", listOrders);
+});
+```
+
+All exceptions of a request, including those of global middleware, use the scopes of the route that
+matched. A request no route serves has no group, so only the application's handlers apply to
+exceptions of the custom `notFound`, `methodNotAllowed` and `notImplemented` handlers and global
+middleware. Like group routes, a group's handlers are removed if its configuration callback throws.
+
+### Observing listener rejections
+
+Middleware never see requests the listener rejects (400, 408, 413, 414, 417, 431, 501, 503, 504, 505 and
+its own 500), so operators cannot add metrics or logging to them there. Set a read-only observer on the
+listener instead:
+
+```java
+var options = ListenerOptions.builder()
+        .rejectionObserver((status, code, requestId) -> rejected.counter("status", Integer.toString(status)).increment())
+        .build();
+app.listen(new InetSocketAddress("127.0.0.1", 8080), options);
+```
+
+It is called once per such response, just before the response is written, with only the status, the
+problem `code` and the request ID that the response carries in `X-Request-ID`; never request content.
+It cannot change the response or let a request through, and an exception it throws is logged and ignored.
+It runs on a listener thread and must be fast, non-blocking and thread-safe. It is not called for responses
+the application produces (problem responses for `AxiomException`s, the router's 404 and 405, an
+`InternalServerErrorException`), for connections closed without a response, or in memory
+(`app.handle`, `TestClient`). The listener's 503 and 504 for admission and deadline failures are
+included; metrics for those also exist in the [observability guide](observability.md).
+
+### Testing failures
+
+`TestClient.start(app)` lets an exception that nothing maps propagate to the test, and fails
+a call whose response the transport could not send with `IllegalStateException`. A test can
+therefore pass where a client would get a 500. `TestClient.startMappingFailures(app)` answers
+exactly as the listener does: the generic 500 problem response (status, code and request ID,
+`Connection: close`) for such an exception or response, logged at ERROR with its request ID, in
+`execute`, `submit` and `stream` (before the head). Interruption, cancellation and a stream
+aborted after its head still fail the call, because the listener sends no response for them.
+`AxiomException`s, error handlers, middleware and admission behave identically in both modes.
+
+### Development errors
+
+For local debugging, `app.developmentErrors()` (before startup; there is no flag to pass, so
+configuration cannot turn it on by accident) adds a `debug` member to the problem responses the
+runtime builds for failures:
+
+```json
+{"status":500,"code":"internal_server_error","requestId":"...",
+ "debug":{"type":"java.lang.IllegalStateException","message":"no such order 7",
+          "stack":["com.example.Orders.load(Orders.java:41)","..."],
+          "causes":[{"type":"java.io.IOException","message":"..."}]}}
+```
+
+It covers an `AxiomException`'s problem response, the generic 500 of a failing error handler
+(describing the handler's failure), and an exception that nothing maps, which is then answered
+with a 500 carrying `Connection: close` instead of propagating from `app.handle` and `TestClient`.
+At most 64 stack frames and 8 causes are included. Responses built by your own error handlers
+and failures the listener answers itself are unchanged. The `debug` member can expose internals
+and request content, so the mode is guarded:
+
+- off unless the call is made, and the default responses never contain exception details;
+- `listen` throws `IllegalStateException` for any address that is not a loopback address
+  (including the wildcard address and unresolved names) while it is on;
+- a warning is logged at startup.
+
+A reverse proxy or tunnel in front of the loopback listener would still forward the details, so
+do not run it that way.
+
+### Logging of failures
+
+Failures are logged server-side only, never in a response, through the logger named
+`com.jsgalactic.axiom.failures` at WARNING by default. `app.failureLog(logger, level)` chooses
+another `System.Logger` and level before startup (`Level.OFF` silences the entries). Each
+failure is logged once per request, with the request ID and the exception:
+
+- a 5xx `AxiomException` answered by its built-in problem response;
+- an exception an error handler mapped, whatever the answer's status, unless it is an
+  `AxiomException` below 500 answered below 500 (an expected client error). A translation
+  by throwing an `AxiomException` logs the original exception only, with the status of the
+  translation, so a translated 5xx is not logged twice;
+- a failing error handler (or a `null` result) is a defect and is always logged at ERROR on
+  the same logger, with the original failure suppressed into it, whatever the level.
+
+Exceptions that propagate unmapped from `app.handle` are the caller's to log; the HTTP
+listener logs them itself.
 
 ## Framework statuses
 
@@ -176,7 +301,7 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 | 415 | Missing, unsupported or non-UTF-8 Content-Type in `ctx.body` | Runtime |
 | 417 | An `Expect` value other than `100-continue` | Listener |
 | 431 | Header section larger than 8 KiB (`maxHeaderBytes`) | Listener |
-| 500 | Unexpected handler or middleware exception without an error handler, unencodable or oversized response | Listener (in memory: exception propagates) |
+| 500 | Unexpected handler or middleware exception without an error handler, unencodable or oversized response | Listener (in memory: the exception propagates, except from `TestClient.startMappingFailures`) |
 | 500 | Failing [error handler](#error-handlers) | Runtime |
 | 501 | CONNECT (also from `app.handle` and `TestClient`), Upgrade, or a single Transfer-Encoding line applying another coding before a final `chunked` (RFC 9112 section 6.1; see [wire behavior](http.md#wire-behavior)) | Listener |
 | 501 | No route matches the path and the method is not recognized | Runtime |
@@ -186,9 +311,12 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 
 Errors the listener generates itself (the rows marked Listener, including its 500,
 503 and 504) close the connection because the request framing or connection state
-may be unusable. Runtime errors (404, 405, 406, 415, 501 for an unrecognized method, 400 from decoding) and
-`AxiomException`s thrown by handlers, whatever their status, keep a keep-alive
-connection open. A listener never sends an error ahead of an
+may be unusable. So does every **500 the framework generates**: an unmapped handler
+exception, an unsendable response, and the generic 500 after a failing error handler
+(which carries `Connection: close`, also in memory), since the application is in an
+unknown state. Runtime errors (404, 405, 406, 415, 501 for an unrecognized method, 400 from decoding) and
+`AxiomException`s thrown by handlers or error handlers, whatever their status (including
+an `InternalServerErrorException`), keep a keep-alive connection open. A listener never sends an error ahead of an
 earlier pipelined response: earlier requests complete and are answered in order, then
 the error is sent and the connection closes (see
 [errors on pipelined requests](http.md#errors-on-pipelined-requests)).

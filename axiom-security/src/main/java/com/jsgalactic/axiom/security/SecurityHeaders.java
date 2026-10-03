@@ -35,10 +35,9 @@ import java.util.TreeMap;
  *
  * <p>A header the response already carries is left unchanged, so a handler can deliberately loosen
  * one (for example a CSP for an HTML page). Registered globally, the middleware also decorates the
- * router's own 404, 405, automatic OPTIONS and 501 answers. <b>It does not decorate responses
- * mapped from exceptions</b> (problem responses, including the 401 and 403 of {@link Security}
- * policies, and error handler responses), because exceptions pass through middleware before they
- * are mapped; see the middleware documentation for the error handler workaround.
+ * router's own 404, 405, automatic OPTIONS and 501 answers. It also decorates responses mapped
+ * from exceptions (problem responses, including the 401 and 403 of {@link Security} policies, and
+ * error handler responses) through {@link Middleware#afterError}.
  *
  * <p>Immutable and thread-safe; one instance can serve every request.
  */
@@ -110,7 +109,15 @@ public final class SecurityHeaders implements Middleware {
 
     @Override
     public Response handle(Context context, Next next) throws Exception {
-        var response = next.run();
+        return decorate(next.run());
+    }
+
+    @Override
+    public Response afterError(Context context, Response response) {
+        return decorate(response);
+    }
+
+    private Response decorate(Response response) {
         for (var header : headers.entrySet()) {
             if (!response.headers().containsKey(header.getKey())) {
                 response = response.withHeader(header.getKey(), header.getValue());

@@ -28,6 +28,9 @@ final class DefaultContext implements Context {
     private java.util.Optional<TraceContext> traceContext;
 
     private final Codecs codecs;
+    /** Middleware on the stack of this request's chain, outermost first; see {@link Pipeline}. */
+    private int entered;
+    private Throwable seen;
 
     DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution, Codecs codecs,
                    Response frameworkAnswer, CompiledRouter router) {
@@ -37,6 +40,24 @@ final class DefaultContext implements Context {
         this.execution = execution;
         this.match = match;
         this.frameworkAnswer = frameworkAnswer;
+    }
+
+    Codecs codecs() { return codecs; }
+
+    /** How many middleware of the chain are on the stack; set by the chain as it runs. */
+    int entered() { return entered; }
+
+    void entered(int count) { entered = count; }
+
+    /**
+     * Records how many middleware were on the stack when an exception first came into view. The
+     * same exception passing outwards through further frames keeps its first, deeper count.
+     */
+    void observed(Throwable failure, int count) {
+        if (seen != failure) {
+            seen = failure;
+            entered = count;
+        }
     }
 
     /** The router's answer (404, 405, automatic OPTIONS, 501) for a request no route serves. */
@@ -127,6 +148,11 @@ final class DefaultContext implements Context {
         this.status = status;
         explicitStatus = true;
         return this;
+    }
+
+    @Override
+    public Response problem(com.jsgalactic.axiom.error.AxiomException failure) {
+        return Problems.response(java.util.Objects.requireNonNull(failure, "failure"), execution.requestId());
     }
 
     @Override

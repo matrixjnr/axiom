@@ -5,7 +5,6 @@ import com.jsgalactic.axiom.context.ErrorHandler;
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.error.AxiomException;
-import com.jsgalactic.axiom.error.NotAcceptableException;
 import com.jsgalactic.axiom.error.PayloadTooLargeException;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.ExecutionContext;
@@ -15,6 +14,7 @@ import com.jsgalactic.axiom.http.spi.HttpTransportProvider;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.observability.Metrics;
+import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteGroup;
 import java.io.IOException;
@@ -37,12 +37,12 @@ final class DefaultApplication implements Application {
      * Immutable configuration published at startup. The request path reads it through one
      * volatile field and takes no lock; {@code router} is null once the application closes.
      */
-    private record Runtime(CompiledRouter router, Handler unmatched, ErrorHandlers errors, List<Route> routes,
+    private record Runtime(CompiledRouter router, Handler unmatched, List<Route> routes,
                            Set<Route> routeSet, Map<Route, AdmissionPolicy> routePolicies,
                            AdmissionPolicy defaultPolicy, Codecs codecs, int maxRequestBody) {
         /** Drops every reference to application handlers, middleware and error handlers. */
         Runtime withoutRouter() {
-            return new Runtime(null, null, ErrorHandlers.NONE, routes, routeSet, routePolicies, defaultPolicy,
+            return new Runtime(null, null, routes, routeSet, routePolicies, defaultPolicy,
                     codecs, maxRequestBody);
         }
     }
@@ -57,7 +57,6 @@ final class DefaultApplication implements Application {
     // Configuration state; guarded by this until startup publishes a runtime snapshot.
     private final Map<Route, Registration> registrations = new LinkedHashMap<>();
     private final Scope root = new Scope(null, "");
-    private final Map<Class<?>, ErrorHandler<?>> errorHandlers = new LinkedHashMap<>();
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
     private final Set<String> recognizedMethods = new java.util.TreeSet<>();
@@ -69,6 +68,8 @@ final class DefaultApplication implements Application {
     private final List<Server> listeners = new ArrayList<>();
     private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
     private volatile Metrics metrics = Metrics.NOOP;
+    private volatile FailureLog failureLog = FailureLog.DEFAULT;
+    private volatile boolean developmentErrors;
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
     private volatile int maxRequestBody = 1024 * 1024;
     private volatile State state = State.CONFIGURING;
@@ -84,6 +85,18 @@ final class DefaultApplication implements Application {
         void add(Thread hook);
         void remove(Thread hook);
     }
+
+    /** How the shutdown hook waits for balancers to notice the drain; a seam so tests need not wait. */
+    interface DrainPause {
+        void pause(Duration delay) throws InterruptedException;
+    }
+
+    private final List<Runnable> drainActions = new ArrayList<>();
+    private Duration drainDelay = Duration.ZERO;
+    private DrainPause drainPause = delay -> Thread.sleep(delay);
+
+    /** Replaces the wait of the shutdown hook; for tests. */
+    void drainPause(DrainPause pause) { this.drainPause = Objects.requireNonNull(pause, "pause"); }
 
     /** Time added to the longest grace period for the stop of executors and event loops. */
     static final Duration SHUTDOWN_HOOK_MARGIN = Duration.ofSeconds(5);
@@ -108,6 +121,10 @@ final class DefaultApplication implements Application {
         Objects.requireNonNull(address, "address");
         Objects.requireNonNull(options, "options");
         if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+        if (developmentErrors && (address.isUnresolved() || !address.getAddress().isLoopbackAddress())) {
+            throw new IllegalStateException("Development errors expose exception details in responses and are"
+                    + " allowed only on a loopback address, not " + address);
+        }
         // Provider discovery and binding can block; neither runs under the lifecycle lock.
         var providers = ServiceLoader.load(HttpTransportProvider.class).iterator();
         if (!providers.hasNext()) {
@@ -135,10 +152,28 @@ final class DefaultApplication implements Application {
     }
 
     @Override
-    public Application closeOnJvmShutdown() {
+    public Application closeOnJvmShutdown() { return closeOnJvmShutdown(Duration.ZERO); }
+
+    @Override
+    public Application onDrain(Runnable action) {
+        Objects.requireNonNull(action, "action");
+        synchronized (this) {
+            if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+            drainActions.add(action);
+        }
+        return this;
+    }
+
+    @Override
+    public Application closeOnJvmShutdown(Duration drainDelay) {
+        Objects.requireNonNull(drainDelay, "drainDelay");
+        if (drainDelay.isNegative() || drainDelay.compareTo(Duration.ofHours(1)) > 0) {
+            throw new IllegalArgumentException("drainDelay must be from zero to one hour");
+        }
         synchronized (this) {
             if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
             if (shutdownHook != null) { return this; }
+            this.drainDelay = drainDelay;
             var hook = new Thread(this::shutdownFromJvm, "axiom-shutdown");
             hooks.add(hook); // IllegalStateException when the JVM is already shutting down
             shutdownHook = hook;
@@ -148,6 +183,20 @@ final class DefaultApplication implements Application {
 
     /** The shutdown hook: closes the application, then waits for its listeners, within a bound. */
     private void shutdownFromJvm() {
+        List<Runnable> drains;
+        Duration pause;
+        synchronized (this) {
+            drains = List.copyOf(drainActions);
+            pause = drainDelay;
+        }
+        for (var drain : drains) {
+            try { drain.run(); }
+            catch (RuntimeException failure) { LOG.log(System.Logger.Level.WARNING, "A drain action failed", failure); }
+        }
+        if (!pause.isZero()) {
+            try { drainPause.pause(pause); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
         List<Server> owned;
         Duration wait;
         synchronized (this) {
@@ -257,13 +306,8 @@ final class DefaultApplication implements Application {
     }
 
     @Override
-    public synchronized <E extends Exception> Application error(Class<E> type, ErrorHandler<? super E> handler) {
-        requireState(State.CONFIGURING);
-        Objects.requireNonNull(type, "type");
-        Objects.requireNonNull(handler, "handler");
-        if (errorHandlers.putIfAbsent(type, handler) != null) {
-            throw new IllegalArgumentException("An error handler is already registered for " + type.getName());
-        }
+    public <E extends Exception> Application error(Class<E> type, ErrorHandler<? super E> handler) {
+        root.error(type, handler);
         return this;
     }
 
@@ -291,6 +335,7 @@ final class DefaultApplication implements Application {
         private final Scope parent;
         private final String prefix;
         private final List<Middleware> middleware = new ArrayList<>();
+        private final Map<Class<?>, ErrorHandler<?>> errors = new LinkedHashMap<>();
         private boolean open = true;
 
         private Scope(Scope parent, String prefix) {
@@ -312,6 +357,27 @@ final class DefaultApplication implements Application {
                 middleware.add(added);
             }
             return this;
+        }
+
+        @Override
+        public <E extends Exception> RouteGroup error(Class<E> type, ErrorHandler<? super E> handler) {
+            Objects.requireNonNull(type, "type");
+            Objects.requireNonNull(handler, "handler");
+            synchronized (DefaultApplication.this) {
+                requireState(State.CONFIGURING);
+                requireOpen();
+                if (errors.putIfAbsent(type, handler) != null) {
+                    throw new IllegalArgumentException("An error handler is already registered for " + type.getName());
+                }
+            }
+            return this;
+        }
+
+        /** Error handlers of this scope and its enclosing ones, innermost first. */
+        private List<ErrorHandlers> errorScopes() {
+            var scopes = new ArrayList<ErrorHandlers>();
+            for (var scope = this; scope != null; scope = scope.parent) { scopes.add(new ErrorHandlers(scope.errors)); }
+            return scopes;
         }
 
         @Override
@@ -372,6 +438,7 @@ final class DefaultApplication implements Application {
             removed.remove();
         }
         scope.middleware.clear();
+        scope.errors.clear();
     }
 
     /** Template shape with capture names erased; templates of equal shape match the same paths. */
@@ -402,20 +469,26 @@ final class DefaultApplication implements Application {
             // A route of an open group could be compiled without the middleware its callback adds later.
             throw new IllegalStateException("Cannot start while a route group is being configured");
         }
-        var codecs = Codecs.discover();
+        if (developmentErrors) {
+            LOG.log(System.Logger.Level.WARNING, "Development errors are on: responses describe exceptions."
+                    + " Never use them in production.");
+        }
+        var codecs = Codecs.discover(metrics);
         var global = List.copyOf(root.middleware);
+        var rootScopes = root.errorScopes();
         var chains = new LinkedHashMap<Route, Handler>();
         registrations.forEach((route, registration) -> {
             var chain = new ArrayList<>(global);
             registration.scope().collectGroupMiddleware(chain);
             chain.addAll(registration.middleware());
-            chains.put(route, Pipeline.compose(chain, registration.handler()));
+            chains.put(route, Pipeline.compose(chain, registration.handler(),
+                    registration.scope().errorScopes(), failureLog, developmentErrors));
         });
         var router = CompiledRouter.compile(chains, Set.copyOf(recognizedMethods));
         // Answers the router produces itself are wrapped by global middleware only.
         var unmatched = Pipeline.compose(global, unmatchedTerminal(notFoundHandler, methodNotAllowedHandler,
-                notImplementedHandler));
-        runtime = snapshot(router, unmatched, new ErrorHandlers(errorHandlers), codecs);
+                notImplementedHandler), rootScopes, failureLog, developmentErrors);
+        runtime = snapshot(router, unmatched, codecs);
         registrations.clear();
         shapes.clear();
         state = State.RUNNING;
@@ -446,9 +519,9 @@ final class DefaultApplication implements Application {
         };
     }
 
-    private Runtime snapshot(CompiledRouter router, Handler unmatched, ErrorHandlers errors, Codecs codecs) {
+    private Runtime snapshot(CompiledRouter router, Handler unmatched, Codecs codecs) {
         var routes = List.copyOf(registrations.keySet());
-        return new Runtime(router, unmatched, errors, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
+        return new Runtime(router, unmatched, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
                 codecs, maxRequestBody);
     }
 
@@ -517,6 +590,18 @@ final class DefaultApplication implements Application {
 
     @Override public Metrics metrics() { return metrics; }
 
+    @Override public synchronized Application developmentErrors() {
+        requireState(State.CONFIGURING);
+        developmentErrors = true;
+        return this;
+    }
+
+    @Override public synchronized Application failureLog(System.Logger logger, System.Logger.Level level) {
+        requireState(State.CONFIGURING);
+        failureLog = new FailureLog(logger, level);
+        return this;
+    }
+
     @Override public Optional<Route> resolve(Request request) {
         Objects.requireNonNull(request, "request");
         var match = acceptingRouter().match(request);
@@ -551,8 +636,9 @@ final class DefaultApplication implements Application {
         try {
             response = dispatch(published, request, execution);
         } catch (AxiomException failure) {
+            // Failures before routing (413) and exceptions of afterError, which the chain did not map.
             if (failure.status() >= 500) {
-                LOG.log(System.Logger.Level.WARNING, "Request " + execution.requestId() + " failed with "
+                failureLog.failure("Request " + TraceContext.correlation(execution.requestId(), request) + " failed with "
                         + failure.status() + " " + failure.code(), failure);
             }
             response = Problems.response(failure, execution.requestId());
@@ -592,73 +678,8 @@ final class DefaultApplication implements Application {
                     frameworkAnswer(published.router(), request, match, execution), published.router());
             chain = published.unmatched();
         }
-        try {
-            // Composed chains always return a Response; encoding runs once, after every middleware.
-            return encode(published.codecs(), request, (Response) chain.handle(context), safe(request.method()));
-        } catch (Exception failure) {
-            return handleError(published, context, failure);
-        }
-    }
-
-    /**
-     * Whether the method is safe (RFC 9110 section 9.2.1), so that a 406 decided after the handler
-     * ran cannot repeat a state change when the client retries. For other methods Accept is advisory.
-     */
-    private static boolean safe(String method) {
-        return method.equals("GET") || method.equals("HEAD") || method.equals("OPTIONS") || method.equals("TRACE");
-    }
-
-    /**
-     * Offers an exception from the chain to the registered error handlers. Without one it is
-     * rethrown: AxiomExceptions get their problem response, others propagate. An AxiomException
-     * thrown by the error handler is rethrown for its problem response and not handled again;
-     * any other failure of the error handler becomes the generic 500.
-     */
-    private static Response handleError(Runtime published, DefaultContext context, Exception failure) throws Exception {
-        if (cancelled(context, failure)) { throw failure; }
-        var handler = published.errors().find(failure.getClass());
-        if (handler == null) { throw failure; }
-        context.resetStatus();
-        try {
-            var response = handler.handle(context, failure);
-            if (response == null) {
-                throw new IllegalStateException("Error handler for " + failure.getClass().getName() + " returned null");
-            }
-            // Error responses are sent whatever the client accepts, like problem responses.
-            var encoded = encode(published.codecs(), context.request(), response, false);
-            logMapped(context, failure, encoded.status());
-            return encoded;
-        } catch (AxiomException translated) {
-            logMapped(context, failure, translated.status());
-            throw translated;
-        } catch (Exception broken) {
-            if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
-            broken.addSuppressed(failure);
-            LOG.log(System.Logger.Level.ERROR, "Request " + context.execution().requestId()
-                    + " failed and its error handler failed too", broken);
-            return Problems.response(500, context.execution().requestId());
-        }
-    }
-
-    /**
-     * Logs a failure an error handler mapped, server-side only, unless it is an expected client
-     * error: an AxiomException below 500 answered below 500.
-     */
-    private static void logMapped(DefaultContext context, Exception failure, int status) {
-        boolean clientError = failure instanceof AxiomException axiom && axiom.status() < 500;
-        if (status >= 500 || !clientError) {
-            LOG.log(System.Logger.Level.WARNING, "Request " + context.execution().requestId() + " failed; its error handler"
-                    + " answered " + status, failure);
-        }
-    }
-
-    /**
-     * Whether the request was cancelled or ran out of time: its outcome is discarded, so no
-     * application error handler runs. Interruption and cancellation are never offered at all.
-     */
-    private static boolean cancelled(DefaultContext context, Exception failure) {
-        return failure instanceof InterruptedException || failure instanceof java.util.concurrent.CancellationException
-                || Thread.currentThread().isInterrupted() || context.execution().isExpired();
+        // The chain's outermost step encodes the response and maps exceptions; see ErrorBoundary.
+        return (Response) chain.handle(context);
     }
 
     /** The router's own answer when no route serves the request method on its path. */
@@ -673,27 +694,6 @@ final class DefaultApplication implements Application {
         return Problems.response(405, execution.requestId()).withHeader("Allow", match.allow());
     }
 
-    /**
-     * Prepares a response whose Content-Type has an installed codec: when {@code negotiate} is set,
-     * checks the request's Accept header (406 when nothing matches), and encodes values other than
-     * String and byte[].
-     */
-    private static Response encode(Codecs codecs, Request request, Response response, boolean negotiate) {
-        var mediaType = Codecs.mediaType(response.headers().get("Content-Type"));
-        var codec = mediaType == null ? null : codecs.forMediaType(mediaType);
-        if (codec == null) { return response; }
-        if (negotiate && !Codecs.acceptable(request.header("Accept").orElse(null), mediaType)) {
-            throw new NotAcceptableException();
-        }
-        var body = response.body();
-        if (body == null || body instanceof String || body instanceof byte[] || response.isStreaming()) { return response; }
-        var encoded = Response.of(response.status(), codec.encode(body));
-        for (var header : response.headers().entrySet()) {
-            encoded = encoded.withHeader(header.getKey(), header.getValue());
-        }
-        return encoded;
-    }
-
     @Override
     public State state() { return state; }
 
@@ -704,11 +704,12 @@ final class DefaultApplication implements Application {
         synchronized (this) {
             hook = shutdownHook;
             shutdownHook = null;
-            runtime = runtime == null ? snapshot(null, null, ErrorHandlers.NONE, Codecs.of(List.of())) : runtime.withoutRouter();
+            runtime = runtime == null ? snapshot(null, null, Codecs.of(List.of())) : runtime.withoutRouter();
             state = State.CLOSED;
+            drainActions.clear();
             registrations.clear();
             root.middleware.clear();
-            errorHandlers.clear();
+            root.errors.clear();
             recognizedMethods.clear();
             notFoundHandler = null;
             methodNotAllowedHandler = null;

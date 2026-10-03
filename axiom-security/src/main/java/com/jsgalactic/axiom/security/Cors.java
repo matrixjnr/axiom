@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.security;
 
 import com.jsgalactic.axiom.context.Context;
 import com.jsgalactic.axiom.context.Middleware;
+import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -62,8 +63,9 @@ import java.util.regex.Pattern;
  *
  * <p><b>Placement.</b> Register it globally with {@code app.use(...)}; group middleware do not run
  * for the router's own answers, so a group-scoped instance would not see preflights. The
- * middleware is immutable and thread-safe. Like other middleware it does not decorate responses
- * mapped from exceptions (see the middleware documentation).
+ * middleware is immutable and thread-safe. It also decorates responses mapped from exceptions (a
+ * 401 from a policy, for example) through {@link Middleware#afterError}, so a browser sees the
+ * status instead of a CORS failure; a preflight whose chain failed gets only {@code Vary}.
  */
 public final class Cors implements Middleware {
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
@@ -100,11 +102,18 @@ public final class Cors implements Middleware {
 
     @Override
     public Response handle(Context context, Next next) throws Exception {
-        var request = context.request();
+        return decorate(context.request(), next.run());
+    }
+
+    @Override
+    public Response afterError(Context context, Response response) {
+        return decorate(context.request(), response);
+    }
+
+    private Response decorate(Request request, Response response) {
         var origin = request.header("Origin").orElse(null);
         boolean preflight = request.method().equals("OPTIONS") && origin != null
                 && request.header("Access-Control-Request-Method").isPresent();
-        var response = next.run();
         if (!anyOrigin) { response = vary(response, preflight ? "Origin, Access-Control-Request-Method, Access-Control-Request-Headers" : "Origin"); }
         if (origin == null || !(anyOrigin || origins.contains(origin))) { return response; }
         if (!preflight) { return actual(response, origin); }
