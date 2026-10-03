@@ -41,7 +41,17 @@ most 1024 distinct endpoints and pools later ones under `other`.
 | `axiom.admission.active` | gauge | none | Reserved or running executions |
 | `axiom.admission.queued` | gauge | none | Requests waiting for capacity |
 
-These cover requests that pass admission: HTTP listeners and `TestClient`. Direct
+[Streamed responses](streaming.md) add four more series, none tagged by anything a request carries:
+
+| Name | Kind | Tags | Meaning |
+| --- | --- | --- | --- |
+| `axiom.http.streams` | counter | `outcome` | Finished streams: `completed`, `client_disconnected`, `limit_exceeded`, `timeout`, `shutdown` or `failed` |
+| `axiom.http.stream.bytes` | counter | none | Body bytes written by streams |
+| `axiom.http.streams.active` | gauge | none | Streams whose head was sent and whose body is still running |
+| `axiom.http.stream.backpressure` | counter | none | Stream writes that had to wait for a slow client |
+
+These cover requests that pass admission: HTTP listeners and `TestClient`. (The stream series
+are recorded by HTTP listeners only.) Direct
 `app.handle(...)` calls bypass admission and are not recorded. Timeouts count as `5xx` (504) and
 queue timeouts and capacity refusals as `5xx` (503), matching the responses clients see.
 
