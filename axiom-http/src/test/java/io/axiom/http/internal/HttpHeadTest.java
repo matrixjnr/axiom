@@ -123,6 +123,30 @@ class HttpHeadTest {
         }
     }
 
+    /** Errors the listener produces before routing must not send a body to a HEAD request either. */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "HEAD /items/1 HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello",
+            "HEAD //items HTTP/1.1\r\nHost: a\r\n\r\n",
+            "HEAD /items/1 HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\n\r\n",
+            "HEAD /items/1 HTTP/1.1\r\nHost: a\r\nExpect: something\r\n\r\n",
+            "HEAD /items/1 HTTP/1.1\r\n\r\n",
+            "GET /items/1 HTTP/1.1\r\nHost: a\r\n\r\nHEAD //items HTTP/1.1\r\nHost: a\r\n\r\n"})
+    void listenerErrorsForHeadRequestsSendNoBody(String requests) throws Exception {
+        try (var fixture = fixture(new AtomicInteger())) {
+            fixture.app.maxRequestBody(4);
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write(requests);
+                if (requests.startsWith("GET")) { assertThat(wire.read(false).text()).isEqualTo("item 1"); }
+                var error = wire.read(true);
+                assertThat(error.status()).isBetween(400, 599);
+                assertThat(error.headers()).containsEntry("Connection", "close").doesNotContainKey("Content-Length");
+                // End of stream right after the head: no problem body bytes were sent.
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            }
+        }
+    }
+
     @Test void headOfARepresentationTheTransportCannotSendIs500LikeGet() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.get("/huge", ctx -> new byte[1024 * 1024 + 1]);

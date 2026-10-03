@@ -84,6 +84,14 @@ final class DefaultApplication implements Application {
         requireState(State.CONFIGURING);
         Objects.requireNonNull(handler, "handler");
         var route = new Route(method, path);
+        if (method.equals("TRACE")) {
+            // A TRACE response reflects the request, including credentials (cross-site tracing).
+            throw new IllegalArgumentException("TRACE routes are not supported: echoing requests can expose credentials");
+        }
+        if (method.equals("CONNECT")) {
+            // CONNECT turns the connection into a tunnel; no transport supports that.
+            throw new IllegalArgumentException("CONNECT routes are not supported: CONNECT is answered 501");
+        }
         if (registrations.containsKey(route)) {
             throw new IllegalArgumentException("Duplicate route: " + method + " " + path);
         }
@@ -251,9 +259,16 @@ final class DefaultApplication implements Application {
 
     private static Response dispatch(Runtime published, Request request, ExecutionContext execution) throws Exception {
         if (request.body().length() > published.maxRequestBody()) { throw new PayloadTooLargeException(); }
+        // CONNECT requests a tunnel, which is not supported for any target (RFC 9110 15.6.2).
+        if (request.method().equals("CONNECT")) { return Problems.response(501, execution.requestId()); }
         var match = published.router().match(request);
-        if (match == null) { return Problems.response(404, execution.requestId()); }
+        if (match == null) {
+            // RFC 9110 15.6.2: a method the server does not recognize for any resource is 501.
+            return Problems.response(published.router().recognizes(request.method()) ? 404 : 501, execution.requestId());
+        }
         if (!match.methodAllowed()) {
+            // OPTIONS *, or a routed path where no matching template registered OPTIONS: no handler runs.
+            if (request.method().equals("OPTIONS")) { return Response.of(204, null).withHeader("Allow", match.allow()); }
             return Problems.response(405, execution.requestId()).withHeader("Allow", match.allow());
         }
         var context = new DefaultContext(request, match, execution, published.codecs());

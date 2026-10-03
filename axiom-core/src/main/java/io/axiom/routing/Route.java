@@ -19,10 +19,13 @@ public record Route(String method, String path) {
      *
      * @param method HTTP token
      * @param path absolute path template
-     * @throws IllegalArgumentException for malformed templates or duplicate capture names
+     * @throws IllegalArgumentException for malformed templates (including {@code *}) or duplicate capture names
      */
     public Route {
         new Request(method, path);
+        if (path.equals("*")) {
+            throw new IllegalArgumentException("The asterisk-form is not a route template; OPTIONS * is answered automatically");
+        }
         var names = new HashSet<String>();
         var segments = path.substring(1).split("/", -1);
         for (int i = 0; i < segments.length; i++) {

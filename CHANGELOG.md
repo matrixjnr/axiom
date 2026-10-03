@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Answer OPTIONS for routed paths and `OPTIONS *` automatically with 204 and Allow, refuse TRACE and CONNECT routes, answer CONNECT with 501 everywhere, answer unrecognized methods on unrouted paths with 501, and document every method in one table.
+- Send no body with listener errors for HEAD requests.
 - Add opt-in validation modules: annotation-free rules in axiom-validation and a Jakarta Validation adapter in axiom-validation-jakarta, reported as 422 field violations.
 - Add the `io.axiom:axiom` starter, Maven publication (binary, sources, Javadoc, POM, Gradle module metadata) with optional signing, and the BOM covering all published modules.
 - Add consumer compatibility builds (Gradle Kotlin, Gradle Groovy, Maven) behind `./gradlew compatibilityTest`, a scheduled compatibility workflow and a release workflow skeleton.

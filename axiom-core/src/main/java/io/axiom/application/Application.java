@@ -17,6 +17,31 @@ import java.util.Optional;
  * Registers routes before startup and owns their execution lifecycle.
  * Registration, startup, and shutdown are thread-safe. Handlers may execute concurrently
  * and are responsible for synchronizing shared application state.
+ *
+ * <p>Methods are case-sensitive RFC 9110 tokens and are handled as follows. "Allow" is the union of
+ * the methods registered on every template matching the path, plus HEAD wherever GET is. The same
+ * answers come from {@link #handle(Request)}, the test client and HTTP listeners.
+ * <table class="striped">
+ * <caption>Method handling</caption>
+ * <thead><tr><th>Method</th><th>Registration</th><th>Path routed, method not registered there</th>
+ * <th>Path not routed</th></tr></thead>
+ * <tbody>
+ * <tr><td>GET, POST, PUT, PATCH, DELETE</td><td>shortcut or {@link #route}</td><td>405 with Allow</td>
+ * <td>404</td></tr>
+ * <tr><td>HEAD</td><td>{@link #head} or the GET route of the same template</td>
+ * <td>405 with Allow</td><td>404</td></tr>
+ * <tr><td>OPTIONS</td><td>{@link #options}</td><td>204 with Allow plus OPTIONS, no handler</td>
+ * <td>404</td></tr>
+ * <tr><td>OPTIONS *</td><td>not possible</td>
+ * <td colspan="2">204 with every registered method (HEAD if GET is registered) plus OPTIONS</td></tr>
+ * <tr><td>TRACE</td><td>refused</td><td>405 with Allow</td><td>404</td></tr>
+ * <tr><td>CONNECT</td><td>refused</td><td colspan="2">501</td></tr>
+ * <tr><td>extension token, e.g. PROPFIND or QUERY</td><td>{@link #route}</td><td>405 with Allow</td>
+ * <td>404 if registered on any route, otherwise 501</td></tr>
+ * </tbody>
+ * </table>
+ * Request bodies are accepted and limited alike for every method, HEAD responses never carry a
+ * body, and method-override headers such as {@code X-HTTP-Method-Override} are ignored.
  */
 public interface Application extends AutoCloseable {
     /** Application lifecycle; a closed application cannot be restarted. */
@@ -31,15 +56,23 @@ public interface Application extends AutoCloseable {
 
     /**
      * Registers a method/path template. Methods and static segments are case-sensitive.
+     * The method must be an RFC 9110 token (one or more of {@code A-Z a-z 0-9} and
+     * {@code !#$%&'*+-.^_`|~}); {@code get} and {@code GET} are different methods. Extension
+     * methods such as {@code PROPFIND} or {@code QUERY} are registered here; there is no
+     * {@code query} shortcut while that method is still a draft. Only the request line's method
+     * is matched; method-override headers such as {@code X-HTTP-Method-Override} are ignored.
      * Named parameters match one non-empty segment; named terminal wildcards match the remainder.
      * Templates that differ only in capture names have the same shape and match the same paths;
      * registering a second one for the same method fails here.
      *
-     * @param method HTTP method token
+     * @param method case-sensitive HTTP method token
      * @param path absolute path template without query or fragment
      * @param handler callback invoked for matching requests
      * @return the registered route identity
-     * @throws IllegalArgumentException for invalid, duplicate, or same-shape routes for one method
+     * @throws IllegalArgumentException for a method that is not a token, for {@code TRACE} (whose
+     *         echo of the request would expose credentials; TRACE requests are answered 405 or 404),
+     *         for {@code CONNECT} (tunnels are not supported; CONNECT requests are answered 501),
+     *         for an invalid template, or for a duplicate or same-shape route for one method
      * @throws IllegalStateException if configuration has ended
      */
     Route route(String method, String path, Handler handler);
@@ -111,7 +144,9 @@ public interface Application extends AutoCloseable {
     }
 
     /**
-     * Registers a route for this HTTP method.
+     * Registers an OPTIONS route. Without one, OPTIONS for a routed path is answered
+     * automatically with 204 and an Allow header; an explicit route replaces that answer for the
+     * paths it matches.
      *
      * @param path route path
      * @param handler callback
@@ -238,8 +273,13 @@ public interface Application extends AutoCloseable {
      * a successful HEAD response (2xx other than 204 and 205) instead carries
      * {@code Content-Length} set to the encoded length of the body it would have had, and keeps a
      * body the HTTP transport could not send, so that HEAD fails where GET would.
-     * Returns 404 for an unknown path, and 405 when no matching template has the method, with
+     * Returns 404 for an unknown path (501 when the method is neither an RFC 9110 method, PATCH,
+     * nor registered on any route), and 405 when no matching template has the method, with
      * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
+     * An OPTIONS request that no matching template registered is answered 204 without invoking
+     * a handler, with that Allow list plus OPTIONS. {@code OPTIONS *} is answered 204 without route
+     * lookup, with an Allow list of every registered method (HEAD if GET is registered) plus OPTIONS.
+     * CONNECT is answered 501 without routing.
      * Bodies over {@link #maxRequestBody()} receive 413. Unknown paths, method mismatches and
      * {@link io.axiom.error.AxiomException}s thrown by handlers or {@code Context.body} become
      * {@code application/problem+json} responses with only status, code, request ID and

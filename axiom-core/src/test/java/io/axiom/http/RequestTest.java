@@ -51,6 +51,28 @@ class RequestTest {
     }
 
     @Test
+    void acceptsTheAsteriskFormOnlyForOptions() {
+        var asterisk = Request.fromTarget("OPTIONS", "*");
+        assertThat(asterisk.path()).isEqualTo("*");
+        assertThat(asterisk.query()).isEmpty();
+        assertThat(asterisk).isEqualTo(new Request("OPTIONS", "*"));
+        assertThat(asterisk.withHeaders(java.util.Map.of("X", "y")).path()).isEqualTo("*");
+        for (var method : new String[] {"GET", "HEAD", "POST", "options", "Options", "TRACE", "PROPFIND"}) {
+            assertThatThrownBy(() -> Request.fromTarget(method, "*")).as(method)
+                    .isInstanceOf(InvalidRequestPathException.class);
+        }
+        for (var target : new String[] {"*?", "*?x=1", "**", "*/", "*/a", "*a", "*#", "*%20", " *"}) {
+            assertThatThrownBy(() -> Request.fromTarget("OPTIONS", target)).as(target)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        // Absolute-form targets are not normalized; they stay rejected for every method.
+        assertThatThrownBy(() -> Request.fromTarget("OPTIONS", "http://host/a"))
+                .isInstanceOf(InvalidRequestPathException.class);
+        assertThatThrownBy(() -> new Request("OPTIONS", "*", "x=1", java.util.Map.of(), Body.empty()))
+                .isInstanceOf(InvalidRequestPathException.class);
+    }
+
+    @Test
     void preservesMethodCaseAndAllowsExtensionMethods() {
         assertThat(new Request("propfind", "/").method()).isEqualTo("propfind");
         assertThat(new Request("CUSTOM-METHOD", "/").method()).isEqualTo("CUSTOM-METHOD");

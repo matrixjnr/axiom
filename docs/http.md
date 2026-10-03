@@ -33,10 +33,16 @@ multiple transport providers fail before startup. Closed applications cannot bin
 ## Wire behavior
 
 The listener accepts HTTP/1.1 origin-form requests with exactly one valid Host,
-and HTTP/1.0 requests, whose Host is optional but validated when present.
+and HTTP/1.0 requests, whose Host is optional but validated when present. The
+asterisk-form target is accepted only as `OPTIONS *` (see
+[OPTIONS *](routing.md#options-)); `*` with any other method and absolute-form
+targets such as `http://host/path` receive 400.
 Responses always use HTTP/1.1. An HTTP/1.0 connection closes after each response
 unless the request sends `Connection: keep-alive`, which the response echoes.
-Paths that `Request` rejects (empty or dot segments, backslashes, malformed or
+A method that is not an RFC 9110 token receives 400; methods are case-sensitive, and
+method-override headers such as `X-HTTP-Method-Override` are ignored. The
+[method table](routing.md#methods) lists the answer for every method, including
+OPTIONS, TRACE, CONNECT and extension methods. Paths that `Request` rejects (empty or dot segments, backslashes, malformed or
 encoded separators; see [routing rules](routing.md)) receive 400. Accepted raw paths
 retain their encoding. Query strings are excluded from routing, retained on the
 request and validated as described in [routing rules](routing.md#query-parameters);
@@ -51,11 +57,16 @@ propagates those exceptions.
 The transport controls Content-Length, Transfer-Encoding, connection headers and
 `Date`, which every response carries as an IMF-fixdate with one-second precision.
 Hop-by-hop headers, including names nominated by Connection, are removed. HEAD
-uses an explicit HEAD route or falls back to GET and sends no body bytes. A successful
+uses an explicit HEAD route or falls back to GET and sends no body bytes. OPTIONS
+for a routed path without an OPTIONS route is answered 204 with `Allow` and no
+handler runs (see [automatic OPTIONS](routing.md#automatic-options)). TRACE is never
+echoed: it is answered 405 or 404 (see [TRACE](routing.md#trace)). A successful
 HEAD response (2xx other than 204 and 205) carries the Content-Length the GET
 representation would have, its encoded body length, replacing any value the
 application set; a representation the transport could not send is a 500 for HEAD as
-for GET. Error responses to HEAD keep their own framing: no body and no Content-Length.
+for GET. Error responses to HEAD keep their own framing: no body and no Content-Length,
+including errors the listener produces before routing (400, 413, 417, 501 and the
+others below).
 Statuses 204 and 304 omit Content-Length; 205 uses zero, because RFC 9112 section 6.3 does not treat it as
 bodiless and the client needs explicit framing to read the next response. The
 interim `100 Continue` carries no header fields. Keep-alive and pipelining are supported, with
@@ -63,8 +74,8 @@ one active handler per connection and responses in request order.
 
 Every error response, whether produced by the listener or the application, is an
 `application/problem+json` body holding only status, code and request ID; see
-[errors](errors.md) for the full status table. CONNECT, upgrades and unknown
-transfer codings return 501; an overlong request line 414; an oversized header
+[errors](errors.md) for the full status table. CONNECT (see
+[CONNECT](routing.md#connect)), upgrades and unknown transfer codings return 501; an overlong request line 414; an oversized header
 section 431; an
 `Expect` other than `100-continue` 417; other HTTP versions 505; malformed requests
 400. These close the connection.

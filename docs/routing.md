@@ -42,8 +42,12 @@ Methods remain case-sensitive.
 
 When no complete match is registered for the method, the response is **405**. Its
 `Allow` header is the union of the methods registered on every template that
-matches the complete path, sorted alphabetically. An unknown path returns 404. Both
-use `application/problem+json` bodies (see [errors](errors.md)).
+matches the complete path, sorted alphabetically. An unknown path returns 404, or
+501 for a method the application does not recognize (see
+[custom methods](#custom-methods)). All use `application/problem+json` bodies (see
+[errors](errors.md)). OPTIONS is the
+exception: when no matching template registered it, the application answers it
+itself (see [automatic OPTIONS](#automatic-options)).
 
 HEAD is served by an explicit HEAD route or, failing that, by the GET route on the
 same template, checked template by template in precedence order. With
@@ -54,6 +58,151 @@ HEAD responses suppress bodies for successful matches and routing errors. A
 successful HEAD response (2xx other than 204 and 205) keeps the representation length
 instead: `app.handle` and `TestClient` return it with `Content-Length` set to the
 body's encoded length, and the listener sends that header with no body bytes.
+
+## Methods
+
+This table is the reference for every method. "Routed" means at least one template
+matches the complete path; "Allow" is the union of the methods registered on all
+templates that match it, plus `HEAD` wherever `GET` is registered, sorted
+alphabetically.
+
+| Method | Registration | Routed, a matching template has the method | Routed, no matching template has it | Not routed |
+| --- | --- | --- | --- | --- |
+| `GET`, `POST`, `PUT`, `PATCH`, `DELETE` | `get`, `post`, `put`, `patch`, `delete` or `route` | Handler runs | 405, `Allow` | 404 |
+| `HEAD` | `head` or `route`; otherwise the `GET` route of the same template serves it | Handler runs; no body bytes, `Content-Length` of the representation | 405, `Allow`; no body | 404; no body |
+| `OPTIONS` | `options` or `route` | Handler runs | 204, `Allow` plus `OPTIONS` ([automatic](#automatic-options)) | 404 |
+| `OPTIONS *` | Not possible (`*` is not a template) | 204, `Allow` = every registered method, `HEAD` if `GET` is registered, `OPTIONS` ([details](#options-)) | | |
+| `TRACE` | Refused: `IllegalArgumentException` ([why](#trace)) | | 405, `Allow` | 404 |
+| `CONNECT` | Refused: `IllegalArgumentException` | | 501 ([why](#connect)); the listener closes the connection | 501, likewise |
+| Extension method (`PROPFIND`, `REPORT`, `QUERY`, ...) | `route` | Handler runs | 405, `Allow` | 404 if registered on any route, else 501 ([custom methods](#custom-methods)) |
+| Any other token, including `get` and `Get` | `route` (then it is an extension method) | | 405, `Allow` | 501 |
+| Not a token (`G(T`, `G T`, empty) | Refused: `IllegalArgumentException` | 400 from the listener, which closes the connection; `new Request` throws | | |
+
+`Allow` on a 405 lists only registered methods (and `HEAD` for `GET`); it never lists
+`TRACE` or `CONNECT`, and lists `OPTIONS` only where an OPTIONS route is registered,
+although the path also answers OPTIONS automatically. Every error in the table is an
+`application/problem+json` response (see [errors](errors.md)); 400 and the listener's
+501 for CONNECT close the connection, the others keep it open. Request bodies are
+accepted and limited the same way for every method (see
+[request bodies](bodies.md#limits)), and method-override headers are
+[ignored](#method-override-headers). `app.handle`, `TestClient` and the listener give
+the same answers, except that a request the listener rejects with 400 cannot be built
+in memory.
+
+A method is an RFC 9110 token: one or more ASCII letters, digits and the characters
+``!#$%&'*+-.^_`|~``.
+`app.route(method, path, handler)` throws `IllegalArgumentException` ("Invalid HTTP
+method") for anything else, including an empty method, spaces, separators such as
+`(`, `/` or `:`, control characters and non-ASCII letters. `new Request(...)` applies
+the same rule, so a listener answers a request line whose method is not a token with
+400 and closes the connection without routing it, and `TestClient` callers get the
+`IllegalArgumentException` when they build the request.
+
+Methods are matched exactly. Nothing is upper-cased: `get` is a method distinct from
+`GET`, may be registered on its own, and a `get` request never runs a `GET` route.
+
+### Automatic OPTIONS
+
+An OPTIONS request for a path with at least one complete match, none of which has an
+OPTIONS route, is answered **204 No Content** with an `Allow` header and no body. No
+handler runs. `Allow` is the 405 union above (every method registered on any template
+matching the path, plus `HEAD` wherever `GET` is) with `OPTIONS` added, sorted
+alphabetically: with `GET /users` and `POST /users`, `OPTIONS /users` gets
+`Allow: GET, HEAD, OPTIONS, POST`.
+
+An explicit OPTIONS route is selected like any other method, so it wins on its own
+template and also serves paths whose more specific templates lack OPTIONS: with
+`GET /users/me` and `OPTIONS /users/:id`, `OPTIONS /users/me` runs the OPTIONS route.
+An unknown path is still 404. `resolve` returns empty for an automatic answer, so
+over HTTP and through `TestClient` it is admitted in the default bucket shared with
+404 and 405 responses, under the application's default policy (see
+[admission](admission.md)); it can be refused with 503 like any request. A request
+body is read and limited as for any method (413 over `maxRequestBody`) and then
+discarded. CORS preflight handling is not part of this answer.
+
+### OPTIONS *
+
+`OPTIONS *` (the asterisk-form request target, RFC 9110 section 9.3.7) asks about
+the server as a whole. It is answered **204** with an `Allow` header listing every
+method registered on any route, `HEAD` when `GET` is registered anywhere, and
+`OPTIONS`, sorted alphabetically (`Allow: OPTIONS` for an application without
+routes). No route is looked up and no handler runs, not even an OPTIONS route that
+matches every path; `resolve` returns empty and admission uses the default bucket, as
+for automatic OPTIONS. `*` is not a path and cannot be a route template.
+
+`Request` accepts the target `*` only with the method `OPTIONS` and no query
+(`Request.fromTarget("OPTIONS", "*")` or `new Request("OPTIONS", "*")`); its `path()`
+is then `"*"`. Any other method with `*`, `*?query`, `**` or `*/a` throws
+`InvalidRequestPathException`, which a listener answers with 400.
+
+Absolute-form targets (`GET http://host/path`) are rejected with 400 for every
+method, `OPTIONS` included. They are meant for proxies; an origin server must accept
+them (RFC 9112 section 3.2.2), but normalizing one would mean choosing between the
+target's authority and `Host`, so Axiom does not and treats them as an unsupported
+target.
+
+### TRACE
+
+TRACE routes cannot be registered: `app.route("TRACE", ...)` throws
+`IllegalArgumentException`. A TRACE response echoes the request message, which
+includes cookies and `Authorization` headers; together with a script that can send
+TRACE, that leaks credentials that are otherwise hidden from scripts (cross-site
+tracing), and an application has no safe use for the echo. A TRACE request is routed
+like any other method that no route has: **405** with `Allow` for a path that has
+routes and 404 otherwise, each with the usual problem body that contains no request
+data. `Allow` never lists TRACE. Methods are case-sensitive, so `trace` is an
+ordinary extension method and may be registered.
+
+### CONNECT
+
+CONNECT asks the server to open a tunnel to another host (RFC 9110 section 9.3.6),
+which Axiom does not support for any target. CONNECT routes cannot be registered
+(`IllegalArgumentException`), and every CONNECT request is answered **501 Not
+Implemented** without routing, whatever its target. 501 rather than 405 because 405
+states that the method is known but not allowed for this resource and requires an
+`Allow` list for it, while a CONNECT target is usually an authority (`host:443`), not
+a resource of the application. The listener rejects CONNECT as soon as its head
+arrives and closes the connection after the response: bytes after a CONNECT head may
+already be tunnel data, so they are discarded rather than parsed as further
+requests. `app.handle` and `TestClient` also answer 501.
+
+### Custom methods
+
+Any other token can be registered with `app.route(method, path, handler)`, for
+example WebDAV's `PROPFIND` and `REPORT` or `QUERY` (a safe method with a request
+body, still an IETF draft). They are matched exactly like the built-in methods and
+their bodies are read and limited as for any method. There is no `query(...)`
+shortcut while the `QUERY` specification is not final; use
+`app.route("QUERY", path, handler)`.
+
+A method is **recognized** when it is one of the RFC 9110 methods (`GET`, `HEAD`,
+`POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`), `PATCH`, or a method
+registered on any route of the application. A request whose path matches no template
+is answered 404 when its method is recognized and **501 Not Implemented** otherwise
+(RFC 9110 section 15.6.2: the server does not support the method for any resource).
+A request whose path does match is answered 405 with `Allow` whenever no matching
+template has its method, recognized or not. With `PROPFIND /dav` registered:
+
+| Request | Status |
+| --- | --- |
+| `PROPFIND /dav` | handler runs |
+| `FOO /dav`, `get /dav` | 405, `Allow: PROPFIND` |
+| `PROPFIND /missing`, `GET /missing` | 404 |
+| `FOO /missing`, `get /missing` | 501 |
+
+The 501 is a runtime error: over HTTP it keeps a keep-alive connection open, and its
+problem body does not repeat the method.
+
+### Method override headers
+
+`X-HTTP-Method-Override`, `X-HTTP-Method` and `X-Method-Override` are not supported.
+Routing, `resolve`, admission, automatic OPTIONS and `ctx.method()` always use the
+method of the request line; these headers reach handlers as ordinary request headers
+and change nothing. Honoring them would let any client that can send a POST, including
+a cross-site form, reach a DELETE or PUT route, and would make the method that
+proxies, logs and access rules see differ from the one the application executes. An
+application that must serve clients limited to GET and POST can register an explicit
+POST route that performs the action.
 
 ## Conflicts and startup
 
@@ -170,8 +319,12 @@ bound is claimed for adversarial overlapping templates.
 
 Tests cover raw and rejected paths, conflicts, method fallback and mismatches, HEAD, deep paths,
 10,000 routes, and concurrent captures. An independent exhaustive template scanner
-checks 640 method/path combinations (including HEAD) to catch differences in matching and precedence,
-and confirms that the generated paths with empty segments are rejected.
+checks 1,600 method/path combinations to catch differences in matching and precedence:
+ten methods (`GET`, `HEAD`, `POST`, `DELETE`, `OPTIONS`, `TRACE`, `CONNECT`, the
+registered extension method `PROPFIND`, the unrecognized `FOO` and a lowercase `get`)
+against every generated path, including explicit and automatic OPTIONS, 404 versus
+501, 405 `Allow` contents and `OPTIONS *`. It also confirms that the generated paths
+with empty segments are rejected.
 
 The [JMH harness](../benchmarks/http/README.md) exercises the public in-memory
 dispatcher. No timing threshold is enforced by CI.

@@ -35,8 +35,11 @@ application. They are not a budget shared across listeners, processes or hosts.
 Direct `handle` calls remain synchronous and bypass admission. `TestClient` applies
 the policies through its own dispatcher.
 `app.resolve(request)` exposes the compiled route identity for adapters; it
-requires a running application and returns empty for 404/405. Those requests
-share a default bucket and still consume aggregate capacity when dispatched.
+requires a running application and returns empty for 404/405 and for OPTIONS
+requests the application answers automatically (see [methods](routing.md#methods)).
+Those requests run no handler, but they share one default bucket under the
+application's default policy and still consume aggregate capacity when dispatched,
+so a saturated listener answers them 503 like any other request.
 
 ## Queue behavior
 
