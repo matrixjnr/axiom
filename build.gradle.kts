@@ -6,6 +6,9 @@ plugins {
 
 val modules = subprojects.filter { it.buildFile.isFile }
 tasks.named("check") { dependsOn(modules.map { "${it.path}:check" }) }
+// The convention checks themselves (publication coverage, module boundaries) have unit tests in
+// build-logic; an included build's own check is not run by the root check unless wired here.
+tasks.named("check") { dependsOn(gradle.includedBuild("build-logic").task(":check")) }
 tasks.named("assemble") { dependsOn(modules.map { "${it.path}:assemble" }) }
 
 // Test split (see docs/build.md): `unitTest` runs every module's `test` (no real sockets),

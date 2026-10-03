@@ -65,6 +65,12 @@ fails the build and names the module and the file to update. To see it fire, rem
 a `api(project(...))` line from `axiom-bom/build.gradle.kts` or a module from the map
 and run `./gradlew checkPublicationCoverage`.
 
+The checks themselves have JUnit tests in `build-logic/src/test/kotlin` (`./gradlew
+:build-logic:test`), and the root `check` runs them through the included build's `check`. They
+cover the pure `problems()` function (agreement, a missing BOM entry, a missing boundary entry, a
+module present in only one set, the test-only exemption) and `CheckModuleBoundaries.verify` (allowed,
+forbidden, unlisted and test-only dependencies, and the external-dependency confinement rules).
+
 ## Unit and integration tests
 
 Tests are split into two Gradle tasks per module, both part of `check`:
