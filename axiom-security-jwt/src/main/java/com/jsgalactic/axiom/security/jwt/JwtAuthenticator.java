@@ -12,12 +12,17 @@ import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.interfaces.ECPublicKey;
+import java.security.interfaces.EdECPublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.ECParameterSpec;
+import java.security.spec.MGF1ParameterSpec;
+import java.security.spec.NamedParameterSpec;
+import java.security.spec.PSSParameterSpec;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -49,7 +55,8 @@ import javax.crypto.spec.SecretKeySpec;
  * <ol>
  * <li>The token is at most {@link Builder#maxTokenLength(int)} characters (8 KiB by default),
  * checked before anything is decoded.</li>
- * <li>Three non-empty, unpadded, canonical base64url parts; JWE (five parts) is rejected.</li>
+ * <li>Three non-empty, unpadded, canonical base64url parts. Encrypted tokens (JWE, five parts or an
+ * {@code enc} header) are a documented non-goal and are rejected like any invalid token.</li>
  * <li>The header is a strict JSON object (well-formed UTF-8, no duplicate names). Its {@code alg}
  * must be an algorithm a key was registered for: the allow-list is exactly the registered
  * algorithms, so {@code none} and anything unconfigured are refused. A {@code crit} or
@@ -60,7 +67,8 @@ import javax.crypto.spec.SecretKeySpec;
  * without a key ID for the token's algorithm. The key must have been registered for exactly that
  * algorithm, so an RSA or EC public key can never be used as an HMAC secret (algorithm
  * confusion).</li>
- * <li>The signature is verified; HMAC tags are compared in constant time.</li>
+ * <li>The signature is verified; HMAC tags are compared in constant time. RSASSA-PSS uses the
+ * digest, MGF1 digest and salt length of RFC 7518, and EdDSA means Ed25519 only.</li>
  * <li>Only then is the claims set parsed. {@code exp} is required; {@code exp}, {@code nbf} and
  * {@code iat} are integer NumericDates, checked with the configured clock skew (30 seconds by
  * default, at most five minutes): the token is rejected at or after {@code exp + skew}, before
@@ -70,15 +78,23 @@ import javax.crypto.spec.SecretKeySpec;
  * </ol>
  * The identity's principal is {@code sub}. Roles come from the {@code roles} claim and permissions
  * from the {@code scope} claim by default; each may be a space-separated string or an array of
- * strings, at most 256 entries. Other claims are not exposed.
+ * strings, at most 256 entries. Other claims are not exposed unless the application asks:
+ * {@link Builder#exposeClaims} copies named scalar claims to {@link SecurityIdentity#attributes()},
+ * {@link Builder#attributes} maps claims with application code, and {@link Builder#tokenCheck}
+ * adds a revocation or {@code jti} replay check that runs last (see {@link TokenCheck}).
  *
  * <p><b>Credentials.</b> A request without an {@code Authorization} header, or with a scheme other
  * than {@code Bearer}, carries no credentials for this authenticator: {@link #authenticate} returns
  * empty. A Bearer header with a missing or malformed token is invalid (401). Repeated
  * {@code Authorization} fields are joined by the transport and therefore rejected.
  *
- * <p><b>Lifecycle.</b> Immutable and thread-safe once built; keys are fixed at build time (there
- * is no key-set fetching or rotation). The authenticator holds HMAC secrets for its lifetime.
+ * <p><b>Key sets.</b> {@link Builder#jwks(JwksSource, JwksOptions)} adds the keys of a JSON Web Key
+ * Set fetched from a configured URL or file, cached, refreshed and rotated within bounds; keys
+ * embedded in tokens ({@code jku}, {@code jwk}, {@code x5u}, {@code x5c}) remain unused.
+ *
+ * <p><b>Lifecycle.</b> Thread-safe once built. Statically registered keys are fixed at build time;
+ * a configured key set is the only mutable state, replaced as a whole when a fetch succeeds. The
+ * authenticator holds HMAC secrets for its lifetime.
  */
 public final class JwtAuthenticator implements Authenticator {
     private static final Pattern BASE64URL = Pattern.compile("[A-Za-z0-9_-]+");
@@ -87,12 +103,16 @@ public final class JwtAuthenticator implements Authenticator {
 
     private final Map<String, Entry> keysById;
     private final Map<JwsAlgorithm, Entry> keysWithoutId;
+    private final JwksKeys jwks;
     private final Set<String> issuers;
     private final Set<String> audiences;
     private final long skewSeconds;
     private final int maxTokenLength;
     private final String rolesClaim;
     private final String permissionsClaim;
+    private final Set<String> exposedClaims;
+    private final List<Function<JwtClaims, Map<String, String>>> attributeMappers;
+    private final List<TokenCheck> checks;
     private final Clock clock;
     private final String challenge;
     private final String invalidChallenge;
@@ -100,12 +120,16 @@ public final class JwtAuthenticator implements Authenticator {
     private JwtAuthenticator(Builder builder) {
         keysById = Map.copyOf(builder.keysById);
         keysWithoutId = Map.copyOf(builder.keysWithoutId);
+        jwks = builder.jwksSource == null ? null : new JwksKeys(builder.jwksSource, builder.jwksOptions, builder.clock);
         issuers = Set.copyOf(builder.issuers);
         audiences = Set.copyOf(builder.audiences);
         skewSeconds = builder.skew.toSeconds();
         maxTokenLength = builder.maxTokenLength;
         rolesClaim = builder.rolesClaim;
         permissionsClaim = builder.permissionsClaim;
+        exposedClaims = Set.copyOf(builder.exposedClaims);
+        attributeMappers = List.copyOf(builder.attributeMappers);
+        checks = List.copyOf(builder.checks);
         clock = builder.clock;
         challenge = "Bearer realm=\"" + builder.realm + "\"";
         invalidChallenge = challenge + ", error=\"invalid_token\"";
@@ -134,6 +158,18 @@ public final class JwtAuthenticator implements Authenticator {
     @Override
     public String challenge() {
         return challenge;
+    }
+
+    /**
+     * Fetches the configured key set now, regardless of the refresh schedule and rate limit, for
+     * example at startup to fail fast on a misconfigured URL. A failed fetch keeps the last good
+     * key set. Without a key set source this does nothing.
+     *
+     * @return true if a new key set was installed, false if the fetch or the set was unusable
+     *         (the reason is attached to the 401 of the next token that needs it)
+     */
+    public boolean refreshKeys() {
+        return jwks != null && jwks.refresh();
     }
 
     /**
@@ -176,7 +212,11 @@ public final class JwtAuthenticator implements Authenticator {
         for (var candidate : JwsAlgorithm.values()) {
             if (candidate.name().equals(name)) { algorithm = candidate; }
         }
-        if (algorithm == null || !allowed(algorithm)) { throw invalid("Algorithm is not allowed"); }
+        // With a key set, an unknown algorithm may belong to a key that has not been fetched yet;
+        // the key lookup then decides, and it still demands a key bound to exactly this algorithm.
+        if (algorithm == null || !(allowed(algorithm) || (jwks != null && header.get("kid") instanceof String))) {
+            throw invalid("Algorithm is not allowed");
+        }
         if (header.containsKey("crit")) { throw invalid("Critical header extensions are not supported"); }
         if (header.containsKey("enc")) { throw invalid("Encrypted tokens are not supported"); }
         var type = header.get("typ");
@@ -202,10 +242,15 @@ public final class JwtAuthenticator implements Authenticator {
             entry = keysWithoutId.get(algorithm);
         } else if (kid instanceof String id) {
             entry = keysById.get(id);
+            if (entry == null && jwks != null) { entry = jwks.find(id); }
         } else {
             throw invalid("kid is not a string");
         }
-        if (entry == null) { throw invalid("No key for the token's kid and algorithm"); }
+        if (entry == null) {
+            var failure = jwks == null ? null : jwks.lastFailure();
+            throw invalid("No key for the token's kid and algorithm"
+                    + (failure == null ? "" : " (the last key set fetch failed: " + failure + ")"));
+        }
         if (entry.algorithm() != algorithm) { throw invalid("The key is registered for another algorithm"); }
         return entry;
     }
@@ -227,10 +272,21 @@ public final class JwtAuthenticator implements Authenticator {
         if (!(claims.get("sub") instanceof String subject) || subject.isEmpty()) { throw invalid("Missing subject"); }
         var roles = grants(claims, rolesClaim);
         var permissions = grants(claims, permissionsClaim);
+        var verified = new JwtClaims(claims);
+        for (var check : checks) {
+            if (!check.accept(verified)) { throw invalid("Rejected by a token check"); }
+        }
+        var attributes = new HashMap<String, String>();
+        for (var name : exposedClaims) { verified.text(name).ifPresent(value -> attributes.put(name, value)); }
+        for (var mapper : attributeMappers) {
+            var mapped = mapper.apply(verified);
+            if (mapped == null) { throw new IllegalStateException("An attribute mapper returned null"); }
+            attributes.putAll(mapped);
+        }
         try {
-            return new SecurityIdentity(subject, roles, permissions);
+            return new SecurityIdentity(subject, roles, permissions, attributes);
         } catch (IllegalArgumentException | NullPointerException unusable) {
-            throw invalid("Subject or grants are not usable names");
+            throw invalid("Subject, grants or attributes are not usable names");
         }
     }
 
@@ -265,7 +321,7 @@ public final class JwtAuthenticator implements Authenticator {
         return result;
     }
 
-    private static byte[] decode(String part, String name) {
+    static byte[] decode(String part, String name) {
         if (part.isEmpty() || !BASE64URL.matcher(part).matches() || part.length() % 4 == 1) {
             throw invalid("The " + name + " is not unpadded base64url");
         }
@@ -282,7 +338,7 @@ public final class JwtAuthenticator implements Authenticator {
     }
 
     /** A verification key bound to one algorithm. */
-    private record Entry(JwsAlgorithm algorithm, Key key) {
+    record Entry(JwsAlgorithm algorithm, Key key) {
         boolean verify(byte[] signed, byte[] signature) {
             try {
                 if (algorithm.family() == JwsAlgorithm.Family.HMAC) {
@@ -293,13 +349,32 @@ public final class JwtAuthenticator implements Authenticator {
                 if (algorithm.family() == JwsAlgorithm.Family.EC && signature.length != 2 * algorithm.size()) {
                     return false;
                 }
+                if (algorithm.family() == JwsAlgorithm.Family.EDDSA && signature.length != algorithm.size()) {
+                    return false;
+                }
                 var verifier = Signature.getInstance(algorithm.jcaName());
+                if (algorithm.family() == JwsAlgorithm.Family.RSA_PSS) { verifier.setParameter(pss(algorithm)); }
                 verifier.initVerify((PublicKey) key);
                 verifier.update(signed);
                 return verifier.verify(signature);
             } catch (GeneralSecurityException | IllegalArgumentException unverifiable) {
                 return false;
             }
+        }
+
+        /** RFC 7518 section 3.5: the digest, MGF1 with the same digest, and a salt as long as the digest. */
+        private static PSSParameterSpec pss(JwsAlgorithm algorithm) {
+            var digest = switch (algorithm) {
+                case PS256 -> "SHA-256";
+                case PS384 -> "SHA-384";
+                default -> "SHA-512";
+            };
+            var mgf = switch (algorithm) {
+                case PS256 -> MGF1ParameterSpec.SHA256;
+                case PS384 -> MGF1ParameterSpec.SHA384;
+                default -> MGF1ParameterSpec.SHA512;
+            };
+            return new PSSParameterSpec(digest, "MGF1", mgf, algorithm.size(), 1);
         }
     }
 
@@ -315,8 +390,13 @@ public final class JwtAuthenticator implements Authenticator {
         private int maxTokenLength = 8192;
         private String rolesClaim = "roles";
         private String permissionsClaim = "scope";
+        private final Set<String> exposedClaims = new LinkedHashSet<>();
+        private final List<Function<JwtClaims, Map<String, String>>> attributeMappers = new ArrayList<>();
+        private final List<TokenCheck> checks = new ArrayList<>();
         private Clock clock = Clock.systemUTC();
         private String realm = "api";
+        private JwksSource jwksSource;
+        private JwksOptions jwksOptions = JwksOptions.defaults();
 
         private Builder() {}
 
@@ -348,10 +428,11 @@ public final class JwtAuthenticator implements Authenticator {
         }
 
         /**
-         * Registers an RSA or EC public key used for tokens without a {@code kid}.
+         * Registers a public key used for tokens without a {@code kid}.
          *
-         * @param algorithm an RS or ES algorithm matching the key
-         * @param key RSA key of at least 2048 bits, or EC key on the algorithm's curve
+         * @param algorithm an RS, PS, ES or EdDSA algorithm matching the key
+         * @param key RSA key of at least 2048 bits (RS and PS), EC key on the algorithm's curve (ES)
+         *        or Ed25519 key (EdDSA)
          * @return this builder
          * @throws IllegalArgumentException if the key does not fit the algorithm, or for a second
          *         key without key ID for the algorithm
@@ -361,17 +442,59 @@ public final class JwtAuthenticator implements Authenticator {
         }
 
         /**
-         * Registers an RSA or EC public key for tokens whose {@code kid} is the key ID.
+         * Registers a public key for tokens whose {@code kid} is the key ID.
          *
          * @param keyId key ID, unique within this builder
-         * @param algorithm an RS or ES algorithm matching the key
-         * @param key RSA key of at least 2048 bits, or EC key on the algorithm's curve
+         * @param algorithm an RS, PS, ES or EdDSA algorithm matching the key
+         * @param key RSA key of at least 2048 bits (RS and PS), EC key on the algorithm's curve (ES)
+         *        or Ed25519 key (EdDSA)
          * @return this builder
          * @throws IllegalArgumentException if the key does not fit the algorithm or for a duplicate
          *         key ID
          */
         public Builder publicKey(String keyId, JwsAlgorithm algorithm, PublicKey key) {
             return add(Objects.requireNonNull(keyId, "keyId"), algorithm, asymmetric(algorithm, key));
+        }
+
+        /**
+         * Takes further verification keys from the issuer's JSON Web Key Set, with
+         * {@linkplain JwksOptions#defaults() default options}. See {@link #jwks(JwksSource, JwksOptions)}.
+         *
+         * @param source where the key set comes from, for example {@link JwksSource#url(java.net.URI)}
+         * @return this builder
+         * @throws IllegalStateException if a key set source was already configured
+         */
+        public Builder jwks(JwksSource source) {
+            return jwks(source, JwksOptions.defaults());
+        }
+
+        /**
+         * Takes further verification keys from the issuer's JSON Web Key Set, which the
+         * application configures and the token cannot influence. The set is fetched on first use,
+         * refreshed when older than {@link JwksOptions#refreshInterval(java.time.Duration)}, and
+         * refetched when a token names an unknown {@code kid}, at most once per
+         * {@link JwksOptions#minRefreshInterval(java.time.Duration)}, so key rotation needs no
+         * restart and unknown key IDs cannot make the server fetch in a loop. A failed fetch keeps
+         * the last good set until {@link JwksOptions#maxStale(java.time.Duration)} has passed.
+         *
+         * <p>Keys of the set are bound to their declared {@code alg} exactly like statically
+         * registered keys and pass the same size and curve checks. Statically registered keys with
+         * the same key ID win over keys of the set. Tokens without a {@code kid} are verified only
+         * with statically registered keys.
+         *
+         * @param source where the key set comes from
+         * @param options bounds and timings
+         * @return this builder
+         * @throws IllegalStateException if a key set source was already configured
+         * @throws IllegalArgumentException if the options contradict each other
+         */
+        public Builder jwks(JwksSource source, JwksOptions options) {
+            if (jwksSource != null) { throw new IllegalStateException("A key set source is already configured"); }
+            Objects.requireNonNull(source, "source");
+            Objects.requireNonNull(options, "options").validate();
+            jwksSource = source;
+            jwksOptions = options;
+            return this;
         }
 
         /**
@@ -448,6 +571,51 @@ public final class JwtAuthenticator implements Authenticator {
         }
 
         /**
+         * Exposes verified claims as {@linkplain SecurityIdentity#attributes() identity attributes}
+         * under the same names. Only string, number and boolean claims are exposed, as text; a
+         * claim that is absent or JSON {@code null} is skipped, and one that is an array or object
+         * makes the token invalid. Values over 2,048 characters make the token invalid too. Only
+         * claims listed here are exposed; every other claim stays unavailable to handlers.
+         *
+         * @param names claim names, at most 64 in total with the other attribute settings
+         * @return this builder
+         */
+        public Builder exposeClaims(String... names) {
+            for (var name : Objects.requireNonNull(names, "names")) { exposedClaims.add(requireText(name, "claim")); }
+            if (exposedClaims.size() > 64) { throw new IllegalArgumentException("At most 64 claims can be exposed"); }
+            return this;
+        }
+
+        /**
+         * Maps verified claims to identity attributes with application code, for example to
+         * flatten a nested or array claim. Runs after the {@linkplain #tokenCheck token checks}
+         * accepted the token; its entries are added to those of {@link #exposeClaims} and replace
+         * same-named ones. An {@link IllegalArgumentException} from the function, or an attribute
+         * that {@link SecurityIdentity} refuses, makes the token invalid; other exceptions
+         * propagate.
+         *
+         * @param mapper thread-safe function from verified claims to attribute names and values
+         * @return this builder
+         */
+        public Builder attributes(Function<JwtClaims, Map<String, String>> mapper) {
+            attributeMappers.add(Objects.requireNonNull(mapper, "mapper"));
+            return this;
+        }
+
+        /**
+         * Adds a check that runs after signature, time, issuer, audience and subject verification,
+         * for revocation or {@code jti} replay detection. See {@link TokenCheck} for the
+         * outcomes. Checks run in registration order.
+         *
+         * @param check thread-safe check
+         * @return this builder
+         */
+        public Builder tokenCheck(TokenCheck check) {
+            checks.add(Objects.requireNonNull(check, "check"));
+            return this;
+        }
+
+        /**
          * Sets the realm of the {@code WWW-Authenticate} challenge ({@code api} by default).
          *
          * @param realm 1 to 64 letters, digits, spaces and {@code . _ : / -}
@@ -479,7 +647,9 @@ public final class JwtAuthenticator implements Authenticator {
          * @throws IllegalStateException without a key, an issuer or an audience
          */
         public JwtAuthenticator build() {
-            if (keysById.isEmpty() && keysWithoutId.isEmpty()) { throw new IllegalStateException("At least one key is required"); }
+            if (keysById.isEmpty() && keysWithoutId.isEmpty() && jwksSource == null) {
+                throw new IllegalStateException("At least one key or a key set source is required");
+            }
             if (issuers.isEmpty()) { throw new IllegalStateException("At least one issuer is required"); }
             if (audiences.isEmpty()) { throw new IllegalStateException("At least one audience is required"); }
             return new JwtAuthenticator(this);
@@ -509,11 +679,11 @@ public final class JwtAuthenticator implements Authenticator {
             return new SecretKeySpec(secret.clone(), algorithm.jcaName());
         }
 
-        private static Key asymmetric(JwsAlgorithm algorithm, PublicKey key) {
+        static Key asymmetric(JwsAlgorithm algorithm, PublicKey key) {
             Objects.requireNonNull(algorithm, "algorithm");
             Objects.requireNonNull(key, "key");
             switch (algorithm.family()) {
-                case RSA -> {
+                case RSA, RSA_PSS -> {
                     if (!(key instanceof RSAPublicKey rsa)) { throw new IllegalArgumentException(algorithm + " needs an RSA public key"); }
                     if (rsa.getModulus().bitLength() < 2048) { throw new IllegalArgumentException("RSA keys need at least 2048 bits"); }
                 }
@@ -522,12 +692,18 @@ public final class JwtAuthenticator implements Authenticator {
                         throw new IllegalArgumentException(algorithm + " needs an EC public key on " + curve(algorithm));
                     }
                 }
+                case EDDSA -> {
+                    if (!(key instanceof EdECPublicKey ed) || !(ed.getParams() instanceof NamedParameterSpec named)
+                            || !named.getName().equals("Ed25519")) {
+                        throw new IllegalArgumentException(algorithm + " needs an Ed25519 public key");
+                    }
+                }
                 case HMAC -> throw new IllegalArgumentException(algorithm + " needs a secret, not a public key");
             }
             return key;
         }
 
-        private static String curve(JwsAlgorithm algorithm) {
+        static String curve(JwsAlgorithm algorithm) {
             return switch (algorithm) {
                 case ES256 -> "secp256r1";
                 case ES384 -> "secp384r1";
@@ -535,7 +711,7 @@ public final class JwtAuthenticator implements Authenticator {
             };
         }
 
-        private static boolean sameCurve(ECParameterSpec actual, String name) {
+        static boolean sameCurve(ECParameterSpec actual, String name) {
             try {
                 var parameters = AlgorithmParameters.getInstance("EC");
                 parameters.init(new ECGenParameterSpec(name));
