@@ -188,7 +188,7 @@ are never offered to error handlers; global middleware can replace them. See
 ## Validated bodies
 
 ```java
-public interface BodyValidator<T> {        // io.axiom.context, core
+public interface BodyValidator<T> {        // com.jsgalactic.axiom.context, core
     List<Violation> validate(T value);
 }
 

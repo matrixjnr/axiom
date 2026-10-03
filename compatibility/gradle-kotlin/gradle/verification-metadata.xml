@@ -4,7 +4,7 @@
       <verify-metadata>true</verify-metadata>
       <verify-signatures>false</verify-signatures>
       <trusted-artifacts>
-         <trust group="io.axiom"/>
+         <trust group="com.jsgalactic.axiom"/>
       </trusted-artifacts>
    </configuration>
    <components>

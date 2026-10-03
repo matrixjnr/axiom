@@ -1,6 +1,6 @@
 package example;
 
-import io.axiom.Axiom;
+import com.jsgalactic.axiom.Axiom;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;

@@ -6,7 +6,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>io.axiom.compatibility</groupId>
+  <groupId>com.jsgalactic.axiom.compatibility</groupId>
   <artifactId>consumer-maven</artifactId>
   <version>1</version>
 
@@ -27,7 +27,7 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>io.axiom</groupId>
+        <groupId>com.jsgalactic.axiom</groupId>
         <artifactId>axiom-bom</artifactId>
         <version>${axiom.version}</version>
         <type>pom</type>
@@ -38,7 +38,7 @@
 
   <dependencies>
     <dependency>
-      <groupId>io.axiom</groupId>
+      <groupId>com.jsgalactic.axiom</groupId>
       <artifactId>axiom</artifactId>
     </dependency>
   </dependencies>

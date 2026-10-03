@@ -1,8 +1,8 @@
 package consumer;
 
-import io.axiom.Axiom;
-import io.axiom.validation.Validation;
-import io.axiom.validation.jakarta.JakartaValidation;
+import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.validation.Validation;
+import com.jsgalactic.axiom.validation.jakarta.JakartaValidation;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;

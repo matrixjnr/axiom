@@ -2,8 +2,8 @@ package example.rest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.axiom.http.Response;
-import io.axiom.test.TestClient;
+import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.test.TestClient;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;

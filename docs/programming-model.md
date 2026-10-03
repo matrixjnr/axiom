@@ -57,7 +57,8 @@ response is 405 with a sorted `Allow` header listing every method registered on 
 matching template. HEAD uses an explicit HEAD route or else the GET route on the
 same template, and omits the response body (a successful one keeps its length in
 `Content-Length`); `Allow` includes HEAD wherever GET is
-registered. Automatic OPTIONS behavior is not enabled.
+registered. A routed path without an explicit OPTIONS route answers OPTIONS
+automatically (see [automatic OPTIONS](routing.md#automatic-options)).
 
 `ctx.route()` returns the matched template identity. `ctx.path("id")` reads a raw
 capture; `ctx.pathParameters()` returns an immutable map in template order. Values

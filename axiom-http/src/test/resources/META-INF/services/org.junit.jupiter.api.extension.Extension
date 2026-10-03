@@ -1,1 +1,1 @@
-io.axiom.http.internal.LeakDetection
+com.jsgalactic.axiom.http.internal.LeakDetection

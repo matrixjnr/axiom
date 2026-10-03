@@ -7,7 +7,7 @@ dependencyResolutionManagement {
     repositories {
         maven {
             url = uri(providers.gradleProperty("axiomRepo").get())
-            content { includeGroup("io.axiom") }
+            content { includeGroup("com.jsgalactic.axiom") }
         }
         mavenCentral()
     }

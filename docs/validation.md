@@ -22,7 +22,7 @@ public interface Validator<T> {
 ```
 
 A validator returns an empty list for a valid value, or core
-`io.axiom.error.Violation(field, code)` values. Implementations must be
+`com.jsgalactic.axiom.error.Violation(field, code)` values. Implementations must be
 thread-safe and must not build fields or codes from the checked value.
 `Validation.require(validator, value)` returns the value when it is valid and
 otherwise throws core's `ValidationException`, so the client receives:
@@ -72,7 +72,7 @@ from client input.
 ## Rules without annotations
 
 ```java
-import static io.axiom.validation.Rule.*;
+import static com.jsgalactic.axiom.validation.Rule.*;
 
 static final Validator<Address> ADDRESS = Rules.of(Address.class)
         .field("street", Address::street, notBlank(), maxLength(80))

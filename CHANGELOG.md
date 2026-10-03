@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Rename the Java packages and the Maven group from `io.axiom` to `com.jsgalactic.axiom` (the starter is now `com.jsgalactic.axiom:axiom`; artifact IDs are unchanged). Nothing had been published under `io.axiom`.
 - Add `Context.validatedBody(type, validator)` with core's `BodyValidator`, which axiom-validation's `Validator` now extends.
 - Map exceptions to responses with `app.error(type, handler)`; the nearest registered superclass wins, problem responses stay the default for AxiomException, and a failing error handler produces the generic 500.
 - Add middleware (`app.use`, route-level arguments) and route groups with path prefixes and scoped middleware, composed once at startup; global middleware also wrap 404, 405, automatic OPTIONS and 501 answers. **Binary incompatible (pre-release):** `route`, `get`, `post`, `put`, `patch`, `delete`, `head` and `options` moved to the new `RouteGroup` interface and gained a trailing `Middleware...` parameter. Existing source compiles unchanged, but code compiled against the previous `Application` methods must be recompiled.

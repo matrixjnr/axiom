@@ -8,7 +8,7 @@ against `GET /users/:id`. Parameter values cannot create new admission buckets.
 ## Configuration
 
 ```java
-import io.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import java.time.Duration;
 
 var app = Axiom.create();
