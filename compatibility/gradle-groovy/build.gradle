@@ -7,7 +7,7 @@ sourceSets { main { java { srcDir '../shared' } } }
 
 dependencies {
     // Explicit version, no BOM: the starter alone is enough.
-    implementation "io.axiom:axiom:${axiomVersion}"
+    implementation "com.jsgalactic.axiom:axiom:${axiomVersion}"
 }
 
 tasks.register('smoke', JavaExec) {

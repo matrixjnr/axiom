@@ -1,9 +1,12 @@
 # Releasing
 
 Nothing has been published yet. This page lists what the build does, what the owner
-must still do, and the steps for each release. The `io.axiom` group is provisional
-until ownership of that namespace is validated; changing it is a deliberate decision
-that is not covered here.
+must still do, and the steps for each release. Artifacts are published under the group
+`com.jsgalactic.axiom` (for example `com.jsgalactic.axiom:axiom`), which is also the Java
+package root. It is the reverse of the project domain `axiom.jsgalactic.com`, so the
+namespace can be verified through DNS. The group and packages were `io.axiom` before
+the first release; nothing was ever published under that name, so no relocation is
+needed.
 
 ## Published modules
 
@@ -19,8 +22,12 @@ automatically; add it to `axiom-bom` as well.
    (currently `TODO-developer-id`, `TODO Developer Name` and a profile URL guess). The
    repository URL (`https://github.com/matrixjnr/axiom`) and the Apache-2.0 license
    come from the repository. A developer email is optional and not set.
-2. Verify the namespace with Maven Central (or choose another group and rename it
-   everywhere), and create the publishing account and a user token.
+2. Verify the namespace `com.jsgalactic` in the Central Portal
+   (central.sonatype.com): add the namespace to the publishing account, then publish
+   the verification key the portal shows as a DNS TXT record on `jsgalactic.com` and
+   ask the portal to verify it. Only the owner of the domain can do this. A verified
+   `com.jsgalactic` covers the `com.jsgalactic.axiom` group. Then create a user token
+   for publishing.
 3. Create a signing key pair, publish the public key to a key server, and keep the
    private key out of the repository. Provide it to CI as secrets:
    `ORG_GRADLE_PROJECT_signingInMemoryKey` (armored private key),

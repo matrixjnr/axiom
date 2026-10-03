@@ -7,11 +7,11 @@ sourceSets.main { java.srcDirs("../shared", "../shared-validation") }
 
 dependencies {
     // The BOM supplies the version of the starter.
-    implementation(platform("io.axiom:axiom-bom:$axiomVersion"))
-    implementation("io.axiom:axiom")
+    implementation(platform("com.jsgalactic.axiom:axiom-bom:$axiomVersion"))
+    implementation("com.jsgalactic.axiom:axiom")
     // Optional modules, versions from the BOM. Applications declare the annotation API themselves.
-    implementation("io.axiom:axiom-validation")
-    implementation("io.axiom:axiom-validation-jakarta")
+    implementation("com.jsgalactic.axiom:axiom-validation")
+    implementation("com.jsgalactic.axiom:axiom-validation-jakarta")
     implementation("jakarta.validation:jakarta.validation-api:3.1.1")
 }
 
