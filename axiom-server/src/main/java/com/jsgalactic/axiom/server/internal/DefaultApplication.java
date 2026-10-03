@@ -12,6 +12,7 @@ import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.spi.HttpTransportProvider;
+import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.routing.Route;
@@ -70,8 +71,9 @@ final class DefaultApplication implements Application {
     private volatile Runtime runtime;
 
     @Override
-    public Server listen(InetSocketAddress address) throws IOException {
+    public Server listen(InetSocketAddress address, ListenerOptions options) throws IOException {
         Objects.requireNonNull(address, "address");
+        Objects.requireNonNull(options, "options");
         if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
         // Provider discovery and binding can block; neither runs under the lifecycle lock.
         var providers = ServiceLoader.load(HttpTransportProvider.class).iterator();
@@ -81,7 +83,7 @@ final class DefaultApplication implements Application {
         var provider = providers.next();
         if (providers.hasNext()) { throw new IllegalStateException("Multiple HTTP transport providers"); }
         start();
-        var server = provider.bind(this, address);
+        var server = provider.bind(this, address, options);
         synchronized (this) {
             if (state != State.CLOSED) {
                 listeners.removeIf(listener -> listener.termination().toCompletableFuture().isDone());

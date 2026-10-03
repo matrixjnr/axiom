@@ -21,10 +21,11 @@ running handler keeps it running; its response is sent with `Connection: close`
 and queued pipelined requests on it are dropped unanswered. This holds for every
 response sent after `close()` is called, so it is already in force when a waiting
 request receives its 503. The connection then
-lingers for at most 500 milliseconds (see [wire behavior](#wire-behavior)) before it
+lingers for at most 500 milliseconds by default (see [wire behavior](#wire-behavior)) before it
 closes; connections already lingering when the listener closes stop within the same
 bound, so they do not hold up shutdown.
-After a fixed five-second grace period, remaining connections close and their
+After the shutdown grace period (five seconds by default, see
+[listener options](#listener-options)), remaining connections close and their
 handlers are interrupted; then execution and I/O threads stop. Await
 `server.termination()` to join resource shutdown. Handlers must cooperate with
 interruption; termination cannot complete while a handler refuses to stop.
@@ -119,7 +120,7 @@ single lost segment does not end it. The trade-off is a client that is still sen
 but pauses for longer (a very lossy link, or a client that stalls between writes): its
 next bytes arrive at a closed connection, the operating system answers with a reset,
 and response bytes the client has not read yet may be lost. Once the listener is
-closing, lingering lasts at most 500 milliseconds in total, so lingering connections
+closing, lingering lasts at most 500 milliseconds in total by default, so lingering connections
 barely delay shutdown. A lingering connection holds no request data and no longer
 counts against the connection limit (see [resource limits](#resource-limits)).
 Connections closed without a response (an idle
@@ -167,12 +168,13 @@ configurable through `app.admissionPolicy(...)`; see
 threads. Full execution capacity with no free queue slot, or an expired queue
 wait, produces 503 and closes that connection. So does any other failure to start
 a request, including a pipelined request reached after the application has
-closed. Connections are limited to 128; additional connections close immediately
-without consuming a slot. A connection that only lingers after its last response
+closed. Connections are limited to 128 by default; additional connections close immediately
+without a response and without consuming a slot. A connection that only lingers after its last response
 (see [wire behavior](#wire-behavior)) gives its slot back, because it holds no request
 data and its remaining life is bounded by the linger caps. At most 32 connections per
-listener linger this way; beyond that a lingering connection keeps its slot until it
-closes, so a listener never has more than 160 open sockets. The listening socket requests a 1024-entry accept
+listener linger this way by default; beyond that a lingering connection keeps its slot until it
+closes, so a listener never has more than 160 open sockets by default (the connection cap plus
+the lingering pool). The listening socket requests a 1024-entry accept
 backlog and sets SO_REUSEADDR so a restart can rebind while old connections
 linger in TIME_WAIT. Connections use TCP_NODELAY and a 32/128 KiB write-buffer
 water mark. A connection holds at most eight outstanding requests, including the
@@ -224,5 +226,60 @@ The default execution deadline is ten seconds, configurable before startup throu
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
-Other limits remain fixed. TLS, HTTP/2, streaming request bodies, observability integrations and a configurable shutdown grace period remain
-future work.
+TLS, HTTP/2, streaming request bodies and observability integrations remain future work.
+
+## Listener options
+
+Transport limits and timeouts are set per listener with an immutable `ListenerOptions`,
+passed to `app.listen(address, options)`. `app.listen(address)` and `app.listen(port)` use
+`ListenerOptions.defaults()`, which keeps the values described in this document. Each
+builder method validates its value when called and throws `IllegalArgumentException` naming
+the setting and its range; `build()` cannot fail. The options apply to that listener only, so
+listeners of one application may differ. Application-level limits (request body size,
+execution deadline, admission) stay on the application.
+
+```java
+var options = ListenerOptions.builder()
+        .shutdownGrace(Duration.ofSeconds(30))
+        .maxConnections(512)
+        .build();
+var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
+```
+
+| Setting | Default | Valid range | Governs |
+| --- | --- | --- | --- |
+| `shutdownGrace` | 5 s | 0 to 1 day | Time `close()` lets running exchanges finish before connections close and handlers are interrupted; zero interrupts at once |
+| `idleTimeout` | 30 s | 1 ms to 1 day | Network inactivity after which a connection closes |
+| `headTimeout` | 10 s | 1 ms to 1 day | Time from a request's first byte until its head is complete (408) |
+| `responseTimeout` | 30 s | 1 ms to 1 day | Time to write one response to the socket |
+| `lingerTimeout` | 2 s | 1 ms to 1 day | Total linger after the last response |
+| `lingerQuietTimeout` | 500 ms | 1 ms to 1 day | Silence that ends lingering |
+| `shutdownLingerTimeout` | 500 ms | 1 ms to 1 day | Total linger once the listener is closing (the smaller of this and `lingerTimeout` applies) |
+| `maxDiscardedInput` | 16 MiB | 0 to 1 GiB | Bytes discarded unread after an error or last response before the connection closes |
+| `maxConnections` | 128 | 1 to 1,000,000 | Open connections per listener |
+| `maxLingeringConnections` | 32 | 0 to 1,000,000 | Lingering connections that stop counting against `maxConnections`; zero keeps them on their regular slots |
+| `maxPipelinedRequests` | 8 | 1 to 1024 | Outstanding requests per connection, including the running one |
+| `maxRequestLine` | 4096 | 256 to 65,536 | Longest request line in bytes (414 beyond) |
+| `maxHeaderBytes` | 8192 | 256 to 1 MiB | Largest header section in bytes (431 beyond) |
+| `ioThreads` | processors, at least 2 | 1 to 1024 | I/O threads of the listener; handlers never run on them |
+
+Choosing values:
+
+- Total open sockets are at most `maxConnections + maxLingeringConnections`. The worst-case memory
+  held for request bodies grows linearly with `maxConnections` (see
+  [request bodies](bodies.md#memory-per-connection)).
+- The connection cap and admission are independent limits. A connection over the cap is closed
+  at once without a response, so the client sees a closed connection, never a 503; admission 503s
+  are only produced for requests on accepted connections. A cap below the application's admission
+  capacity (active plus queued requests) leaves part of that capacity unreachable, because clients
+  are turned away before admission could queue or answer them. Set `maxConnections` at or above
+  that capacity plus headroom for idle keep-alive connections; see
+  [admission and bounded queues](admission.md).
+- A short `shutdownGrace` interrupts handlers sooner; a long one delays `termination()` for as long
+  as a handler keeps running. Handlers must still cooperate with interruption.
+- `lingerQuietTimeout` longer than `lingerTimeout` has no effect beyond the total bound, and a
+  very small `lingerQuietTimeout` raises the chance that a client still sending gets a reset (see
+  [wire behavior](#wire-behavior)).
+- `headTimeout` and `idleTimeout` are the main defense against slow clients; raising them or the
+  connection cap widens the exposure to slowloris-style clients.
+

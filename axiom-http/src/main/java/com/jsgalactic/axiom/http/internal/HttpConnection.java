@@ -4,6 +4,7 @@ import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.HttpStatus;
 import com.jsgalactic.axiom.internal.OwnedBodies;
+import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
@@ -54,27 +55,27 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static final System.Logger LOG = System.getLogger(HttpConnection.class.getName());
     private static final Object UNMATCHED = new Object();
     /** Bound from a request's first byte until its head is complete; a slower client receives 408. */
-    static final Duration REQUEST_HEAD_TIMEOUT = Duration.ofSeconds(10);
+    static final Duration REQUEST_HEAD_TIMEOUT = ListenerOptions.defaults().headTimeout();
     private static final java.util.regex.Pattern CONTENT_LENGTH = java.util.regex.Pattern.compile("[0-9]{1,18}");
     /**
      * Outstanding requests per connection, including the active one. A further request is not
      * executed: it is answered 503 after the earlier responses, and the connection closes.
      */
-    static final int MAX_PIPELINED = 8;
+    static final int MAX_PIPELINED = ListenerOptions.defaults().maxPipelinedRequests();
     /**
      * Input read and dropped, never buffered, after a listener error (while earlier pipelined
      * requests finish, and again while lingering). Reading continues so that a client disconnect is
      * noticed and cancels the running handler. A client that sends more is treated as abusive: the
      * connection closes at once, cancelling any running handler.
      */
-    static final int MAX_DISCARDED_INPUT = 16 * 1024 * 1024;
+    static final int MAX_DISCARDED_INPUT = ListenerOptions.defaults().maxDiscardedInput();
     /**
      * After the last response on a connection the output is shut down and input is read and
      * discarded for at most this long before the connection closes, so a client still sending (for
      * example the rest of a rejected body, or pipelined requests) reads the whole response instead
      * of a reset.
      */
-    static final Duration LINGER_TIMEOUT = Duration.ofSeconds(2);
+    static final Duration LINGER_TIMEOUT = ListenerOptions.defaults().lingerTimeout();
     /**
      * Lingering ends once no input has arrived for this long. Lingering exists for a client that is
      * still sending; one that has gone quiet has most likely finished, and closing a connection with
@@ -83,16 +84,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * it; a client that pauses longer while still sending may get a reset, which can destroy
      * response bytes it has not read yet.
      */
-    static final Duration LINGER_QUIET_TIMEOUT = Duration.ofMillis(500);
+    static final Duration LINGER_QUIET_TIMEOUT = ListenerOptions.defaults().lingerQuietTimeout();
     /** Total linger bound once the listener is closing, so lingering connections barely delay shutdown. */
-    static final Duration SHUTDOWN_LINGER_TIMEOUT = Duration.ofMillis(500);
+    static final Duration SHUTDOWN_LINGER_TIMEOUT = ListenerOptions.defaults().shutdownLingerTimeout();
     /**
      * Bound on writing one response: from handing it to the socket until the operating system has
      * accepted its last byte. A client that reads too slowly to take a whole response (at most 1 MiB
      * of body) in this time loses the connection. The inactivity timeout alone would let a client
      * that reads a few bytes now and then hold the connection indefinitely.
      */
-    static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(30);
+    static final Duration RESPONSE_TIMEOUT = ListenerOptions.defaults().responseTimeout();
     private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
@@ -102,6 +103,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final long lingerQuietNanos;
     private final long shutdownLingerNanos;
     private final long responseNanos;
+    private final int maxPipelined;
+    private final int maxDiscardedInput;
     /**
      * True once the listener has started closing. Read on every response, from the moment the
      * listener's close begins, so a response sent after that carries {@code Connection: close} even
@@ -172,6 +175,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         this.lingerQuietNanos = settings.lingerQuiet().toNanos();
         this.shutdownLingerNanos = settings.shutdownLinger().toNanos();
         this.responseNanos = settings.responseTimeout().toNanos();
+        this.maxPipelined = settings.options().maxPipelinedRequests();
+        this.maxDiscardedInput = settings.options().maxDiscardedInput();
     }
 
     /**
@@ -241,7 +246,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private boolean accept(ChannelHandlerContext ctx, HttpRequest request) {
         receivingHead = request.method().name().equals("HEAD");
         // The request beyond the bound is refused before its body is read; earlier ones still complete.
-        if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { fail(ctx, 503); return false; }
+        if (pending.size() + (busy ? 1 : 0) >= maxPipelined) { fail(ctx, 503); return false; }
         boolean http10 = request.protocolVersion().equals(HttpVersion.HTTP_1_0);
         if (!http10 && !request.protocolVersion().equals(HttpVersion.HTTP_1_1)) { fail(ctx, 505); return false; }
         if (!validHost(request, http10)) { fail(ctx, 400); return false; }
@@ -554,7 +559,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         releaseBody();
         receiving = null;
         var decoder = ctx.pipeline().get(RequestDecoder.class);
-        if (decoder != null) { decoder.discard(MAX_DISCARDED_INPUT); }
+        if (decoder != null) { decoder.discard(maxDiscardedInput); }
         if (busy || !pending.isEmpty()) { deferredStatus = status; deferredHead = head; return; }
         sendError(ctx, status, head);
     }
@@ -578,7 +583,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // Only discarding remains, bounded in time and bytes, so the connection stops keeping
         // new clients out (when the listener's separate lingering bound allows).
         if (slot != null) { slot.linger(); }
-        decoder.discard(MAX_DISCARDED_INPUT);
+        decoder.discard(maxDiscardedInput);
         long now = now(ctx);
         lastInput = now;
         boolean shuttingDown = draining || listenerClosing.getAsBoolean();

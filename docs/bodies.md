@@ -77,9 +77,10 @@ copy, but a codec that implements only the array method receives one copy (up to
 `L`); the decoded value lives until the handler drops it, and `Body.bytes()` copies
 on every call.
 
-These bounds are **per connection, not global**. A listener accepts up to 128
-connections, so its worst case is about `128 × 3 × L` (384 MiB at the default),
-and each additional listener has its own 128 connections. There is no
+These bounds are **per connection, not global**. A listener accepts up to `maxConnections` (128 by default, see
+[listener options](http.md#listener-options)), so its worst case is about
+`128 × 3 × L` (384 MiB at the default),
+and each additional listener has its own connections. There is no
 process-wide body budget; size `L`, the request timeout and the heap together.
 
 ## Rejected bodies
