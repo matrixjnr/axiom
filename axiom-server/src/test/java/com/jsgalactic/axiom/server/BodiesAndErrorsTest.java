@@ -146,6 +146,31 @@ class BodiesAndErrorsTest {
         }
     }
 
+    @Test void ignoresAcceptForUnsafeMethodsSoSideEffectsAreNeverFollowedBy406() throws Exception {
+        var created = new java.util.concurrent.atomic.AtomicInteger();
+        try (var app = Axiom.create()) {
+            app.get("/notes", ctx -> ctx.json(new Note("n", 1)));
+            for (var method : new String[] {"POST", "PUT", "PATCH", "DELETE", "PROPFIND"}) {
+                app.route(method, "/notes", ctx -> {
+                    created.incrementAndGet();
+                    return ctx.status(201).json(new Note("n", created.get()));
+                });
+            }
+            app.start();
+            var unacceptable = Map.of("Accept", "text/html");
+            for (var method : new String[] {"POST", "PUT", "PATCH", "DELETE", "PROPFIND"}) {
+                int before = created.get();
+                var response = app.handle(new Request(method, "/notes").withHeaders(unacceptable));
+                // The handler ran exactly once and its response was sent, not replaced by a 406.
+                assertThat(created.get()).as(method).isEqualTo(before + 1);
+                assertThat(response.status()).as(method).isEqualTo(201);
+                assertThat(response.headers()).as(method).containsEntry("Content-Type", "application/json");
+            }
+            // Safe methods are still negotiated, as before.
+            assertProblem(app.handle(Request.get("/notes").withHeaders(unacceptable)), 406, "not_acceptable");
+        }
+    }
+
     @Test void answersUnmatchedRoutesAndMethodsWithProblems() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/users", ctx -> "users");

@@ -32,6 +32,14 @@ framework identity. IDs are correlation values, not authentication credentials:
 anyone who has seen one ID can predict later IDs from the same process.
 Handler exception logs include the identity; no exception details enter the body.
 
+**The request ID is deliberately not secret.** It is exposed in the `X-Request-ID` header, in
+the `requestId` member of every problem body, and in log lines, and Axiom never uses it to
+authorize or identify anyone: nothing in the framework treats possession of an ID as a
+capability, and an application must not either (a session token, CSRF token, password-reset
+link or download URL needs its own `SecureRandom` value). The generator keeps its cheap form,
+one atomic increment per request, because the ID exists to correlate a response with a log
+entry, which unpredictability would not improve.
+
 ## Deadline boundary
 
 The default budget is ten seconds. Configure `app.requestTimeout(Duration)` before
