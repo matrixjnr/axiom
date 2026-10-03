@@ -1,3 +1,9 @@
+---
+title: OpenAPI and Swagger
+parent: Guides
+nav_order: 10
+---
+
 # OpenAPI and Swagger
 
 `axiom-openapi` (package `com.jsgalactic.axiom.openapi`) generates an **OpenAPI 3.1** document, or

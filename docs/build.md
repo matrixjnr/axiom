@@ -190,6 +190,23 @@ modules); "own tests" is the module's `jacocoTestReport`. `axiom-starter` has no
 Of the total, `test` alone covers 90.7% of lines and 81.8% of branches, `integrationTest`
 alone 68.3% and 54.6%.
 
+## Code style
+
+Checkstyle (version in `gradle/libs.versions.toml`) is applied to every Java module by the
+`axiom.java-base` convention plugin. `checkstyleMain` and `checkstyleTest` are part of each
+module's `check` and fail the build on any violation (`maxWarnings = 0`); run one module with
+`./gradlew :axiom-core:checkstyleMain :axiom-core:checkstyleTest`. The single shared ruleset is
+`config/checkstyle/checkstyle.xml`. It encodes only conventions the tree already follows: no tabs,
+trailing whitespace or star imports, a final newline, no unused or redundant imports, imports in
+one ASCII-sorted block with static imports first, 4-space indentation, lines of at most 200
+characters, standard naming, `final` classes without a visible constructor (or a hidden one for
+utility classes), required braces for multi-line statements, and Javadoc on every public type and
+method of library main sources. Tests, examples and benchmarks are exempt from the Javadoc rule,
+and the README examples from the utility-class rule, by filters inside the ruleset itself; there
+is no separate suppression file. A rule the code does not satisfy is removed or tuned rather than
+the code reformatted. The Checkstyle dependencies have checksums in
+`gradle/verification-metadata.xml` like every other tool dependency.
+
 ## README examples
 
 The README's Hello world, tasks API and `TestClient` snippet are quoted from compiled sources in
@@ -357,7 +374,7 @@ the Gradle cache of `gradle/actions/setup-gradle`:
 
 | Job | Runs | Timeout |
 | --- | --- | --- |
-| `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
+| `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkstyleMain` and `checkstyleTest` of every module, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
 | `matrix` | `./gradlew -q unitTestMatrix`: prints the modules that have unit tests as the `unit` job's matrix | 10 min |
 | `unit` | `./gradlew <module>:test -Daxiom.requireAllocationTests=true`, one job per module listed by `matrix`; uploads the module's test report on failure | 20 min |
 | `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure | 30 min |
@@ -406,3 +423,41 @@ does not loosen any production rule: core, server and the test client still cann
 depend on a codec or on Jackson. Its tests run in its `integrationTest` task (part of
 `check`) and finish in a few seconds; `examples/rest-api` remains a usage example with its own tests. The module
 is not published and the BOM does not constrain it.
+
+## Documentation site
+
+The site (see [the site guide](site.md)) is generated from `README.md` and `docs/*.md` plus an
+aggregated Javadoc, and published to GitHub Pages by `.github/workflows/docs.yml`.
+
+**Generator choice.** The generator is a small converter written in Kotlin in `build-logic`
+(`MarkdownHtml`, `DocsSite`) with a page template and one stylesheet, and no dependency at all.
+The options weighed were a Markdown library on the build-logic classpath, a static-site tool run
+in CI, and this. A library adds a published artifact (plus its transitive ones) to every
+build, needs checksums and verification metadata kept up to date, and has a release cadence to
+follow. A static-site tool adds an installed runtime and, for Python tools, a pinned and hashed
+requirements file with its own update path, and it still needs a converter for GitHub-style
+anchors and relative links. Our documents use a small, regular subset of Markdown (headings,
+lists, fenced code, tables, links, emphasis), which a few hundred lines convert exactly; the
+subset and its exclusions are listed in the site guide, and raw HTML is escaped rather than
+passed through, so a document can never inject markup. The conversion has unit tests in
+`build-logic`, and the real documents are converted and link-checked by `check`, so a construct
+the converter mishandles shows up as a broken link or in review of the preview artifact. The
+supply-chain surface is therefore the repository's own source, the JDK and Gradle that already
+build everything else; the Javadoc tool is the JDK's. The Pages workflow adds only three more
+official actions, pinned to commit SHAs like the others.
+
+**Link checking.** `checkDocsLinks` is part of `check` and `checkSiteLinks` runs in `docsSite`.
+They read the generated HTML and fail on a missing target file, a missing `#anchor`, a duplicate
+id or a site-absolute (`/...`) path, which would break under the `/axiom/` project path. Links
+from documents to other repository files are rewritten to GitHub and must exist. External URLs
+are not fetched, so the build stays offline and deterministic.
+
+**Javadoc.** `aggregateJavadoc` documents the main sources of every module that applies
+`maven-publish` (the same set `checkPublicationCoverage` uses), excluding `internal` packages.
+Its classpath is a root configuration with the published modules, resolved under the committed
+dependency verification metadata like every other configuration. Doclint is off for the
+aggregate because each module's own `javadoc` task, part of the Build workflow, is the gate.
+
+The Docs workflow is separate from the Build workflow and not part of its `check` job.
+Pull requests build and check the site and keep it as an artifact; only pushes to `main` deploy,
+from a job that alone holds `pages: write` and `id-token: write`.

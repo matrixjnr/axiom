@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+<!--
+  Axiom code style, tuned to the existing sources: 4-space indentation, imports in one
+  ASCII-sorted block (static imports first), compact one-line members and lines up to 200
+  characters. Enforced at zero warnings for main and test sources of every Java module (see
+  docs/build.md). A rule that the tree does not already follow is not listed here.
+-->
+<module name="Checker">
+  <property name="charset" value="UTF-8"/>
+  <property name="severity" value="error"/>
+  <property name="fileExtensions" value="java"/>
+
+  <!-- Javadoc is required on the public API of library main sources only: not on tests, and not
+       on examples and benchmarks (the README quotes the examples verbatim). -->
+  <module name="SuppressionSingleFilter">
+    <property name="files" value="[\\/]src[\\/](?!main[\\/])|[\\/](examples|benchmarks)[\\/]"/>
+    <property name="checks" value="Missing.*"/>
+  </module>
+  <!-- The README examples are single-class programs with a main method. -->
+  <module name="SuppressionSingleFilter">
+    <property name="files" value="[\\/]examples[\\/]"/>
+    <property name="checks" value="HideUtilityClassConstructor"/>
+  </module>
+
+  <module name="NewlineAtEndOfFile"/>
+  <module name="FileTabCharacter"/>
+  <module name="RegexpSingleline">
+    <property name="format" value="\s+$"/>
+    <property name="message" value="Line has trailing whitespace."/>
+  </module>
+  <module name="LineLength">
+    <property name="max" value="200"/>
+    <property name="ignorePattern" value="^(package|import) .*|https?://\S+"/>
+  </module>
+
+  <module name="TreeWalker">
+    <module name="OuterTypeFilename"/>
+    <module name="OneTopLevelClass"/>
+    <module name="AvoidStarImport"/>
+    <module name="RedundantImport"/>
+    <module name="UnusedImports">
+      <property name="processJavadoc" value="true"/>
+    </module>
+    <module name="IllegalImport"/>
+    <module name="CustomImportOrder">
+      <property name="customImportOrderRules" value="STATIC###THIRD_PARTY_PACKAGE"/>
+      <property name="separateLineBetweenGroups" value="true"/>
+      <property name="sortImportsInGroupAlphabetically" value="true"/>
+    </module>
+    <module name="Indentation">
+      <property name="basicOffset" value="4"/>
+      <property name="caseIndent" value="4"/>
+      <property name="lineWrappingIndentation" value="8"/>
+      <property name="forceStrictCondition" value="false"/>
+    </module>
+    <module name="MissingOverride"/>
+
+    <module name="ConstantName"/>
+    <module name="LocalFinalVariableName"/>
+    <module name="LocalVariableName"/>
+    <module name="MemberName"/>
+    <module name="MethodName"/>
+    <module name="PackageName"/>
+    <module name="ParameterName"/>
+    <module name="StaticVariableName"/>
+    <module name="TypeName"/>
+
+    <module name="ModifierOrder"/>
+    <module name="UpperEll"/>
+    <module name="ArrayTypeStyle"/>
+    <module name="EmptyStatement"/>
+    <module name="EqualsHashCode"/>
+    <module name="DefaultComesLast"/>
+    <module name="FallThrough"/>
+    <module name="HideUtilityClassConstructor"/>
+    <module name="FinalClass"/>
+    <module name="InterfaceIsType"/>
+    <module name="NeedBraces">
+      <property name="tokens" value="LITERAL_IF, LITERAL_ELSE, LITERAL_FOR, LITERAL_WHILE, LITERAL_DO"/>
+      <property name="allowSingleLineStatement" value="true"/>
+    </module>
+
+    <module name="MissingJavadocType">
+      <property name="scope" value="public"/>
+    </module>
+    <module name="MissingJavadocMethod">
+      <property name="scope" value="public"/>
+      <property name="allowMissingPropertyJavadoc" value="true"/>
+      <property name="allowedAnnotations" value="Override"/>
+      <property name="tokens" value="METHOD_DEF, CTOR_DEF, ANNOTATION_FIELD_DEF"/>
+    </module>
+  </module>
+</module>

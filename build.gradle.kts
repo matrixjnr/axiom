@@ -1,6 +1,7 @@
 plugins {
     base
     id("axiom.publication-coverage")
+    id("axiom.docs-site")
     `jacoco-report-aggregation`
 }
 
