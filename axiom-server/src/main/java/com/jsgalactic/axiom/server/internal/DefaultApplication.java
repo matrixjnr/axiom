@@ -59,6 +59,7 @@ final class DefaultApplication implements Application {
     private final Map<Class<?>, ErrorHandler<?>> errorHandlers = new LinkedHashMap<>();
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
+    private final Set<String> recognizedMethods = new java.util.TreeSet<>();
     /** Group callbacks currently running; startup is refused while any is open. */
     private int openGroups;
     private final List<Server> listeners = new ArrayList<>();
@@ -141,6 +142,22 @@ final class DefaultApplication implements Application {
         }
         registrations.put(route, new Registration(handler, scope, routeMiddleware));
         return route;
+    }
+
+    @Override
+    public synchronized Application recognizeMethods(String... methods) {
+        requireState(State.CONFIGURING);
+        var declared = new java.util.TreeSet<String>();
+        for (var method : Objects.requireNonNull(methods, "methods")) {
+            Objects.requireNonNull(method, "method");
+            new Request(method, "/"); // IllegalArgumentException ("Invalid HTTP method") for a non-token
+            if (method.equals("CONNECT")) {
+                throw new IllegalArgumentException("CONNECT is answered 501 and cannot be declared as recognized");
+            }
+            declared.add(method);
+        }
+        recognizedMethods.addAll(declared);
+        return this;
     }
 
     @Override
@@ -298,7 +315,7 @@ final class DefaultApplication implements Application {
             chain.addAll(registration.middleware());
             chains.put(route, Pipeline.compose(chain, registration.handler()));
         });
-        var router = CompiledRouter.compile(chains);
+        var router = CompiledRouter.compile(chains, Set.copyOf(recognizedMethods));
         // Answers the router produces itself are wrapped by global middleware only.
         var unmatched = Pipeline.compose(global, context -> ((DefaultContext) context).frameworkAnswer());
         runtime = snapshot(router, unmatched, new ErrorHandlers(errorHandlers), codecs);
@@ -556,6 +573,7 @@ final class DefaultApplication implements Application {
             registrations.clear();
             root.middleware.clear();
             errorHandlers.clear();
+            recognizedMethods.clear();
             shapes.clear();
             routePolicies.clear();
             owned = List.copyOf(listeners);

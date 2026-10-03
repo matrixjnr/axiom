@@ -42,7 +42,7 @@ import java.util.function.Consumer;
  * <tr><td>TRACE</td><td>refused</td><td>405 with Allow</td><td>404</td></tr>
  * <tr><td>CONNECT</td><td>refused</td><td colspan="2">501</td></tr>
  * <tr><td>extension token, e.g. PROPFIND or QUERY</td><td>{@link #route}</td><td>405 with Allow</td>
- * <td>404 if registered on any route, otherwise 501</td></tr>
+ * <td>404 if registered on any route or declared with {@link #recognizeMethods}, otherwise 501</td></tr>
  * </tbody>
  * </table>
  * Request bodies are accepted and limited alike for every method, HEAD responses never carry a
@@ -84,6 +84,24 @@ public interface Application extends RouteGroup, AutoCloseable {
      */
     @Override
     Route route(String method, String path, Handler handler, Middleware... middleware);
+
+    /**
+     * Declares methods this application recognizes although no route has them, before startup.
+     * A request whose path matches no template is answered 404 for a recognized method and 501
+     * for any other (RFC 9110 section 15.6.2). Recognized are the RFC 9110 methods, {@code PATCH},
+     * every method registered on a route and the methods declared here, for example an extension
+     * a gateway or global middleware answers itself. Declaring a method changes nothing else:
+     * it is not added to any {@code Allow} header, and a request for it whose path matches
+     * a template is still 405. Repeated calls add to the set; a method already recognized is
+     * accepted.
+     *
+     * @param methods case-sensitive RFC 9110 method tokens
+     * @return this application
+     * @throws IllegalArgumentException for a method that is not a token or for {@code CONNECT},
+     *         which is always answered 501
+     * @throws IllegalStateException if configuration has ended
+     */
+    Application recognizeMethods(String... methods);
 
     /**
      * Adds global middleware. It runs first for every route, and also wraps the answers the
@@ -266,7 +284,7 @@ public interface Application extends RouteGroup, AutoCloseable {
      * {@code Content-Length} set to the encoded length of the body it would have had, and keeps a
      * body the HTTP transport could not send, so that HEAD fails where GET would.
      * Returns 404 for an unknown path (501 when the method is neither an RFC 9110 method, PATCH,
-     * nor registered on any route), and 405 when no matching template has the method, with
+     * nor registered on any route or declared with {@link #recognizeMethods}), and 405 when no matching template has the method, with
      * an Allow header listing the methods of all matching templates (HEAD wherever GET is, and OPTIONS).
      * An OPTIONS request that no matching template registered is answered 204 without invoking
      * a handler, with that Allow list plus OPTIONS. {@code OPTIONS *} is answered 204 without route

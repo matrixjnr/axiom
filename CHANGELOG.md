@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `Application.recognizeMethods(...)` to declare extension methods that no route has, so they are answered 404 rather than 501 on unrouted paths. **Binary incompatible (pre-release):** `Application` gained `recognizeMethods(String...)`.
 - Add `Context.automaticOptions()` so an explicit OPTIONS route, such as a wildcard preflight handler, can answer the requests it does not handle with the automatic 204 and accurate `Allow` list.
 - List `OPTIONS` in the `Allow` header of 405 responses, since every routed path answers it (RFC 9110 section 15.5.6); the list now equals the automatic OPTIONS answer.
 - Add observability: a dependency-free `Metrics` SPI in core with `Application.metrics(...)`; the dispatcher records requests by method, route template and status class, latency, admission rejections, queue wait and active and queued depth (no raw paths or user input as tags); the opt-in `axiom-metrics` module with a bounded in-memory `MetricsRegistry` and `PrometheusText` renderer and handler; `Health` and `HealthCheck` for liveness and readiness with `/health/live` and `/health/ready` routes and `beginDrain()`; and a strictly parsed W3C `traceparent` as `Context.traceContext()`. **Binary incompatible (pre-release):** `Application` gained `metrics(Metrics)` and `metrics()`. See `docs/observability.md`.

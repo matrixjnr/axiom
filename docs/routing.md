@@ -76,7 +76,7 @@ alphabetically.
 | `OPTIONS *` | Not possible (`*` is not a template) | 204, `Allow` = every registered method, `HEAD` if `GET` is registered, `OPTIONS` ([details](#options-)) | | |
 | `TRACE` | Refused: `IllegalArgumentException` ([why](#trace)) | | 405, `Allow` | 404 |
 | `CONNECT` | Refused: `IllegalArgumentException` | | 501 ([why](#connect)); the listener closes the connection | 501, likewise |
-| Extension method (`PROPFIND`, `REPORT`, `QUERY`, ...) | `route` | Handler runs | 405, `Allow` | 404 if registered on any route, else 501 ([custom methods](#custom-methods)) |
+| Extension method (`PROPFIND`, `REPORT`, `QUERY`, ...) | `route` | Handler runs | 405, `Allow` | 404 if registered on any route or declared with `recognizeMethods`, else 501 ([custom methods](#custom-methods)) |
 | Any other token, including `get` and `Get` | `route` (then it is an extension method) | | 405, `Allow` | 501 |
 | Not a token (`G(T`, `G T`, empty) | Refused: `IllegalArgumentException` | 400 from the listener, which closes the connection; `new Request` throws | | |
 
@@ -198,8 +198,9 @@ shortcut while the `QUERY` specification is not final; use
 `app.route("QUERY", path, handler)`.
 
 A method is **recognized** when it is one of the RFC 9110 methods (`GET`, `HEAD`,
-`POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`), `PATCH`, or a method
-registered on any route of the application. A request whose path matches no template
+`POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`), `PATCH`, a method
+registered on any route of the application, or a method declared with
+`app.recognizeMethods(...)`. A request whose path matches no template
 is answered 404 when its method is recognized and **501 Not Implemented** otherwise
 (RFC 9110 section 15.6.2: the server does not support the method for any resource).
 A request whose path does match is answered 405 with `Allow` whenever no matching
@@ -211,6 +212,17 @@ template has its method, recognized or not. With `PROPFIND /dav` registered:
 | `FOO /dav`, `get /dav` | 405, `Allow: PROPFIND` |
 | `PROPFIND /missing`, `GET /missing` | 404 |
 | `FOO /missing`, `get /missing` | 501 |
+
+`app.recognizeMethods("MKCOL", "LOCK")` declares methods that no route has but the
+application still treats as its own, for example because global middleware or a
+gateway extension answers them: they get 404 rather than 501 on an unrouted path, so
+`MKCOL /missing` is 404 and `FOO /missing` stays 501. Declaring is configuration
+only: it must happen before `start()`, repeated calls add to the set, each method
+must be a token (`IllegalArgumentException` otherwise; `CONNECT` is refused because
+it is always 501), and a declared method is not advertised anywhere, so it never
+appears in `Allow` or in the `OPTIONS *` list, and a request for it on a routed path
+is 405 as before. Matching is case-sensitive: declaring `MKCOL` does not recognize
+`mkcol`.
 
 The 501 is a runtime error: over HTTP it keeps a keep-alive connection open, and its
 problem body does not repeat the method.

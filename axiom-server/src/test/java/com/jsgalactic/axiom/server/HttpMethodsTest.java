@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.Body;
@@ -160,6 +161,49 @@ class HttpMethodsTest {
             app.options("/*any", ctx -> ctx.automaticOptions());
             app.start();
             assertThat(app.handle(new Request("OPTIONS", "*")).headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
+        }
+    }
+
+    @Test
+    void declaredMethodsAreRecognizedAndAnswer404InsteadOf501OnUnroutedPaths() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/dav", ctx -> "dav");
+            app.recognizeMethods("PROPFIND", "get").recognizeMethods("MKCOL", "GET");
+            app.start();
+            for (var method : java.util.List.of("PROPFIND", "get", "MKCOL", "GET")) {
+                assertThat(app.handle(new Request(method, "/missing")).status()).as(method).isEqualTo(404);
+            }
+            // Declaring changes nothing else: an undeclared method is still 501 when unrouted.
+            assertThat(app.handle(new Request("FOO", "/missing")).status()).isEqualTo(501);
+            assertThat(app.handle(new Request("Propfind", "/missing")).status()).isEqualTo(501);
+            // A routed path is 405 for any method without a matching template, declared or not,
+            // and a declared method is not advertised in Allow.
+            var mismatch = app.handle(new Request("PROPFIND", "/dav"));
+            assertThat(mismatch.status()).isEqualTo(405);
+            assertThat(mismatch.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
+            assertThat(app.handle(new Request("OPTIONS", "*")).headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
+        }
+    }
+
+    @Test
+    void declaringMethodsValidatesTokensAndEndsWithConfiguration() throws Exception {
+        try (var app = Axiom.create()) {
+            assertThatIllegalArgumentException().isThrownBy(() -> app.recognizeMethods("G T"))
+                    .withMessageStartingWith("Invalid HTTP method");
+            assertThatIllegalArgumentException().isThrownBy(() -> app.recognizeMethods(""));
+            assertThatIllegalArgumentException().isThrownBy(() -> app.recognizeMethods("CONNECT"));
+            assertThatIllegalArgumentException().isThrownBy(() -> app.recognizeMethods("FOO", "G T"));
+            assertThatThrownBy(() -> app.recognizeMethods((String[]) null)).isInstanceOf(NullPointerException.class);
+            assertThatThrownBy(() -> app.recognizeMethods((String) null)).isInstanceOf(NullPointerException.class);
+            // A rejected call declares nothing, not even the valid methods before the bad one.
+            app.start();
+            assertThat(app.handle(new Request("FOO", "/missing")).status()).isEqualTo(501);
+            assertThatThrownBy(() -> app.recognizeMethods("FOO")).isInstanceOf(IllegalStateException.class);
+        }
+        try (var app = Axiom.create()) {
+            app.recognizeMethods();
+            app.start();
+            assertThat(app.handle(new Request("FOO", "/missing")).status()).isEqualTo(501);
         }
     }
 

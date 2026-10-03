@@ -26,16 +26,25 @@ final class CompiledRouter {
     private static final Set<String> STANDARD_METHODS =
             Set.of("GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH");
 
-    private CompiledRouter(Node root, Map<String, Node> exactPaths, Set<String> methods) {
+    private CompiledRouter(Node root, Map<String, Node> exactPaths, Set<String> methods, Set<String> declared) {
         this.root = root;
         this.exactPaths = Map.copyOf(exactPaths);
         this.serverAllow = String.join(", ", methods);
         var known = new HashSet<>(STANDARD_METHODS);
         known.addAll(methods);
+        known.addAll(declared);
         this.recognized = Set.copyOf(known);
     }
 
     static CompiledRouter compile(Map<Route, Handler> registrations) {
+        return compile(registrations, Set.of());
+    }
+
+    /**
+     * Compiles the table. {@code declared} lists methods the application recognizes although no
+     * route has them, so they get 404 rather than 501 on an unrouted path.
+     */
+    static CompiledRouter compile(Map<Route, Handler> registrations, Set<String> declared) {
         var nodes = new ArrayList<Builder>();
         var root = new Builder(nodes);
         var exact = new HashMap<String, Builder>();
@@ -86,7 +95,7 @@ final class CompiledRouter {
         registrations.keySet().forEach(route -> everyMethod.add(route.method()));
         if (everyMethod.contains("GET")) { everyMethod.add("HEAD"); }
         everyMethod.add("OPTIONS");
-        return new CompiledRouter(root.frozen, exactPaths, everyMethod);
+        return new CompiledRouter(root.frozen, exactPaths, everyMethod, declared);
     }
 
     /**
@@ -174,8 +183,8 @@ final class CompiledRouter {
     }
 
     /**
-     * Whether the method is one this application knows: an RFC 9110 or PATCH method, or a method
-     * registered on any route. Matching is case-sensitive, so {@code get} is not recognized unless
+     * Whether the method is one this application knows: an RFC 9110 or PATCH method, a method
+     * registered on any route, or a declared one. Matching is case-sensitive, so {@code get} is not recognized unless
      * it is registered.
      */
     boolean recognizes(String method) { return recognized.contains(method); }
