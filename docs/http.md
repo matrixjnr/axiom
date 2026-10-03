@@ -52,8 +52,10 @@ requests finish and are answered with `Connection: close`, waiting requests get 
 left is interrupted after the grace period. The wait is bounded by the longest `shutdownGrace` of
 the application's listeners plus five seconds, so a handler that ignores interruption cannot keep the
 JVM from exiting. Closing makes the application not `RUNNING`, so a `Health` readiness probe
-reports DOWN from then on; if a load balancer needs time to notice, call `health.beginDrain()` and
-wait before the JVM exits (see [observability](observability.md#health-and-readiness)). The grace
+reports DOWN from then on. If a load balancer needs time to notice, use
+`closeOnJvmShutdown(Duration drainDelay)`: the hook first runs the drain actions (a `Health` registers
+`beginDrain()` itself, so readiness turns DOWN), waits the delay, and only then closes (see
+[observability](observability.md#health-and-readiness)). The grace
 period must fit inside the platform's own kill timeout (Kubernetes
 `terminationGracePeriodSeconds`, 30 seconds by default). Calling it twice registers one hook,
 an explicit `app.close()` unregisters it, and it throws `IllegalStateException` on a closed

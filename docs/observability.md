@@ -135,31 +135,50 @@ visible and can be alerted on. Reads are not an atomic snapshot across series.
 ## Health and readiness
 
 ```java
+var app = Axiom.create().closeOnJvmShutdown(Duration.ofSeconds(10)); // drain delay, see below
 var health = Health.builder(app)
+        .startup("warm-up", () -> cache.isWarm(), Duration.ofSeconds(5))
         .liveness("event-loop", () -> true)
         .readiness("database", () -> pool.isValid(1))
         .timeout(Duration.ofSeconds(2))
+        .cacheFor(Duration.ofSeconds(5))
         .build();
 health.register(app, security.hasRole("ops"));
-// on shutdown, before app.close():
-health.beginDrain();
 ```
 
-Liveness answers "restart me?" and should rarely have checks; readiness answers "send me
-traffic?". `register` adds `GET /health/live` and `GET /health/ready` (under a group's prefix
-when given one), each answering `{"status":"UP","checks":{"database":"UP"}}` with 200, or
-`{"status":"DOWN",...}` with 503 and `Cache-Control: no-store`. Check names are restricted to
-letters, digits and `_.-`, and failure reasons are logged, never sent.
+Startup answers "has it finished starting?", liveness "restart me?" (and should rarely have checks) and
+readiness "send me traffic?". `register` adds `GET /health/startup`, `GET /health/live` and
+`GET /health/ready` (under a group's prefix when given one), each answering
+`{"status":"UP","checks":{"database":"UP"}}` with 200, or `{"status":"DOWN",...}` with 503 and
+`Cache-Control: no-store`. Check names are restricted to letters, digits and `_.-`, and failure reasons
+are logged, never sent.
 
 - A check is `boolean isHealthy() throws Exception`; `false`, an exception and a timeout all mean
-  DOWN. Checks of one probe run concurrently on virtual threads and share the probe timeout
-  (default 2 s, at most 30 s); on timeout the thread is interrupted.
+  DOWN. Checks of one probe run concurrently on virtual threads and each is bounded by the probe
+  timeout (default 2 s, at most 30 s) or by its own: `readiness(name, check, Duration)`, and likewise
+  for `liveness` and `startup`. On timeout the thread is interrupted.
 - A check that ignores interruption and is still running is not started again by the next
   probe; it reports DOWN until it returns, so slow dependencies cannot accumulate threads.
-- Readiness is DOWN, without running checks, once `beginDrain()` was called or the application
-  is no longer `RUNNING`. Closing a listener already makes the listener refuse new requests; call
-  `beginDrain()` first (for example in a shutdown hook) and give the balancer time to notice, then
-  close. The flag cannot be reset.
+- **Startup.** The startup probe is DOWN until the application is running and every startup check
+  passes, then UP for good: later probes answer UP without running the checks, so an expensive
+  warm-up check costs nothing afterwards. Point an orchestrator's startup probe (Kubernetes
+  `startupProbe`) at it so liveness and readiness probes are held back until it succeeds.
+- **Caching.** `cacheFor(Duration)` (zero by default, at most one minute) keeps each check's result,
+  healthy or not, so a frequently polled expensive check runs at most once per interval however many
+  probers ask. A check that was skipped because an earlier run is still going is not kept, and
+  neither is anything while draining or when the application is not running. Cached results delay
+  the report of a change by up to the interval, so keep it well under the prober's period times
+  its failure threshold.
+- **Draining.** Readiness is DOWN, without running checks, once `beginDrain()` was called or the
+  application is no longer `RUNNING`; the flag cannot be reset. Building a `Health` registers
+  `beginDrain()` with the application (`Application.onDrain`), so with
+  `app.closeOnJvmShutdown(Duration drainDelay)` a `SIGTERM` or normal JVM exit first turns
+  readiness DOWN, waits the drain delay for the balancer to notice, and only then closes the
+  application and its listeners (which still get their own shutdown grace period). Size the delay
+  to your balancer's probe period times its failure threshold, and keep delay plus grace under the
+  container's termination grace period (`terminationGracePeriodSeconds`). Without
+  `closeOnJvmShutdown`, or when closing from your own code, call `beginDrain()` yourself and wait
+  before `close()`; closing a single listener does not drain the application's other listeners.
 
 ## Trace context
 
@@ -178,6 +197,5 @@ as a metric tag. The framework request ID (`ctx.execution().requestId()`, sent a
 - `tracestate` is not parsed or propagated, and incoming `traceparent` is not copied into
   responses or log records automatically.
 - There is no JMX, StatsD or OTLP exporter.
-- Health checks have no result caching, and there is no startup probe.
 
 These are tracked in the limitations index, [#13](https://github.com/matrixjnr/axiom/issues/13).

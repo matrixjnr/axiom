@@ -85,6 +85,18 @@ final class DefaultApplication implements Application {
         void remove(Thread hook);
     }
 
+    /** How the shutdown hook waits for balancers to notice the drain; a seam so tests need not wait. */
+    interface DrainPause {
+        void pause(Duration delay) throws InterruptedException;
+    }
+
+    private final List<Runnable> drainActions = new ArrayList<>();
+    private Duration drainDelay = Duration.ZERO;
+    private DrainPause drainPause = delay -> Thread.sleep(delay);
+
+    /** Replaces the wait of the shutdown hook; for tests. */
+    void drainPause(DrainPause pause) { this.drainPause = Objects.requireNonNull(pause, "pause"); }
+
     /** Time added to the longest grace period for the stop of executors and event loops. */
     static final Duration SHUTDOWN_HOOK_MARGIN = Duration.ofSeconds(5);
     private final Duration hookMargin;
@@ -135,10 +147,28 @@ final class DefaultApplication implements Application {
     }
 
     @Override
-    public Application closeOnJvmShutdown() {
+    public Application closeOnJvmShutdown() { return closeOnJvmShutdown(Duration.ZERO); }
+
+    @Override
+    public Application onDrain(Runnable action) {
+        Objects.requireNonNull(action, "action");
+        synchronized (this) {
+            if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+            drainActions.add(action);
+        }
+        return this;
+    }
+
+    @Override
+    public Application closeOnJvmShutdown(Duration drainDelay) {
+        Objects.requireNonNull(drainDelay, "drainDelay");
+        if (drainDelay.isNegative() || drainDelay.compareTo(Duration.ofHours(1)) > 0) {
+            throw new IllegalArgumentException("drainDelay must be from zero to one hour");
+        }
         synchronized (this) {
             if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
             if (shutdownHook != null) { return this; }
+            this.drainDelay = drainDelay;
             var hook = new Thread(this::shutdownFromJvm, "axiom-shutdown");
             hooks.add(hook); // IllegalStateException when the JVM is already shutting down
             shutdownHook = hook;
@@ -148,6 +178,20 @@ final class DefaultApplication implements Application {
 
     /** The shutdown hook: closes the application, then waits for its listeners, within a bound. */
     private void shutdownFromJvm() {
+        List<Runnable> drains;
+        Duration pause;
+        synchronized (this) {
+            drains = List.copyOf(drainActions);
+            pause = drainDelay;
+        }
+        for (var drain : drains) {
+            try { drain.run(); }
+            catch (RuntimeException failure) { LOG.log(System.Logger.Level.WARNING, "A drain action failed", failure); }
+        }
+        if (!pause.isZero()) {
+            try { drainPause.pause(pause); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
         List<Server> owned;
         Duration wait;
         synchronized (this) {
@@ -697,6 +741,7 @@ final class DefaultApplication implements Application {
             shutdownHook = null;
             runtime = runtime == null ? snapshot(null, null, ErrorHandlers.NONE, Codecs.of(List.of())) : runtime.withoutRouter();
             state = State.CLOSED;
+            drainActions.clear();
             registrations.clear();
             root.middleware.clear();
             errorHandlers.clear();

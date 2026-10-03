@@ -394,7 +394,8 @@ public interface Application extends RouteGroup, AutoCloseable {
      * handler that ignores interruption cannot keep the JVM from exiting. Because the application
      * is no longer {@link State#RUNNING} from the moment it closes, a
      * {@link com.jsgalactic.axiom.observability.Health} readiness probe reports DOWN; call
-     * {@code Health.beginDrain()} from your own hook earlier if load balancers need time to notice.
+     * {@code Health.beginDrain()} from your own hook earlier if load balancers need time to notice;
+     * {@link #closeOnJvmShutdown(Duration)} does that wait for you.
      *
      * <p>Idempotent: the hook is registered once. An explicit {@link #close()} unregisters it. The
      * hook runs alongside other shutdown hooks, in no defined order, and the JVM's logging may
@@ -404,6 +405,37 @@ public interface Application extends RouteGroup, AutoCloseable {
      * @throws IllegalStateException if the application is closed or the JVM is already shutting down
      */
     Application closeOnJvmShutdown();
+
+    /**
+     * Like {@link #closeOnJvmShutdown()}, but the hook first runs the actions registered with
+     * {@link #onDrain}, which tell the outside world that this instance is going away (a
+     * {@link com.jsgalactic.axiom.observability.Health} readiness probe turns DOWN), then waits
+     * {@code drainDelay} so that a load balancer can notice and stop sending traffic, and only then
+     * closes the application and its listeners as described above. The wait is spent in the hook
+     * thread, so choose a delay well under the container's termination grace period, which also has
+     * to cover the listeners' own shutdown grace. If this method is called twice, the first call's
+     * delay is kept.
+     *
+     * @param drainDelay time between the drain actions and the close; zero for none, at most one hour
+     * @return this application
+     * @throws IllegalArgumentException if the delay is negative or longer than one hour
+     * @throws IllegalStateException if the application is closed or the JVM is already shutting down
+     */
+    Application closeOnJvmShutdown(Duration drainDelay);
+
+    /**
+     * Registers an action that starts draining, such as {@code Health.beginDrain()} (which a
+     * {@code Health} registers on its own). It runs once, on the shutdown hook thread, at the start of
+     * the JVM shutdown hook of {@link #closeOnJvmShutdown(Duration)}, before the drain delay and
+     * before the application closes, and never when {@link #closeOnJvmShutdown()} was not used. It
+     * must be quick and must not block; an exception it throws is logged and does not stop the other
+     * actions or the shutdown. Actions run in registration order.
+     *
+     * @param action what to run
+     * @return this application
+     * @throws IllegalStateException if the application is closed
+     */
+    Application onDrain(Runnable action);
 
     /**
      * Permanently rejects new requests. Already accepted requests may finish.
