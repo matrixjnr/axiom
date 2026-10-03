@@ -179,13 +179,8 @@ public final class Response {
         return withHeader("Location", location);
     }
 
-    /**
-     * Validates a final response status.
-     *
-     * @param status final HTTP status
-     * @throws IllegalArgumentException if invalid
-     */
-    public static void validateStatus(int status) {
+    /** Validates a final response status; shared in this package with {@link HttpStatus}. */
+    static void validateStatus(int status) {
         if (status < 200 || status > 599) {
             throw new IllegalArgumentException("Expected a final HTTP status between 200 and 599: " + status);
         }

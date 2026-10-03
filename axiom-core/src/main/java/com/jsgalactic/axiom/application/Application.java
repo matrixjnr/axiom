@@ -231,6 +231,8 @@ public interface Application extends RouteGroup, AutoCloseable {
      * without invoking a handler: HTTP listeners reject a declared Content-Length before reading
      * the body and stop reading a chunked body as soon as it exceeds the limit; in-memory calls
      * and the test client check the body length. Zero rejects every non-empty body.
+     * The ceiling is deliberate: bodies are held in memory, and 64 MiB equals the default listener
+     * budget for request bodies in flight, so any permitted body fits it (see the body guide).
      * @param bytes limit from zero to 64 MiB
      * @return this application
      * @throws IllegalArgumentException for a negative limit or one above 64 MiB
@@ -370,8 +372,10 @@ public interface Application extends RouteGroup, AutoCloseable {
      * Bodies over {@link #maxRequestBody()} receive 413. Unknown paths, method mismatches and
      * {@link com.jsgalactic.axiom.error.AxiomException}s thrown by handlers or {@code Context.body} become
      * {@code application/problem+json} responses with only status, code, request ID and
-     * violations. Responses whose Content-Type has an installed codec are checked against the
-     * request's Accept header (406 when nothing matches) and non-String, non-byte[] bodies are
+     * violations. Responses of safe-method requests (GET, HEAD, OPTIONS, TRACE) whose Content-Type
+     * has an installed codec are checked against the request's Accept header (406 when nothing
+     * matches; other methods ignore Accept, so a 406 cannot follow a side effect) and
+     * non-String, non-byte[] bodies are
      * encoded by that codec. Exceptions from handlers and middleware are first offered to the
      * handlers registered with {@link #error}; a failing error handler produces the generic 500
      * problem response. Other handler exceptions propagate unchanged; this method is not a
