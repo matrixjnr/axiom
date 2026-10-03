@@ -1,3 +1,9 @@
+---
+title: Benchmarks
+parent: Operations
+nav_order: 5
+---
+
 # Benchmarks
 
 The [`benchmarks/http`](../benchmarks/http/README.md) module holds JMH 1.37

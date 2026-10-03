@@ -1,3 +1,9 @@
+---
+title: Build decisions
+parent: Operations
+nav_order: 3
+---
+
 # Build decisions
 
 Axiom uses Gradle Kotlin DSL with Java 21 toolchains and `--release 21`, without
@@ -446,28 +452,24 @@ is not published and the BOM does not constrain it.
 The site (see [the site guide](site.md)) is generated from `README.md` and `docs/*.md` plus an
 aggregated Javadoc, and published to GitHub Pages by `.github/workflows/docs.yml`.
 
-**Generator choice.** The generator is a small converter written in Kotlin in `build-logic`
-(`MarkdownHtml`, `DocsSite`) with a page template and one stylesheet, and no dependency at all.
-The options weighed were a Markdown library on the build-logic classpath, a static-site tool run
-in CI, and this. A library adds a published artifact (plus its transitive ones) to every
-build, needs checksums and verification metadata kept up to date, and has a release cadence to
-follow. A static-site tool adds an installed runtime and, for Python tools, a pinned and hashed
-requirements file with its own update path, and it still needs a converter for GitHub-style
-anchors and relative links. Our documents use a small, regular subset of Markdown (headings,
-lists, fenced code, tables, links, emphasis), which a few hundred lines convert exactly; the
-subset and its exclusions are listed in the site guide, and raw HTML is escaped rather than
-passed through, so a document can never inject markup. The conversion has unit tests in
-`build-logic`, and the real documents are converted and link-checked by `check`, so a construct
-the converter mishandles shows up as a broken link or in review of the preview artifact. The
-supply-chain surface is therefore the repository's own source, the JDK and Gradle that already
-build everything else; the Javadoc tool is the JDK's. The Pages workflow adds only three more
-official actions, pinned to commit SHAs like the others.
+**Generator choice.** The site is built by Jekyll with the `just-the-docs` theme, which provides
+the navigation tree, search, colour schemes, callouts, code copy buttons and a mobile layout that
+a hand-written converter would have to reimplement. It replaced a small Kotlin Markdown converter,
+which is gone from `build-logic`. Jekyll runs outside Gradle, from Ruby gems pinned in
+`site/Gemfile.lock` with the SHA-256 of every gem file and installed frozen by `ruby/setup-ruby`;
+the site guide explains why this was chosen over `actions/jekyll-build-pages` with a remote
+theme (no unpinned or unverified fetch at build time, no CDN assets, the search index is built
+locally). Gradle prepares the Jekyll source (`jekyllSource`) so the Markdown stays the only copy,
+and builds the Javadoc, which is copied into the finished site. The supply-chain surface added is
+the lock file's gems, reviewed as a diff when they change, and one more action pinned to a commit
+SHA.
 
-**Link checking.** `checkDocsLinks` is part of `check` and `checkSiteLinks` runs in `docsSite`.
-They read the generated HTML and fail on a missing target file, a missing `#anchor`, a duplicate
-id or a site-absolute (`/...`) path, which would break under the `/axiom/` project path. Links
-from documents to other repository files are rewritten to GitHub and must exist. External URLs
-are not fetched, so the build stays offline and deterministic.
+**Link checking.** `checkDocsLinks` is part of `check`. It reads the Markdown and fails on a link
+to a missing page or file, a missing `#anchor` (GitHub's heading ids), a site-absolute path, or a
+page without the front matter the menu needs, without needing Ruby. `checkSiteLinks` runs in CI on
+the built site and checks every page's links and anchors, the theme assets and the links into
+`api/`. Links from documents to other repository files are rewritten to GitHub and must exist.
+External URLs are not fetched, so the build stays offline and deterministic.
 
 **Javadoc.** `aggregateJavadoc` documents the main sources of every module that applies
 `maven-publish` (the same set `checkPublicationCoverage` uses), excluding `internal` packages.

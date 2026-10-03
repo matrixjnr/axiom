@@ -1,5 +1,6 @@
-// Applied to the root project: builds the documentation site (docs/site.md) into build/site from
-// README.md, docs/*.md and the aggregated Javadoc of the published modules, and checks its links.
+// Applied to the root project: the inputs of the documentation site (docs/site.md): the Jekyll source
+// assembled from README.md, docs/*.md and site/, the aggregated Javadoc of the published modules,
+// and the link checks. Jekyll itself runs outside Gradle (Ruby, pinned by site/Gemfile.lock).
 import java.util.concurrent.Callable
 
 plugins {
@@ -7,39 +8,19 @@ plugins {
     `jvm-toolchains`
 }
 
-// `Group/file` entries in display order. The label is each document's own title. A document that
-// does not exist is skipped, so a page can be listed before it lands; a document that is not
-// listed still gets a page, under "More".
-val siteNavigation = listOf(
-    "Guide/programming-model.md",
-    "Guide/routing.md",
-    "Guide/middleware.md",
-    "Guide/bodies.md",
-    "Guide/validation.md",
-    "Guide/errors.md",
-    "Guide/streaming.md",
-    "Guide/openapi.md",
-    "Security and transport/security.md",
-    "Security and transport/tls.md",
-    "Security and transport/http.md",
-    "Operations/observability.md",
-    "Operations/admission.md",
-    "Operations/execution.md",
-    "Project/build.md",
-    "Project/releasing.md",
-    "Project/benchmarks.md",
-    "Project/site.md",
-)
+val repositoryUrl = "https://github.com/matrixjnr/axiom"
+val markdownSources = files(layout.projectDirectory.file("README.md"), fileTree("docs") { include("*.md", "CNAME") })
 
-val docsPages = tasks.register<BuildDocsSite>("docsPages") {
+val jekyllSource = tasks.register<PrepareJekyllSource>("jekyllSource") {
     group = "documentation"
-    description = "Converts README.md and docs/*.md to the HTML pages of the site (build/docs-pages)."
+    description = "Assembles the Jekyll source of the site from site/, README.md and docs/*.md (build/jekyll)."
     root = layout.projectDirectory
-    markdown.from(layout.projectDirectory.file("README.md"), fileTree("docs") { include("*.md", "CNAME") })
-    navigation = siteNavigation
-    repository = "https://github.com/matrixjnr/axiom"
+    sourceFiles.from(markdownSources, fileTree("site"), fileTree("branding"))
+    repository = repositoryUrl
     branch = "main"
-    outputDir = layout.buildDirectory.dir("docs-pages")
+    version = project.version.toString()
+    commit = providers.environmentVariable("GITHUB_SHA")
+    outputDir = layout.buildDirectory.dir("jekyll")
 }
 
 fun publishedModules() = subprojects.filter {
@@ -84,33 +65,23 @@ val aggregateJavadoc = tasks.register<Javadoc>("aggregateJavadoc") {
     }
 }
 
-val assembleSite = tasks.register<Sync>("assembleSite") {
-    group = "documentation"
-    description = "Collects the pages and the aggregated Javadoc in build/site."
-    from(docsPages)
-    from(aggregateJavadoc) { into("api") }
-    into(layout.buildDirectory.dir("site"))
-}
-
-// Fast and Javadoc-free, so it is part of `check`: pages only; links into api/ are accepted.
-val checkDocsLinks = tasks.register<CheckSiteLinks>("checkDocsLinks") {
+// Fast and Javadoc-free, so it is part of `check`: the Markdown sources only.
+val checkDocsLinks = tasks.register<CheckDocsLinks>("checkDocsLinks") {
     group = "verification"
-    description = "Fails when a documentation page links to a missing page, file or anchor."
-    siteDir = docsPages.flatMap { it.outputDir }
-    verifyApi = false
+    description = "Fails when a document links to a missing page, file or anchor, or lacks site front matter."
+    root = layout.projectDirectory
+    markdown.from(markdownSources)
+    repository = repositoryUrl
+    branch = "main"
 }
 tasks.named("check") { dependsOn(checkDocsLinks) }
 
-val checkSiteLinks = tasks.register<CheckSiteLinks>("checkSiteLinks") {
+// Runs after Jekyll has built the site and the Javadoc is in api/ (see docs/site.md and the Docs
+// workflow); it is not part of `check` because it needs Ruby.
+tasks.register<CheckSiteLinks>("checkSiteLinks") {
     group = "verification"
-    description = "Fails when the assembled site (pages and Javadoc) has a broken link or anchor."
+    description = "Fails when the built site (build/site, Jekyll output plus api/) has a broken link or anchor."
     siteDir = layout.buildDirectory.dir("site")
-    verifyApi = true
-    dependsOn(assembleSite)
-}
-
-tasks.register("docsSite") {
-    group = "documentation"
-    description = "Builds the documentation site into build/site and checks its links."
-    dependsOn(checkSiteLinks)
+    siteUrl = "https://matrixjnr.github.io/axiom"
+    baseUrl = "/axiom"
 }
