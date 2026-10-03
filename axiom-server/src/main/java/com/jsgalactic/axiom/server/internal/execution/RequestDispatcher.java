@@ -201,7 +201,7 @@ public final class RequestDispatcher implements AutoCloseable {
                     try { schedule(task, Math.min(task.queueBudget, context.remainingTime().toNanos())); }
                     catch (RuntimeException | Error failure) {
                         finish(task, null, failure instanceof RejectedExecutionException
-                        ? new DispatchRejectedException(failure) : failure, false, signals);
+                                ? new DispatchRejectedException(failure) : failure, false, signals);
                         submissionFailure = failure;
                     }
                 }

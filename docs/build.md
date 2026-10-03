@@ -186,6 +186,23 @@ modules); "own tests" is the module's `jacocoTestReport`. `axiom-starter` has no
 Of the total, `test` alone covers 90.7% of lines and 81.8% of branches, `integrationTest`
 alone 68.3% and 54.6%.
 
+## Code style
+
+Checkstyle (version in `gradle/libs.versions.toml`) is applied to every Java module by the
+`axiom.java-base` convention plugin. `checkstyleMain` and `checkstyleTest` are part of each
+module's `check` and fail the build on any violation (`maxWarnings = 0`); run one module with
+`./gradlew :axiom-core:checkstyleMain :axiom-core:checkstyleTest`. The single shared ruleset is
+`config/checkstyle/checkstyle.xml`. It encodes only conventions the tree already follows: no tabs,
+trailing whitespace or star imports, a final newline, no unused or redundant imports, imports in
+one ASCII-sorted block with static imports first, 4-space indentation, lines of at most 200
+characters, standard naming, `final` classes without a visible constructor (or a hidden one for
+utility classes), required braces for multi-line statements, and Javadoc on every public type and
+method of library main sources. Tests, examples and benchmarks are exempt from the Javadoc rule,
+and the README examples from the utility-class rule, by filters inside the ruleset itself; there
+is no separate suppression file. A rule the code does not satisfy is removed or tuned rather than
+the code reformatted. The Checkstyle dependencies have checksums in
+`gradle/verification-metadata.xml` like every other tool dependency.
+
 ## README examples
 
 The README's Hello world, tasks API and `TestClient` snippet are quoted from compiled sources in
@@ -353,7 +370,7 @@ the Gradle cache of `gradle/actions/setup-gradle`:
 
 | Job | Runs | Timeout |
 | --- | --- | --- |
-| `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
+| `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkstyleMain` and `checkstyleTest` of every module, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
 | `matrix` | `./gradlew -q unitTestMatrix`: prints the modules that have unit tests as the `unit` job's matrix | 10 min |
 | `unit` | `./gradlew <module>:test -Daxiom.requireAllocationTests=true`, one job per module listed by `matrix`; uploads the module's test report on failure | 20 min |
 | `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure | 30 min |

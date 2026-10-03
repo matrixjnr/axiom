@@ -133,9 +133,8 @@ In the repository, open Settings, Pages, and set Source to "GitHub Actions". Unt
 deploy job fails at `configure-pages`; pull request builds are not affected. After the first
 successful deploy the site is at `https://matrixjnr.github.io/axiom/`.
 
-After the first successful deploy, the owner can add the site to the README, for example
-`[Documentation](https://matrixjnr.github.io/axiom/)`. The link is not in the README yet so that
-it never points at a page that does not exist.
+The README links to the site. If the address changes (for example a custom domain), update the link
+and badge at the top of `README.md`.
 
 ### Custom domain (repository owner, optional)
 

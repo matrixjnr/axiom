@@ -3,17 +3,17 @@ package com.jsgalactic.axiom.http.internal;
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.HttpStatus;
-import com.jsgalactic.axiom.internal.OwnedBodies;
-import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
-import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
-import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
-import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
+import com.jsgalactic.axiom.internal.OwnedBodies;
+import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.server.internal.Problems;
 import com.jsgalactic.axiom.server.internal.ResponseSerialization;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
+import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
+import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
+import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -25,11 +25,11 @@ import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpUtil;
-import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.codec.http.TooLongHttpHeaderException;
@@ -40,8 +40,6 @@ import io.netty.util.ReferenceCounted;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.time.Duration;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Date;
@@ -52,6 +50,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 /** All mutable connection state belongs to the channel's event loop. */
@@ -467,14 +467,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
             active = executor.submit(route.<Object>map(value -> value).orElse(UNMATCHED),
                     policy, exchange.execution(), () -> {
-                try {
-                    var response = application.handle(exchange.request(), exchange.execution());
-                    return response.isStreaming() ? stream(ctx, exchange, response) : prepare(response, exchange);
-                } catch (Exception | Error failure) {
-                    logFailure(exchange, failure);
-                    throw failure;
-                }
-            }, WireResponse::status);
+                        try {
+                            var response = application.handle(exchange.request(), exchange.execution());
+                            return response.isStreaming() ? stream(ctx, exchange, response) : prepare(response, exchange);
+                        } catch (Exception | Error failure) {
+                            logFailure(exchange, failure);
+                            throw failure;
+                        }
+                    }, WireResponse::status);
             active.result().whenComplete((response, thrown) -> {
                 // The outcome is final: the request body no longer counts against the listener.
                 exchange.release();

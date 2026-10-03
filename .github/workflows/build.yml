@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # Compilation (main, test and benchmark sources), jars, Javadoc and every check task except the
-  # tests: architectureTest, checkPublicationCoverage, checkIntegrationTags. Dependency
+  # tests: architectureTest, checkstyleMain, checkstyleTest, checkPublicationCoverage, checkIntegrationTags. Dependency
   # verification applies to every configuration resolved here.
   build:
     runs-on: ubuntu-latest
