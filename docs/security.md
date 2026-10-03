@@ -331,7 +331,7 @@ app.use(Cors.builder()
         .allowOrigin("https://app.example.com")
         .allowMethods("GET", "POST", "DELETE")      // default: GET, HEAD
         .allowHeaders("Content-Type", "Authorization")
-        .exposeHeaders("X-Request-ID")
+        .exposeHeaders("X-Request-ID")              // a non-secret correlation value, safe to expose
         .allowCredentials()
         .maxAge(Duration.ofMinutes(10))             // default; 0 omits the header
         .build());
