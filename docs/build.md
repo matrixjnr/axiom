@@ -83,9 +83,12 @@ Tests are split into two Gradle tasks per module, both part of `check`:
   `axiom.integration-test` convention: `axiom-http`, `integration-tests` and
   `examples/rest-api`. It runs from the same test source set and classpath as `test`.
 
-The tag is set per class, so a class with both embedded-channel and live-listener cases
-(`HttpLingerTest`, `HttpPipelineErrorTest`, `NettyServerTest`) runs entirely in
-`integrationTest`. The `integration-tests` module is integration as a whole: its
+The tag is set per class, so a class that mixes embedded-channel and live-listener cases cannot
+be split by tag. Such classes are kept in two: `HttpLingerTest` and `HttpPipelineErrorTest` hold the
+embedded cases and run in `test`; `HttpLingerLiveTest` and `HttpPipelineErrorLiveTest` hold the
+cases that bind a listener and connect a raw socket and run in `integrationTest`. `NettyServerTest`
+stays whole in `integrationTest`: every one of its cases binds a real listener (it only feeds
+embedded channels to it). The `integration-tests` module is integration as a whole: its
 `integrationTest` runs every class there, including the `TestClient` half of the JSON
 contract, and its `test` task is disabled. A module whose tests carry the tag without
 applying `axiom.integration-test` fails `check` (`checkIntegrationTags`) instead of
@@ -95,20 +98,27 @@ The root project has two aggregates: `./gradlew unitTest` runs every module's `t
 `./gradlew integrationTest` runs every module's `integrationTest`. A single module runs as
 `./gradlew :axiom-http:test` or `./gradlew :axiom-http:integrationTest`.
 
-Split when it was introduced (classes / tests):
+Test classes / tests per task (counted from the JUnit reports of `./gradlew clean check` after the
+mixed HTTP classes were split; the split moved 49 embedded cases from `integrationTest` to `test` and lost none: axiom-http
+ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 tests both times):
 
 | Module | `test` | `integrationTest` |
 | --- | --- | --- |
-| axiom-core | 13 / 187 | - |
-| axiom-server | 16 / 213 | - |
-| axiom-http | 2 / 27 | 11 / 176 |
+| axiom-core | 15 / 224 | - |
+| axiom-server | 25 / 276 | - |
+| axiom-http | 5 / 80 | 12 / 144 |
 | axiom-json | 2 / 66 | - |
-| axiom-test | 7 / 24 | - |
-| axiom-validation | 5 / 35 | - |
+| axiom-test | 12 / 46 | - |
+| axiom-validation | 6 / 37 | - |
 | axiom-validation-jakarta | 3 / 16 | - |
-| integration-tests | disabled | 2 / 62 |
-| examples/rest-api | 0 / 0 | 1 / 3 |
-| total | 48 / 568 | 14 / 241 |
+| axiom-security | 3 / 48 | - |
+| axiom-security-jwt | 2 / 27 | - |
+| axiom-metrics | 2 / 11 | - |
+| integration-tests | disabled | 5 / 66 |
+| examples/rest-api | 0 / 0 | 1 / 4 |
+| total | 75 / 831 | 18 / 214 |
+
+`build-logic` has its own `test` task (2 / 20) that the root `check` runs through the included build.
 
 ## Coverage
 
