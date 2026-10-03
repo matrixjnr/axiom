@@ -65,6 +65,12 @@ fails the build and names the module and the file to update. To see it fire, rem
 a `api(project(...))` line from `axiom-bom/build.gradle.kts` or a module from the map
 and run `./gradlew checkPublicationCoverage`.
 
+The checks themselves have JUnit tests in `build-logic/src/test/kotlin` (`./gradlew
+:build-logic:test`), and the root `check` runs them through the included build's `check`. They
+cover the pure `problems()` function (agreement, a missing BOM entry, a missing boundary entry, a
+module present in only one set, the test-only exemption) and `CheckModuleBoundaries.verify` (allowed,
+forbidden, unlisted and test-only dependencies, and the external-dependency confinement rules).
+
 ## Unit and integration tests
 
 Tests are split into two Gradle tasks per module, both part of `check`:
@@ -77,9 +83,12 @@ Tests are split into two Gradle tasks per module, both part of `check`:
   `axiom.integration-test` convention: `axiom-http`, `integration-tests` and
   `examples/rest-api`. It runs from the same test source set and classpath as `test`.
 
-The tag is set per class, so a class with both embedded-channel and live-listener cases
-(`HttpLingerTest`, `HttpPipelineErrorTest`, `NettyServerTest`) runs entirely in
-`integrationTest`. The `integration-tests` module is integration as a whole: its
+The tag is set per class, so a class that mixes embedded-channel and live-listener cases cannot
+be split by tag. Such classes are kept in two: `HttpLingerTest` and `HttpPipelineErrorTest` hold the
+embedded cases and run in `test`; `HttpLingerLiveTest` and `HttpPipelineErrorLiveTest` hold the
+cases that bind a listener and connect a raw socket and run in `integrationTest`. `NettyServerTest`
+stays whole in `integrationTest`: every one of its cases binds a real listener (it only feeds
+embedded channels to it). The `integration-tests` module is integration as a whole: its
 `integrationTest` runs every class there, including the `TestClient` half of the JSON
 contract, and its `test` task is disabled. A module whose tests carry the tag without
 applying `axiom.integration-test` fails `check` (`checkIntegrationTags`) instead of
@@ -89,20 +98,27 @@ The root project has two aggregates: `./gradlew unitTest` runs every module's `t
 `./gradlew integrationTest` runs every module's `integrationTest`. A single module runs as
 `./gradlew :axiom-http:test` or `./gradlew :axiom-http:integrationTest`.
 
-Split when it was introduced (classes / tests):
+Test classes / tests per task (counted from the JUnit reports of `./gradlew clean check` after the
+mixed HTTP classes were split; the split moved 49 embedded cases from `integrationTest` to `test` and lost none: axiom-http
+ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 tests both times):
 
 | Module | `test` | `integrationTest` |
 | --- | --- | --- |
-| axiom-core | 13 / 187 | - |
-| axiom-server | 16 / 213 | - |
-| axiom-http | 2 / 27 | 11 / 176 |
+| axiom-core | 15 / 224 | - |
+| axiom-server | 25 / 276 | - |
+| axiom-http | 5 / 80 | 12 / 144 |
 | axiom-json | 2 / 66 | - |
-| axiom-test | 7 / 24 | - |
-| axiom-validation | 5 / 35 | - |
+| axiom-test | 12 / 46 | - |
+| axiom-validation | 6 / 37 | - |
 | axiom-validation-jakarta | 3 / 16 | - |
-| integration-tests | disabled | 2 / 62 |
-| examples/rest-api | 0 / 0 | 1 / 3 |
-| total | 48 / 568 | 14 / 241 |
+| axiom-security | 3 / 48 | - |
+| axiom-security-jwt | 2 / 27 | - |
+| axiom-metrics | 2 / 11 | - |
+| integration-tests | disabled | 5 / 66 |
+| examples/rest-api | 0 / 0 | 1 / 4 |
+| total | 75 / 831 | 18 / 214 |
+
+`build-logic` has its own `test` task (2 / 20) that the root `check` runs through the included build.
 
 ## Coverage
 
@@ -294,17 +310,20 @@ the Gradle cache of `gradle/actions/setup-gradle`:
 | Job | Runs | Timeout |
 | --- | --- | --- |
 | `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
-| `unit` | `./gradlew :<module>:test -Daxiom.requireAllocationTests=true`, a matrix over the nine library modules with tests; uploads the module's test report on failure | 20 min |
+| `matrix` | `./gradlew -q unitTestMatrix`: prints the modules that have unit tests as the `unit` job's matrix | 10 min |
+| `unit` | `./gradlew <module>:test -Daxiom.requireAllocationTests=true`, one job per module listed by `matrix`; uploads the module's test report on failure | 20 min |
 | `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure | 30 min |
 | `quality` | `./gradlew coverageReport`, uploads `build/reports/jacoco/coverageReport/` (XML and HTML) as the `coverage-report` artifact, then the hello smoke run `./gradlew :examples:hello:run --args=--smoke` | 30 min |
-| `check` | needs the four jobs above and fails unless each succeeded (it runs even when one failed or was cancelled) | 5 min |
+| `check` | needs `build`, `matrix`, `unit`, `integration` and `quality` and fails unless each succeeded (it runs even when one failed or was cancelled) | 5 min |
 | `commits` | pull requests only: `./gradlew clean check` on each commit (below) | 90 min |
 
 Branch protection requires the status check named `check`; the aggregate job keeps that
 name, so the required check stays valid. `commits` is not part of `check`, as before. The
-`unit` matrix lists modules by name: a new module with tests must be added to it, while
-`integration` picks up every `integrationTest` task through the root aggregate. The
-workflow graph is only verifiable on GitHub. The scheduled Compatibility workflow and the
+`unit` matrix is generated by the root `unitTestMatrix` task (modules whose `test` task is
+enabled and that have a test class not tagged `integration`), so a new module with tests is
+picked up automatically; `integration` likewise picks up every `integrationTest` task through
+the root aggregate. If the matrix job fails or prints nothing, `unit` does not run and `check`
+fails. The workflow graph is only verifiable on GitHub. The scheduled Compatibility workflow and the
 tag-triggered release workflow are separate.
 
 ## Every commit builds

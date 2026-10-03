@@ -6,6 +6,9 @@ plugins {
 
 val modules = subprojects.filter { it.buildFile.isFile }
 tasks.named("check") { dependsOn(modules.map { "${it.path}:check" }) }
+// The convention checks themselves (publication coverage, module boundaries) have unit tests in
+// build-logic; an included build's own check is not run by the root check unless wired here.
+tasks.named("check") { dependsOn(gradle.includedBuild("build-logic").task(":check")) }
 tasks.named("assemble") { dependsOn(modules.map { "${it.path}:assemble" }) }
 
 // Test split (see docs/build.md): `unitTest` runs every module's `test` (no real sockets),
@@ -23,6 +26,29 @@ tasks.register("integrationTest") {
     group = "verification"
     description = "Runs the integration tests (each module's integrationTest task) of all modules."
     dependsOn(testTasks("integrationTest"))
+}
+
+// The CI unit-test matrix is generated from this task, so a module with unit tests cannot be left
+// out of CI: `./gradlew -q unitTestMatrix` prints {"include":[{"module":..,"path":..},..]} for every
+// module whose `test` task is enabled and has at least one test class not tagged integration.
+tasks.register("unitTestMatrix") {
+    group = "verification"
+    description = "Prints the GitHub Actions matrix of modules that have unit tests, as JSON."
+    val matrix = objects.property<String>()
+    // Evaluated after the modules are configured; the task output is only the printed JSON.
+    matrix.set(provider {
+        subprojects
+            .filter { "test" in it.tasks.names && it.tasks.named("test").get().enabled }
+            .filter { module ->
+                module.fileTree("src/test/java") { include("**/*.java") }.files.map { it.readText() }
+                    .any { it.contains("@Test") && !it.contains("Tag(\"integration\")") }
+            }
+            .joinToString(",", prefix = "{\"include\":[", postfix = "]}") { module ->
+                val path = module.path.removePrefix(":")
+                "{\"module\":\"${path.replace(':', '-')}\",\"path\":\":$path\",\"dir\":\"${path.replace(':', '/')}\"}"
+            }
+    })
+    doLast { println(matrix.get()) }
 }
 
 // Coverage (see docs/build.md). The aggregated report covers the library modules and the
