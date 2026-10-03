@@ -1,3 +1,9 @@
+---
+title: Admission
+parent: Operations
+nav_order: 1
+---
+
 # Admission and bounded queues
 
 Admission reserves execution capacity before creating a virtual thread. Each
