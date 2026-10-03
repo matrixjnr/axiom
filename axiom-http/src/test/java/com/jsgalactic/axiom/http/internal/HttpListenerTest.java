@@ -36,7 +36,7 @@ class HttpListenerTest {
                 wire.write("POST /users/x HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
                 var mismatch = wire.read(false);
                 assertThat(mismatch.status()).isEqualTo(405);
-                assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD");
+                assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD, OPTIONS");
             }
         }
     }

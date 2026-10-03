@@ -127,8 +127,11 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   answered with the generic 500 problem body, in memory, in `TestClient` and over
   HTTP. That 500 keeps a keep-alive connection open.
 - Router answers (404, 405, 501, automatic OPTIONS) are responses, not exceptions,
-  and are never offered; customize them with global middleware. Requests rejected
-  before routing (413, CONNECT) and listener errors are not offered either.
+  and are never offered. Customize them with `app.notFound`, `app.methodNotAllowed`
+  and `app.notImplemented` (see [customising router answers](routing.md#customising-router-answers)),
+  or with global middleware. Exceptions those handlers throw are offered like any
+  handler's. Requests rejected before routing (413, CONNECT) and listener errors are
+  not offered either.
 - A mapped failure is logged at WARNING with the request ID and the exception,
   server-side only, unless it is an `AxiomException` below 500 answered below
   500 (an expected client error). Translations by throwing an `AxiomException`
@@ -156,6 +159,7 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 | --- | --- | --- |
 | 400 | Malformed request line or headers, a method that is not a token, invalid Host, rejected path or query, an absolute-form target, `*` with a method other than OPTIONS, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked` or naming it twice, more than one Transfer-Encoding line (whatever the values, to avoid ambiguous framing) | Listener |
 | 400 | Empty body or codec failure in `ctx.body` | Runtime |
+| 400 | Query parameter or path capture that a typed accessor (`ctx.queryInt`, `queryLong`, `queryUuid`, `pathInt`, `pathLong`, `pathUuid`) cannot convert; code `invalid_query_parameter` or `invalid_path_parameter` (see [typed parameters](routing.md#typed-parameters)) | Runtime |
 | 400 | Path capture that `ctx.pathDecoded` cannot decode safely (malformed UTF-8, or a decoded separator, backslash, NUL or dot segment); code `invalid_path_encoding` | Runtime |
 | 404 | No route matches the path and the method is recognized (see [custom methods](routing.md#custom-methods)) | Runtime |
 | 405 | Route exists for other methods, including every TRACE request to a routed path; `Allow` lists them | Runtime |

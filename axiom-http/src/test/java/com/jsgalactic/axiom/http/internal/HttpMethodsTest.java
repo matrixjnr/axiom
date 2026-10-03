@@ -119,7 +119,7 @@ class HttpMethodsTest {
                 wire.write("TRACE /x HTTP/1.1\r\nHost: a\r\nCookie: session=secret\r\nAuthorization: Bearer token\r\n\r\n");
                 var trace = wire.read(false);
                 assertThat(trace.status()).isEqualTo(405);
-                assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD");
+                assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
                 assertThat(trace.headers()).containsEntry("Content-Type", "application/problem+json");
                 assertThat(trace.headers().get("Content-Type")).isNotEqualTo("message/http");
                 assertThat(trace.text()).doesNotContain("secret").doesNotContain("token").doesNotContain("TRACE");
@@ -163,7 +163,7 @@ class HttpMethodsTest {
                 wire.write("FOO /dav HTTP/1.1\r\nHost: a\r\n\r\n");
                 var mismatch = wire.read(false);
                 assertThat(mismatch.status()).isEqualTo(405);
-                assertThat(mismatch.headers()).containsEntry("Allow", "PROPFIND");
+                assertThat(mismatch.headers()).containsEntry("Allow", "OPTIONS, PROPFIND");
 
                 wire.write("PROPFIND /missing HTTP/1.1\r\nHost: a\r\n\r\n");
                 assertThat(wire.read(false).status()).isEqualTo(404);
@@ -183,6 +183,36 @@ class HttpMethodsTest {
         }
     }
 
+    @Test void customRouterAnswersKeepAllowAndTheConnection() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/x", ctx -> "x");
+            fixture.app.notFound(ctx -> ctx.text("custom 404"));
+            fixture.app.methodNotAllowed(ctx -> ctx.text("custom 405"));
+            fixture.app.notImplemented(ctx -> ctx.text("custom 501"));
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("GET /missing HTTP/1.1\r\nHost: a\r\n\r\n");
+                var missing = wire.read(false);
+                assertThat(missing.status()).isEqualTo(404);
+                assertThat(missing.text()).isEqualTo("custom 404");
+                wire.write("PUT /x HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n");
+                var mismatch = wire.read(false);
+                assertThat(mismatch.status()).isEqualTo(405);
+                assertThat(mismatch.text()).isEqualTo("custom 405");
+                assertThat(mismatch.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
+                wire.write("FOO /missing HTTP/1.1\r\nHost: a\r\n\r\n");
+                var unknown = wire.read(false);
+                assertThat(unknown.status()).isEqualTo(501);
+                assertThat(unknown.text()).isEqualTo("custom 501");
+                assertThat(unknown.headers().get("Connection")).isNotEqualToIgnoringCase("close");
+                // CONNECT is refused before routing, with the built-in problem body, and closes.
+                wire.write("CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n");
+                var connect = wire.read(false);
+                assertThat(connect.status()).isEqualTo(501);
+                assertThat(connect.text()).contains("\"code\":\"not_implemented\"");
+            }
+        }
+    }
+
     @Test void ignoresMethodOverrideHeaders() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.post("/x", ctx -> "post " + ctx.method());
@@ -195,7 +225,7 @@ class HttpMethodsTest {
                     wire.write("POST /only-delete HTTP/1.1\r\nHost: a\r\n" + header + ": DELETE\r\nContent-Length: 0\r\n\r\n");
                     var mismatch = wire.read(false);
                     assertThat(mismatch.status()).as(header).isEqualTo(405);
-                    assertThat(mismatch.headers()).as(header).containsEntry("Allow", "DELETE");
+                    assertThat(mismatch.headers()).as(header).containsEntry("Allow", "DELETE, OPTIONS");
                 }
             }
         }
@@ -255,7 +285,7 @@ class HttpMethodsTest {
                 wire.write("Get /x HTTP/1.1\r\nHost: a\r\n\r\n");
                 var mixed = wire.read(false);
                 assertThat(mixed.status()).isEqualTo(405);
-                assertThat(mixed.headers()).containsEntry("Allow", "GET, HEAD, M-SEARCH, get");
+                assertThat(mixed.headers()).containsEntry("Allow", "GET, HEAD, M-SEARCH, OPTIONS, get");
                 // A method mismatch is a runtime error: the connection stays open.
                 assertThat(wire.get("/x").status()).isEqualTo(200);
             }

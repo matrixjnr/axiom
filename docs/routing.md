@@ -42,7 +42,9 @@ Methods remain case-sensitive.
 
 When no complete match is registered for the method, the response is **405**. Its
 `Allow` header is the union of the methods registered on every template that
-matches the complete path, sorted alphabetically. An unknown path returns 404, or
+matches the complete path, plus `HEAD` wherever `GET` is and always `OPTIONS` (every
+routed path answers it, with a route or [automatically](#automatic-options)), sorted
+alphabetically: with only `POST /submit`, `PUT /submit` gets `Allow: OPTIONS, POST`. An unknown path returns 404, or
 501 for a method the application does not recognize (see
 [custom methods](#custom-methods)). All use `application/problem+json` bodies (see
 [errors](errors.md)). OPTIONS is the
@@ -63,7 +65,7 @@ body's encoded length, and the listener sends that header with no body bytes.
 
 This table is the reference for every method. "Routed" means at least one template
 matches the complete path; "Allow" is the union of the methods registered on all
-templates that match it, plus `HEAD` wherever `GET` is registered, sorted
+templates that match it, plus `HEAD` wherever `GET` is registered and `OPTIONS`, sorted
 alphabetically.
 
 | Method | Registration | Routed, a matching template has the method | Routed, no matching template has it | Not routed |
@@ -74,13 +76,13 @@ alphabetically.
 | `OPTIONS *` | Not possible (`*` is not a template) | 204, `Allow` = every registered method, `HEAD` if `GET` is registered, `OPTIONS` ([details](#options-)) | | |
 | `TRACE` | Refused: `IllegalArgumentException` ([why](#trace)) | | 405, `Allow` | 404 |
 | `CONNECT` | Refused: `IllegalArgumentException` | | 501 ([why](#connect)); the listener closes the connection | 501, likewise |
-| Extension method (`PROPFIND`, `REPORT`, `QUERY`, ...) | `route` | Handler runs | 405, `Allow` | 404 if registered on any route, else 501 ([custom methods](#custom-methods)) |
+| Extension method (`PROPFIND`, `REPORT`, `QUERY`, ...) | `route` | Handler runs | 405, `Allow` | 404 if registered on any route or declared with `recognizeMethods`, else 501 ([custom methods](#custom-methods)) |
 | Any other token, including `get` and `Get` | `route` (then it is an extension method) | | 405, `Allow` | 501 |
 | Not a token (`G(T`, `G T`, empty) | Refused: `IllegalArgumentException` | 400 from the listener, which closes the connection; `new Request` throws | | |
 
-`Allow` on a 405 lists only registered methods (and `HEAD` for `GET`); it never lists
-`TRACE` or `CONNECT`, and lists `OPTIONS` only where an OPTIONS route is registered,
-although the path also answers OPTIONS automatically. Every error in the table is an
+`Allow` on a 405 lists the registered methods, `HEAD` for `GET` and `OPTIONS` (which
+every routed path answers, RFC 9110 section 15.5.6), and is the same list the
+automatic OPTIONS answer sends. It never lists `TRACE` or `CONNECT`. Every error in the table is an
 `application/problem+json` response (see [errors](errors.md)); 400 and the listener's
 501 for CONNECT close the connection, the others keep it open. Request bodies are
 accepted and limited the same way for every method (see
@@ -113,7 +115,27 @@ alphabetically: with `GET /users` and `POST /users`, `OPTIONS /users` gets
 An explicit OPTIONS route is selected like any other method, so it wins on its own
 template and also serves paths whose more specific templates lack OPTIONS: with
 `GET /users/me` and `OPTIONS /users/:id`, `OPTIONS /users/me` runs the OPTIONS route.
-An unknown path is still 404. `resolve` returns empty for an automatic answer, so
+An unknown path is still 404.
+
+A wildcard OPTIONS route such as `/*any` (a CORS preflight handler, for example)
+serves every path, so it would hide the accurate `Allow` list of paths whose other
+templates have different methods. The precedence rule stays as it is; instead the
+route's handler returns `ctx.automaticOptions()` for the requests it does not handle
+itself:
+
+```java
+app.options("/*any", ctx -> ctx.header("Access-Control-Request-Method").isPresent()
+        ? preflight(ctx) : ctx.automaticOptions());
+```
+
+`automaticOptions()` is the same 204 answer with the same `Allow` list as above: the
+union over every template matching the path, including the OPTIONS route that is
+running, so `Allow` lists `OPTIONS` even where it is the only method. With
+`GET /users` and `POST /users` beside the wildcard, `OPTIONS /users` gets
+`Allow: GET, HEAD, OPTIONS, POST` and `OPTIONS /other` gets `Allow: OPTIONS`.
+`OPTIONS *` never reaches a route.
+
+`resolve` returns empty for an automatic answer, so
 over HTTP and through `TestClient` it is admitted in the default bucket shared with
 404 and 405 responses, under the application's default policy (see
 [admission](admission.md)); it can be refused with 503 like any request. A request
@@ -176,8 +198,9 @@ shortcut while the `QUERY` specification is not final; use
 `app.route("QUERY", path, handler)`.
 
 A method is **recognized** when it is one of the RFC 9110 methods (`GET`, `HEAD`,
-`POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`), `PATCH`, or a method
-registered on any route of the application. A request whose path matches no template
+`POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`), `PATCH`, a method
+registered on any route of the application, or a method declared with
+`app.recognizeMethods(...)`. A request whose path matches no template
 is answered 404 when its method is recognized and **501 Not Implemented** otherwise
 (RFC 9110 section 15.6.2: the server does not support the method for any resource).
 A request whose path does match is answered 405 with `Allow` whenever no matching
@@ -189,6 +212,17 @@ template has its method, recognized or not. With `PROPFIND /dav` registered:
 | `FOO /dav`, `get /dav` | 405, `Allow: PROPFIND` |
 | `PROPFIND /missing`, `GET /missing` | 404 |
 | `FOO /missing`, `get /missing` | 501 |
+
+`app.recognizeMethods("MKCOL", "LOCK")` declares methods that no route has but the
+application still treats as its own, for example because global middleware or a
+gateway extension answers them: they get 404 rather than 501 on an unrouted path, so
+`MKCOL /missing` is 404 and `FOO /missing` stays 501. Declaring is configuration
+only: it must happen before `start()`, repeated calls add to the set, each method
+must be a token (`IllegalArgumentException` otherwise; `CONNECT` is refused because
+it is always 501), and a declared method is not advertised anywhere, so it never
+appears in `Allow` or in the `OPTIONS *` list, and a request for it on a routed path
+is 405 as before. Matching is case-sensitive: declaring `MKCOL` does not recognize
+`mkcol`.
 
 The 501 is a runtime error: over HTTP it keeps a keep-alive connection open, and its
 problem body does not repeat the method.
@@ -203,6 +237,45 @@ a cross-site form, reach a DELETE or PUT route, and would make the method that
 proxies, logs and access rules see differ from the one the application executes. An
 application that must serve clients limited to GET and POST can register an explicit
 POST route that performs the action.
+
+### Customising router answers
+
+The 404, 405 and 501 answers the router produces itself can be replaced with
+dedicated handlers, without middleware:
+
+```java
+app.notFound(ctx -> ctx.json("{\"error\":\"no such resource\"}"));
+app.methodNotAllowed(ctx -> ctx.text("try another method"));
+app.notImplemented(ctx -> ctx.text("unsupported method " + ctx.method()));
+```
+
+| Hook | Replaces | Status preset on the context |
+| --- | --- | --- |
+| `notFound` | 404: no template matches the path and the method is [recognized](#custom-methods) | 404 |
+| `methodNotAllowed` | 405: a template matches the path but none has the method | 405 |
+| `notImplemented` | 501: no template matches the path and the method is not recognized | 501 |
+
+A hook is an ordinary handler. It runs as the innermost step of the global
+[middleware](middleware.md) chain, which therefore still wraps the answer (as it does
+the built-in ones), and group and route middleware do not run. The context's status is
+already the hook's status, so `ctx.json(body)`, `ctx.text(text)` and a returned
+`null` answer 404, 405 or 501; return a `Response` to choose another status. No route
+matched: `ctx.route()` throws and `ctx.matchedRoute()` is empty; use `ctx.path()`,
+`ctx.method()` and `ctx.execution().requestId()` for what the default problem body
+would carry. A custom body is a normal response, so it is subject to `Accept`
+negotiation (406) like any handler response, and nothing is escaped or restricted for
+you: never echo request data into it unfiltered. Exceptions thrown by a hook are
+mapped like those of any handler, by [error handlers](errors.md#error-handlers) or
+into a problem response; throwing an `AxiomException` is the way to keep the problem
+format with a different code.
+
+For 405 the router sets `Allow` on the hook's response whatever the hook set, so a
+custom answer cannot omit or contradict the list (see [Methods](#methods)). Over HEAD
+the body is suppressed as always. Not customisable by these hooks: the automatic
+[OPTIONS](#automatic-options) answer and `OPTIONS *` (use an explicit OPTIONS route
+that returns `ctx.automaticOptions()` for what it does not handle), and answers
+produced before routing: 400, 413 and CONNECT's 501. Each hook is set at most once
+before `start()`; a second call replaces the first.
 
 ## Conflicts and startup
 
@@ -270,8 +343,8 @@ All captures are untrusted client input. A wildcard remainder spans several
 segments and contains `/`; the rules above keep `..` and encoded separators out of
 it, but resolving it against a file system still requires the application's own
 containment check (for example, normalizing a `Path` and verifying its prefix).
-Typed parameter conversion is separate work; request body limits are described in
-[request bodies](bodies.md).
+Typed conversion is in [typed parameters](#typed-parameters); request body limits are
+described in [request bodies](bodies.md).
 
 ## Query parameters
 
@@ -307,7 +380,43 @@ case-sensitive.
 `ctx.query(name)` returns the first value, `ctx.queryAll(name)` an immutable list
 of every value in order (empty when absent); `Request` has the same methods. Values
 are decoded on each call rather than cached, which the limits keep cheap. Typed
-conversion is left to the application, as for path captures.
+conversion is described next.
+
+## Typed parameters
+
+Query parameters and path captures convert to numbers and UUIDs with one small set of
+accessors on `Context`:
+
+| Source | `int` | `long` | `UUID` |
+| --- | --- | --- | --- |
+| Query parameter (first value) | `Optional<Integer> queryInt(name)` | `Optional<Long> queryLong(name)` | `Optional<UUID> queryUuid(name)` |
+| Path capture | `int pathInt(name)` | `long pathLong(name)` | `UUID pathUuid(name)` |
+
+```java
+int page = ctx.queryInt("page").orElse(1);
+UUID id = ctx.pathUuid("id");
+```
+
+An absent query parameter is an empty `Optional`; a path capture is always present
+for a declared name, and an undeclared name is the same `IllegalArgumentException` as
+for `ctx.path(name)` (a handler bug, 500 over HTTP). A repeated query parameter uses
+its first value; read `ctx.queryAll(name)` to convert the others yourself.
+
+Parsing is strict. Integers are an optional leading `-` and one to 19 ASCII digits
+within the type's range; leading zeros are accepted. A leading `+`, spaces, digit
+separators, exponents, hexadecimal, non-ASCII digits and out-of-range values are
+rejected, and so is an empty value (`?page=`). A UUID is the canonical 36-character
+`8-4-4-4-12` form with hexadecimal digits in either case; the lenient forms that
+`UUID.fromString` takes (`1-1-1-1-1`) are rejected. A path capture is converted raw,
+without percent-decoding, so `%31` is not the number 1.
+
+A value that does not convert is the client's error: the accessor throws
+`BadRequestException` and the client receives a **400** problem response (see
+[errors](errors.md)) with code `invalid_query_parameter` or `invalid_path_parameter`.
+The exception message and the response contain neither the value nor the parameter
+name, and no `NumberFormatException` or parser output ever reaches the caller. Other
+types (booleans, enums, dates) are left to the application; throw a
+`BadRequestException` with your own code for a value it cannot accept.
 
 ## Implementation and verification
 
