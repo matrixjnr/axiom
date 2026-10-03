@@ -16,5 +16,7 @@ dependencies {
         api(project(":axiom-security"))
         api(project(":axiom-security-jwt"))
         api(project(":axiom-metrics"))
+        api(project(":axiom-openapi"))
+        api(project(":axiom-openapi-ui"))
     }
 }

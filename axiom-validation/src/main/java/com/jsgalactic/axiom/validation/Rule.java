@@ -5,8 +5,10 @@ import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -31,11 +33,17 @@ public final class Rule<T> {
     private final Predicate<? super T> test;
     private final String code;
     private final boolean nullable;
+    private final Constraint constraint;
 
-    private Rule(Predicate<? super T> test, String code, boolean nullable) {
+    private Rule(Predicate<? super T> test, String code, boolean nullable, Constraint constraint) {
         this.test = Objects.requireNonNull(test, "test");
         this.code = requireCode(code);
         this.nullable = nullable;
+        this.constraint = constraint;
+    }
+
+    private Rule<T> described(Constraint described) {
+        return new Rule<>(test, code, nullable, described);
     }
 
     static String requireCode(String code) {
@@ -54,7 +62,7 @@ public final class Rule<T> {
      * @throws IllegalArgumentException if the code is not a safe code
      */
     public static <T> Rule<T> check(Predicate<? super T> test, String code) {
-        return new Rule<>(test, code, false);
+        return new Rule<>(test, code, false, null);
     }
 
     /**
@@ -67,7 +75,7 @@ public final class Rule<T> {
      * @throws IllegalArgumentException if the code is not a safe code
      */
     public static <T> Rule<T> checkNullable(Predicate<? super T> test, String code) {
-        return new Rule<>(test, code, true);
+        return new Rule<>(test, code, true, null);
     }
 
     /**
@@ -77,7 +85,7 @@ public final class Rule<T> {
      * @return a rule with the same check
      */
     public Rule<T> withCode(String code) {
-        return new Rule<>(test, code, nullable);
+        return new Rule<>(test, code, nullable, constraint);
     }
 
     /**
@@ -86,6 +94,14 @@ public final class Rule<T> {
      * @return safe machine-readable code
      */
     public String code() { return code; }
+
+    /**
+     * Describes what this rule checks, for tools such as documentation generators.
+     *
+     * @return the constraint of a built-in rule, empty for rules made with {@link #check} or
+     *         {@link #checkNullable}, whose predicates cannot be described
+     */
+    public Optional<Constraint> constraint() { return Optional.ofNullable(constraint); }
 
     /**
      * Checks a value.
@@ -103,7 +119,8 @@ public final class Rule<T> {
      * @return the rule
      */
     public static Rule<Object> notNull() {
-        return checkNullable(Objects::nonNull, "not_null");
+        return Rule.<Object>checkNullable(Objects::nonNull, "not_null")
+                .described(new Constraint(Constraint.Kind.NOT_NULL, 0, 0, null, List.of()));
     }
 
     /**
@@ -112,7 +129,8 @@ public final class Rule<T> {
      * @return the rule
      */
     public static Rule<CharSequence> notBlank() {
-        return checkNullable(value -> value != null && !value.toString().isBlank(), "not_blank");
+        return Rule.<CharSequence>checkNullable(value -> value != null && !value.toString().isBlank(), "not_blank")
+                .described(new Constraint(Constraint.Kind.NOT_BLANK, 0, 0, null, List.of()));
     }
 
     /**
@@ -122,7 +140,7 @@ public final class Rule<T> {
      * @return the rule
      */
     public static Rule<Object> notEmpty() {
-        return checkNullable(value -> {
+        return Rule.<Object>checkNullable(value -> {
             if (value == null) {
                 return false;
             }
@@ -136,7 +154,7 @@ public final class Rule<T> {
                 return !map.isEmpty();
             }
             return !value.getClass().isArray() || Array.getLength(value) > 0;
-        }, "not_empty");
+        }, "not_empty").described(new Constraint(Constraint.Kind.NOT_EMPTY, 0, 0, null, List.of()));
     }
 
     /**
@@ -148,14 +166,14 @@ public final class Rule<T> {
      */
     public static Rule<CharSequence> length(int min, int max) {
         requireBounds(min, max);
-        return check(value -> {
+        return Rule.<CharSequence>check(value -> {
             var chars = value.length();
             if (chars < min || chars > 2L * max) {
                 return false;
             }
             var codePoints = Character.codePointCount(value, 0, chars);
             return codePoints >= min && codePoints <= max;
-        }, "size");
+        }, "size").described(new Constraint(Constraint.Kind.LENGTH, min, max, null, List.of()));
     }
 
     /**
@@ -187,7 +205,8 @@ public final class Rule<T> {
      */
     public static Rule<Collection<?>> size(int min, int max) {
         requireBounds(min, max);
-        return check(value -> value.size() >= min && value.size() <= max, "size");
+        return Rule.<Collection<?>>check(value -> value.size() >= min && value.size() <= max, "size")
+                .described(new Constraint(Constraint.Kind.SIZE, min, max, null, List.of()));
     }
 
     /**
@@ -197,7 +216,8 @@ public final class Rule<T> {
      * @return the rule
      */
     public static Rule<Number> min(long min) {
-        return check(value -> !isNaN(value) && compare(value, min) >= 0, "min");
+        return Rule.<Number>check(value -> !isNaN(value) && compare(value, min) >= 0, "min")
+                .described(new Constraint(Constraint.Kind.RANGE, min, Long.MAX_VALUE, null, List.of()));
     }
 
     /**
@@ -207,7 +227,8 @@ public final class Rule<T> {
      * @return the rule
      */
     public static Rule<Number> max(long max) {
-        return check(value -> !isNaN(value) && compare(value, max) <= 0, "max");
+        return Rule.<Number>check(value -> !isNaN(value) && compare(value, max) <= 0, "max")
+                .described(new Constraint(Constraint.Kind.RANGE, Long.MIN_VALUE, max, null, List.of()));
     }
 
     /**
@@ -222,7 +243,8 @@ public final class Rule<T> {
         if (min > max) {
             throw new IllegalArgumentException("min must not exceed max");
         }
-        return check(value -> !isNaN(value) && compare(value, min) >= 0 && compare(value, max) <= 0, "range");
+        return Rule.<Number>check(value -> !isNaN(value) && compare(value, min) >= 0 && compare(value, max) <= 0, "range")
+                .described(new Constraint(Constraint.Kind.RANGE, min, max, null, List.of()));
     }
 
     /**
@@ -263,7 +285,8 @@ public final class Rule<T> {
         } catch (PatternSyntaxException e) {
             throw new IllegalArgumentException("Invalid regular expression", e);
         }
-        return check(value -> value.length() <= maxInputLength && compiled.matcher(value).matches(), "pattern");
+        return Rule.<CharSequence>check(value -> value.length() <= maxInputLength && compiled.matcher(value).matches(),
+                "pattern").described(new Constraint(Constraint.Kind.PATTERN, 0, 0, regex, List.of()));
     }
 
     /**
@@ -276,7 +299,8 @@ public final class Rule<T> {
      * @return the rule
      */
     public static Rule<CharSequence> email() {
-        return check(Rule::isEmail, "email");
+        return Rule.<CharSequence>check(Rule::isEmail, "email")
+                .described(new Constraint(Constraint.Kind.EMAIL, 0, 0, null, List.of()));
     }
 
     /**
@@ -290,7 +314,8 @@ public final class Rule<T> {
             throw new IllegalArgumentException("At least one value is required");
         }
         var allowed = Set.of(values);
-        return check(value -> allowed.contains(value.toString()), "one_of");
+        return Rule.<CharSequence>check(value -> allowed.contains(value.toString()), "one_of")
+                .described(new Constraint(Constraint.Kind.ONE_OF, 0, 0, null, List.of(values)));
     }
 
     private static void requireBounds(int min, int max) {

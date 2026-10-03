@@ -159,7 +159,6 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 - Streaming request bodies (request bodies are buffered in memory)
 - Sessions, cookie authentication, CSRF, CORS and OAuth flows; JWKS key fetching
 - OpenTelemetry, tracing spans and metrics exporters other than Prometheus text
-- OpenAPI generation
 - Native transports (epoll, io_uring)
 - Publication to Maven Central
 
@@ -181,6 +180,8 @@ remaining milestones in the [roadmap, #18](https://github.com/matrixjnr/axiom/is
 | `axiom-security` | `axiom-security` | Authenticator SPI, role and permission policies, trusted proxies, header redaction, security headers (opt-in) |
 | `axiom-security-jwt` | `axiom-security-jwt` | Strict JWT bearer-token authenticator on the JDK only (opt-in) |
 | `axiom-metrics` | `axiom-metrics` | Bounded in-memory metrics registry and Prometheus text output (opt-in) |
+| `axiom-openapi` | `axiom-openapi` | OpenAPI 3.1 and Swagger 2.0 documents from route descriptions (opt-in) |
+| `axiom-openapi-ui` | `axiom-openapi-ui` | Swagger UI served from the application, files packaged statically, no CDN (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
@@ -288,6 +289,43 @@ Tags are route templates and status classes, never raw paths or user input. **Do
 `/metrics` or the health routes publicly without authentication.** See
 [observability](docs/observability.md).
 
+## OpenAPI and Swagger
+
+Describe a route with plain code (no annotations), then serve the generated documents and, if you
+want it, Swagger UI (no CDN: the UI files are packaged). Nothing is served unless you register it.
+
+<!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#describe-route -->
+```java
+var add = app.post("/books", ctx -> {
+    var request = ctx.validatedBody(NewBook.class, NEW_BOOK);
+    var book = new Book(ids.incrementAndGet(), request.title(), request.author(), request.year());
+    books.put(book.id(), book);
+    return ctx.status(201).json(book);
+});
+app.describe(add, RouteDoc.summary("Add a book")
+        .description("Stores a new book and returns it with its id.")
+        .tags("books").operationId("addBook")
+        .requestBody(NewBook.class)
+        .response(201, "The stored book", Book.class)
+        .response(422, "The book is not valid")
+        .security("bearer"));
+```
+
+<!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#serve -->
+```java
+if (docsAccess != null) {
+    openApi.serve(app, "/openapi.json", docsAccess);        // OpenAPI 3.1
+    openApi.serveSwagger(app, "/swagger.json", docsAccess); // Swagger 2.0
+    SwaggerUi.builder()                                     // Swagger UI at /docs
+            .spec("OpenAPI 3.1", "/openapi.json").spec("Swagger 2.0", "/swagger.json")
+            .build().register(app, docsAccess);
+}
+```
+
+Records, JavaBean and Lombok-style classes, enums and collections become schemas, and validation
+rules become constraints. Treat the documentation as part of your API surface and protect or omit it
+in production. See [OpenAPI and Swagger](docs/openapi.md).
+
 ## Build and test
 
 JDK 21 and the committed Gradle wrapper (on Windows, `gradlew.bat`):
@@ -301,6 +339,7 @@ JDK 21 and the committed Gradle wrapper (on Windows, `gradlew.bat`):
 | `./gradlew compatibilityTest` | Gradle Kotlin, Gradle Groovy and Maven consumer builds against locally published artifacts |
 | `./gradlew :examples:hello:run` | Hello World on `http://127.0.0.1:8080/` |
 | `./gradlew :examples:rest-api:run` | The notes JSON API on the same port |
+| `./gradlew :examples:openapi:run` | The books API; set `DOCS_PASSWORD` to also serve `/openapi.json`, `/swagger.json` and Swagger UI at `/docs` |
 
 Details are in [build decisions](docs/build.md).
 
@@ -310,7 +349,7 @@ Details are in [build decisions](docs/build.md).
   [request bodies and JSON](docs/bodies.md), [streaming and server-sent events](docs/streaming.md),
   [errors](docs/errors.md),
   [middleware](docs/middleware.md), [validation](docs/validation.md), [security](docs/security.md),
-  [observability](docs/observability.md)
+  [observability](docs/observability.md), [OpenAPI and Swagger](docs/openapi.md)
 - [HTTP listeners](docs/http.md), [TLS](docs/tls.md), [execution and deadlines](docs/execution.md),
   [admission](docs/admission.md), [benchmarks](docs/benchmarks.md)
 - [Build decisions](docs/build.md), [releasing](docs/releasing.md),

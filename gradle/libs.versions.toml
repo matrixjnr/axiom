@@ -8,14 +8,18 @@ jakarta-validation = "3.1.1"
 hibernate-validator = "9.1.4.Final"
 # JaCoCo agent and report tool, used through the Gradle jacoco plugin (toolVersion).
 jacoco = "0.8.15"
+# Swagger UI static files, packaged as a WebJar and served by axiom-openapi-ui (no CDN at run time).
+swagger-ui = "5.33.1"
 # Checkstyle, used through the Gradle checkstyle plugin (toolVersion).
 checkstyle = "14.3.0"
 
 [libraries]
+swagger-ui = { module = "org.webjars:swagger-ui", version.ref = "swagger-ui" }
 netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
 netty-http = { module = "io.netty:netty-codec-http" }
 netty-handler = { module = "io.netty:netty-handler" }
 jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
+jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }
 jackson-datatype-jdk8 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jdk8" }
 jackson-datatype-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310" }
