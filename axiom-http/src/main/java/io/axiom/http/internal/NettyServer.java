@@ -75,10 +75,16 @@ final class NettyServer implements Server {
                     .channel(NioServerSocketChannel.class)
                     .option(ChannelOption.SO_BACKLOG, BACKLOG)
                     .option(ChannelOption.SO_REUSEADDR, true)
-                    .childOption(ChannelOption.TCP_NODELAY, true)
-                    .childHandler(new ChannelInitializer<SocketChannel>() {
-                        @Override protected void initChannel(SocketChannel channel) { server.accept(channel, application); }
-                    });
+                    .childOption(ChannelOption.TCP_NODELAY, true);
+            if (settings.receiveBuffer() > 0) {
+                // Set on the listening socket too, so accepted sockets advertise the window from the start.
+                bootstrap.option(ChannelOption.SO_RCVBUF, settings.receiveBuffer())
+                        .childOption(ChannelOption.SO_RCVBUF, settings.receiveBuffer());
+            }
+            if (settings.sendBuffer() > 0) { bootstrap.childOption(ChannelOption.SO_SNDBUF, settings.sendBuffer()); }
+            bootstrap.childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override protected void initChannel(SocketChannel channel) { server.accept(channel, application); }
+            });
             var bound = bootstrap.bind(address).awaitUninterruptibly();
             if (!bound.isSuccess()) { throw new IOException("Could not bind HTTP listener to " + address, bound.cause()); }
             server.listener = bound.channel();
@@ -119,6 +125,8 @@ final class NettyServer implements Server {
     }
 
     @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }
+    /** Connections currently holding a slot; for tests. */
+    int connections() { return connections.get(); }
     @Override public InetSocketAddress localAddress() { return address; }
     @Override public boolean isOpen() { return !closing.get() && listener != null && listener.isOpen(); }
     @Override public CompletionStage<Void> termination() { return stopped.minimalCompletionStage(); }

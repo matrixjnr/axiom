@@ -34,6 +34,36 @@ class NettyServerTest {
         }
     }
 
+    @Test void testSettingsCanFixSocketBuffersAndOtherwiseKeepSystemDefaults() throws Exception {
+        try (var app = Axiom.create()) {
+            app.start();
+            var plain = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0));
+            var fixed = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
+                    TransportSettings.DEFAULTS.withSocketBuffers(8192, 8192));
+            try {
+                assertThat(TransportSettings.DEFAULTS.receiveBuffer()).isZero();
+                assertThat(TransportSettings.DEFAULTS.sendBuffer()).isZero();
+                // The kernel may round the request up (Linux doubles it), never below it.
+                assertThat(fixed.listener.config().getOption(ChannelOption.SO_RCVBUF)).isBetween(8192, 4 * 8192);
+                assertThat(plain.connections()).isZero();
+                try (var client = new java.net.Socket()) {
+                    client.connect(plain.localAddress(), 5000);
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                    while (plain.connections() == 0) {
+                        assertThat(System.nanoTime()).as("connection accepted").isLessThan(deadline);
+                        Thread.onSpinWait();
+                    }
+                    assertThat(plain.connections()).isEqualTo(1);
+                }
+            } finally {
+                plain.close();
+                fixed.close();
+                plain.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                fixed.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     @Test void refusesConnectionsBeyondTheLimitAndReleasesSlotsOnClose() throws Exception {
         try (var app = Axiom.create()) {
             app.start();
