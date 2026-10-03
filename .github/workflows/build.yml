@@ -5,9 +5,41 @@ on:
   pull_request:
 permissions:
   contents: read
+# A new push to a pull request cancels the run for its previous head. Pushes to main each keep
+# their own group, so no main run is cancelled or dropped.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  check:
+  # Compilation (main, test and benchmark sources), jars, Javadoc and every check task except the
+  # tests: architectureTest, checkPublicationCoverage, checkIntegrationTags. Dependency
+  # verification applies to every configuration resolved here.
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew assemble testClasses javadoc check -x test -x integrationTest
+  # Fast tests (no real sockets), one job per module that has them.
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - axiom-core
+          - axiom-server
+          - axiom-http
+          - axiom-json
+          - axiom-test
+          - axiom-validation
+          - axiom-validation-jakarta
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -16,8 +48,68 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       # Temurin 21 can measure per-thread allocation; fail instead of skipping if that changes.
-      - run: ./gradlew clean check -Daxiom.requireAllocationTests=true
+      - run: ./gradlew :${{ matrix.module }}:test -Daxiom.requireAllocationTests=true
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports-${{ matrix.module }}
+          path: ${{ matrix.module }}/build/reports/tests/test/
+  # Tests tagged integration (real sockets, live listeners) and the integration-tests module.
+  # One job, so the root task picks up every module's integrationTest and keeps their order.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew integrationTest -Daxiom.requireAllocationTests=true
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-reports
+          path: '**/build/reports/tests/integrationTest/'
+  # Coverage report (runs both test tasks with the JaCoCo agent) and the hello smoke run.
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew coverageReport -Daxiom.requireAllocationTests=true
+      - if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build/reports/jacoco/coverageReport/
+          if-no-files-found: ignore
       - run: ./gradlew :examples:hello:run --args="--smoke"
+  # Branch protection requires a status check named `check`; this job keeps that name and passes
+  # only when every job above succeeded.
+  check:
+    if: always()
+    needs: [build, unit, integration, quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every needed job to succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Needed job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "::error::A needed job ended with result '$result'."
+              exit 1
+            fi
+          done
   # Every commit of a pull request must build on its own, so history stays bisectable and a
   # dependency never lands before its checksums. At most 20 commits are built; a longer series
   # is reduced to the commits that touch build files (see .github/scripts/check-each-commit.sh).

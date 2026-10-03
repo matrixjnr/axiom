@@ -1,4 +1,7 @@
-plugins { id("axiom.java-library") }
+plugins {
+    id("axiom.java-library")
+    id("axiom.integration-test")
+}
 
 dependencies {
     implementation(platform(libs.netty.bom))
@@ -8,7 +11,7 @@ dependencies {
     implementation(project(":axiom-server"))
 }
 
-tasks.test {
+tasks.withType<Test>().configureEach {
     // The test LeakDetection extension also sets this; the property covers buffers created earlier.
     systemProperty("io.netty.leakDetection.level", "paranoid")
 }

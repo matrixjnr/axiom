@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -31,6 +32,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * A listener error on a later pipelined request must not abort earlier work: earlier requests
  * complete and are answered in order, then the error is written and the connection closes.
  */
+@Tag("integration")
 class HttpPipelineErrorTest {
     private static final String SLOW = "POST /slow HTTP/1.1\r\nHost: a\r\nContent-Length: 4\r\n\r\nbody";
     private static final String NEXT = "GET /next HTTP/1.1\r\nHost: a\r\n\r\n";

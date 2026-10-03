@@ -16,9 +16,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** After a listener error response the connection half-closes and discards input for a bounded time. */
+@Tag("integration")
 class HttpLingerTest {
     private final RequestDispatcher executor = new RequestDispatcher(4);
     private final Application app = Axiom.create();

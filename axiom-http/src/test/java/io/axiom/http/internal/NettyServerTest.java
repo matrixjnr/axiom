@@ -8,8 +8,10 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+@Tag("integration")
 class NettyServerTest {
     @Test void sizesEventLoopsAndConfiguresSockets() throws Exception {
         try (var app = Axiom.create()) {
