@@ -41,7 +41,9 @@ val compatMaven = tasks.register<Exec>("compatibility-maven") {
     dependsOn(publishCompatRepo)
     enabled = mavenAvailable // skipped, with a SKIPPED status, where mvn is not installed
     workingDir = file("compatibility/maven")
-    commandLine("mvn", "--batch-mode", "--no-transfer-progress",
+    // --strict-checksums fails on a mismatch with the checksums the repositories publish; Maven has
+    // no committed verification metadata, so this is the weaker equivalent (see docs/build.md).
+    commandLine("mvn", "--batch-mode", "--no-transfer-progress", "--strict-checksums",
         "-Daxiom.repo=${compatRepo.get().asFile.toURI()}", "-Daxiom.version=$compatVersion",
         "-Dmaven.repo.local=${layout.buildDirectory.dir("compat-m2").get().asFile}", "verify")
 }

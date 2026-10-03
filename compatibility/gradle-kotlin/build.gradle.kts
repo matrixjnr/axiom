@@ -3,17 +3,28 @@ plugins { java }
 val axiomVersion = providers.gradleProperty("axiomVersion").get()
 
 java { toolchain { languageVersion.set(JavaLanguageVersion.of(21)) } }
-sourceSets.main { java.srcDir("../shared") }
+sourceSets.main { java.srcDirs("../shared", "../shared-validation") }
 
 dependencies {
     // The BOM supplies the version of the starter.
     implementation(platform("io.axiom:axiom-bom:$axiomVersion"))
     implementation("io.axiom:axiom")
+    // Optional modules, versions from the BOM. Applications declare the annotation API themselves.
+    implementation("io.axiom:axiom-validation")
+    implementation("io.axiom:axiom-validation-jakarta")
+    implementation("jakarta.validation:jakarta.validation-api:3.1.1")
 }
 
 val smoke = tasks.register<JavaExec>("smoke") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set("consumer.Smoke")
+}
+
+val validationSmokes = listOf("ValidationSmoke", "JakartaSmoke").map { name ->
+    tasks.register<JavaExec>("run$name") {
+        classpath = sourceSets.main.get().runtimeClasspath
+        mainClass.set("consumer.$name")
+    }
 }
 
 val compileFiles = configurations.compileClasspath.map { c -> c.files.map { it.name } }
@@ -45,4 +56,4 @@ val verifyClasspaths = tasks.register("verifyClasspaths") {
     }
 }
 
-tasks.register("compatibilityCheck") { dependsOn(verifyClasspaths, smoke) }
+tasks.register("compatibilityCheck") { dependsOn(verifyClasspaths, smoke, validationSmokes) }

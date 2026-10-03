@@ -131,6 +131,13 @@ compiles and runs `compatibility/shared/consumer/Smoke.java`, which serves a pla
 route and a JSON route over HTTP. The Kotlin consumer also checks that the compile
 classpath holds only `axiom` and `axiom-core`, that Netty and Jackson are on the
 runtime classpath, and that the starter was resolved from Gradle module metadata.
+The Kotlin consumer also depends on `axiom-validation`, `axiom-validation-jakarta`
+(versions from the BOM) and `jakarta.validation-api`, and runs
+`compatibility/shared-validation/consumer/ValidationSmoke.java` and `JakartaSmoke.java`:
+each starts the application and checks, over HTTP, a valid request (201) and an invalid
+one (422 with only field paths and codes, no echoed input). This checks the publication
+metadata of both validation modules from a consumer's point of view. The Groovy and Maven
+consumers do not use the validation modules.
 The Maven task is skipped when `mvn` is not on the path. The task is not part of
 `check`; the Compatibility workflow and the release workflow run it.
 
@@ -147,9 +154,38 @@ generated with:
 
 The checksums were taken from the repositories as served at generation time and
 are trust-on-first-use; signature verification is off. A modified checksum makes the
-build fail. The standalone consumer projects in `compatibility/` are not covered.
-Dependency locking was evaluated and not enabled: versions are already exact
-through the catalog and the Netty and Jackson BOMs, and checksums pin the contents.
+build fail.
+
+The Gradle consumers in `compatibility/` are standalone builds, each with its own
+`gradle/verification-metadata.xml`. Artifacts in group `io.axiom` are trusted
+(`<trusted-artifacts>`) because they come from the locally published repository and
+change with every build; every other artifact, including POMs and module files, is
+checksummed. Regenerate a consumer's file from an empty Gradle home, so every artifact
+is downloaded and nothing is taken from a stale cache. Seed the file with the
+`<trusted-artifacts>` block, publish with `./gradlew publishCompatRepo`, then in the
+consumer directory run:
+
+```sh
+../../gradlew -g "$(mktemp -d)" --no-daemon -PaxiomRepo=file://$PWD/../../build/compat-repo/ \
+    -PaxiomVersion=0.1.0-SNAPSHOT --write-verification-metadata sha256 compatibilityCheck
+```
+
+Maven Central may answer HTTP 429 when many artifacts are fetched at once. Retry the
+whole command a bounded number of times with a growing pause, and restore the seed
+file if all attempts fail; never commit a half-written file. Regenerate the consumers
+in the same commit as a change to their dependencies, and when the Jakarta Validation
+or Hibernate Validator versions change.
+
+The Maven consumer has no committed verification metadata. The compatibility task runs
+`mvn --strict-checksums`, which fails when a downloaded file does not match the checksum
+the repository publishes. That detects corrupted or inconsistent downloads but, unlike
+committed metadata, not a change of content that is published together with its checksum.
+
+Dependency locking was evaluated again and is still not enabled: versions are already
+exact through the catalog and the Netty and Jackson BOMs (consumers declare fixed
+versions or import the BOM), and checksums pin the contents. Locking would add lock
+files to regenerate with every update without catching anything the checksums do not;
+revisit it if dynamic versions or version ranges are ever introduced.
 
 ## Every commit builds
 
