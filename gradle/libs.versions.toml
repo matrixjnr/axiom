@@ -1,6 +1,6 @@
 [versions]
-junit = "5.12.2"
-assertj = "3.27.3"
+junit = "6.1.3"
+assertj = "3.27.7"
 jmh = "1.37"
 netty = "4.2.18.Final"
 jackson = "2.22.3"
