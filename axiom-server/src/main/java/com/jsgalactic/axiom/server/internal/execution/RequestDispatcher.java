@@ -3,6 +3,7 @@ package com.jsgalactic.axiom.server.internal.execution;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.observability.Metrics;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,6 +25,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
+import java.util.function.ToIntFunction;
 
 /** Protocol-neutral, listener-owned execution. All admission state is protected by this object's lock. */
 public final class RequestDispatcher implements AutoCloseable {
@@ -32,6 +34,7 @@ public final class RequestDispatcher implements AutoCloseable {
     private final ExecutorService workers;
     private final ScheduledExecutorService deadlines;
     private final LongSupplier clock;
+    private final DispatchMetrics metrics;
     private final Set<Task<?>> tasks = new HashSet<>();
     private final Set<Bucket> queuedBuckets = new LinkedHashSet<>();
     private final Map<Object, Bucket> buckets = new HashMap<>();
@@ -55,9 +58,18 @@ public final class RequestDispatcher implements AutoCloseable {
      * Creates bounded admission before virtual-thread creation.
      * @param policy aggregate limits for this dispatcher
      */
-    public RequestDispatcher(AdmissionPolicy policy) {
+    public RequestDispatcher(AdmissionPolicy policy) { this(policy, Metrics.NOOP); }
+
+    /**
+     * Creates bounded admission before virtual-thread creation, recording request, latency and
+     * admission measurements. Metrics calls happen while the dispatcher holds its lock, so an
+     * implementation must not block.
+     * @param policy aggregate limits for this dispatcher
+     * @param metrics receiver of measurements; {@link Metrics#NOOP} disables recording
+     */
+    public RequestDispatcher(AdmissionPolicy policy, Metrics metrics) {
         this(policy, Executors.newThreadPerTaskExecutor(
-                Thread.ofVirtual().name("axiom-handler-", 0).factory()), scheduler(), System::nanoTime);
+                Thread.ofVirtual().name("axiom-handler-", 0).factory()), scheduler(), System::nanoTime, metrics);
     }
 
     RequestDispatcher(int capacity, ExecutorService workers, ScheduledExecutorService deadlines) {
@@ -66,6 +78,13 @@ public final class RequestDispatcher implements AutoCloseable {
 
     RequestDispatcher(AdmissionPolicy policy, ExecutorService workers,
             ScheduledExecutorService deadlines, LongSupplier clock) {
+        this(policy, workers, deadlines, clock, Metrics.NOOP);
+    }
+
+    RequestDispatcher(AdmissionPolicy policy, ExecutorService workers,
+            ScheduledExecutorService deadlines, LongSupplier clock, Metrics metrics) {
+        Objects.requireNonNull(metrics, "metrics");
+        this.metrics = metrics == Metrics.NOOP ? DispatchMetrics.DISABLED : new DispatchMetrics(metrics);
         this.policy = Objects.requireNonNull(policy, "policy");
         this.workers = workers;
         this.deadlines = deadlines;
@@ -103,6 +122,25 @@ public final class RequestDispatcher implements AutoCloseable {
      */
     public <T> Task<T> submit(Object key, AdmissionPolicy endpointPolicy,
             ExecutionContext context, Callable<T> action) {
+        return submit(key, endpointPolicy, context, action, null);
+    }
+
+    /**
+     * Admits work like {@link #submit(Object, AdmissionPolicy, ExecutionContext, Callable)} and
+     * reports the status class of its result to the metrics. The endpoint key is also the metrics
+     * identity: a {@link com.jsgalactic.axiom.routing.Route} is tagged by method and template, any
+     * other key as unmatched.
+     * @param key stable endpoint identity, never a request-specific path
+     * @param endpointPolicy immutable policy for this endpoint
+     * @param context request identity and remaining deadline
+     * @param action framework-owned work, including response preparation
+     * @param status maps a result to its HTTP status code, or null to count results as unknown
+     * @param <T> result type
+     * @return cancellation handle; queued work has no execution thread
+     * @throws RejectedExecutionException if closed or capacity is exhausted
+     */
+    public <T> Task<T> submit(Object key, AdmissionPolicy endpointPolicy,
+            ExecutionContext context, Callable<T> action, ToIntFunction<? super T> status) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(endpointPolicy, "endpointPolicy");
         Objects.requireNonNull(context, "context");
@@ -110,8 +148,13 @@ public final class RequestDispatcher implements AutoCloseable {
         var signals = new ArrayList<Runnable>();
         Task<T> task = null;
         Throwable submissionFailure = null;
+        var series = metrics.series(key);
         synchronized (this) {
-            if (closed || stopping) { rejected++; throw new RejectedExecutionException("Dispatcher closed"); }
+            if (closed || stopping) {
+                rejected++;
+                metrics.refused(series, DispatchMetrics.Reason.SHUTDOWN);
+                new RejectedExecutionException("Dispatcher closed");
+            }
             var bucket = buckets.get(key);
             if (bucket != null && !bucket.policy.equals(endpointPolicy)) {
                 // A caller bug, not overload: reported as IllegalArgumentException and not counted as rejected.
@@ -127,10 +170,11 @@ public final class RequestDispatcher implements AutoCloseable {
             }
             if (full) {
                 rejected++;
+                metrics.refused(series, DispatchMetrics.Reason.CAPACITY);
                 submissionFailure = new RejectedExecutionException("Request capacity unavailable");
             } else {
                 buckets.put(key, bucket);
-                task = new Task<>(context, action, bucket);
+                task = new Task<>(context, action, bucket, series, status, clock.getAsLong());
                 tasks.add(task);
                 if (room) {
                     submissionFailure = activate(task, signals);
@@ -141,6 +185,7 @@ public final class RequestDispatcher implements AutoCloseable {
                     task.sequence = sequence++;
                     bucket.enqueue(task);
                     queued++;
+                    metrics.queued(1);
                     queuedBuckets.add(bucket);
                     try { schedule(task, Math.min(task.queueBudget, context.remainingTime().toNanos())); }
                     catch (RuntimeException | Error failure) {
@@ -150,7 +195,10 @@ public final class RequestDispatcher implements AutoCloseable {
                     }
                 }
                 if (submissionFailure == null) { accepted++; }
-                else if (submissionFailure instanceof RejectedExecutionException) { rejected++; }
+                else if (submissionFailure instanceof RejectedExecutionException) {
+                    rejected++;
+                    metrics.rejected(series, DispatchMetrics.Reason.EXECUTOR);
+                }
             }
         }
         publish(signals);
@@ -194,6 +242,7 @@ public final class RequestDispatcher implements AutoCloseable {
                 if (task.waiting) {
                     finish(task, null, new DispatchRejectedException(
                             new RejectedExecutionException("Dispatcher stopping")), false, signals);
+                    metrics.rejected(task.series, DispatchMetrics.Reason.SHUTDOWN);
                 }
             }
         }
@@ -230,6 +279,7 @@ public final class RequestDispatcher implements AutoCloseable {
         if (task.waiting) { unqueue(task); }
         task.reserved = true;
         active++;
+        metrics.active(1);
         task.bucket.active++;
         try {
             schedule(task, task.context.remainingTime().toNanos());
@@ -270,7 +320,13 @@ public final class RequestDispatcher implements AutoCloseable {
         if (task.finished) { return; }
         task.finished = true;
         if (task.timer != null) { task.timer.cancel(false); }
-        if (failure instanceof QueueTimeoutException) { queueTimeouts++; }
+        if (failure instanceof QueueTimeoutException) {
+            queueTimeouts++;
+            metrics.rejected(task.series, DispatchMetrics.Reason.QUEUE_TIMEOUT);
+        }
+        if (metrics.enabled()) {
+            metrics.request(task.series, outcome(task, value, failure), clock.getAsLong() - task.submittedAt);
+        }
         if (task.waiting) {
             unqueue(task);
             tasks.remove(task);
@@ -283,10 +339,25 @@ public final class RequestDispatcher implements AutoCloseable {
         });
     }
 
+    /** The status code that classifies a finished request, or the cancelled and unknown codes. */
+    private static <T> int outcome(Task<T> task, T value, Throwable failure) {
+        if (failure == null) {
+            if (task.status == null) { return DispatchMetrics.UNKNOWN; }
+            try { return task.status.applyAsInt(value); }
+            catch (RuntimeException unreadable) { return DispatchMetrics.UNKNOWN; }
+        }
+        if (failure instanceof CancellationException) { return DispatchMetrics.CANCELLED; }
+        if (failure instanceof DeadlineExceededException) { return 504; }
+        if (failure instanceof QueueTimeoutException || failure instanceof DispatchRejectedException) { return 503; }
+        return 500;
+    }
+
     private void unqueue(Task<?> task) {
         var bucket = task.bucket;
         bucket.waiting.remove(task);
         queued--;
+        metrics.queued(-1);
+        if (metrics.enabled()) { metrics.queueWait(task.series, clock.getAsLong() - task.queuedAt); }
         if (bucket.waiting.isEmpty()) { queuedBuckets.remove(bucket); }
         task.waiting = false;
     }
@@ -295,6 +366,7 @@ public final class RequestDispatcher implements AutoCloseable {
         if (!task.reserved) { return; }
         task.reserved = false;
         active--;
+        metrics.active(-1);
         task.bucket.active--;
         tasks.remove(task);
         prune(task.bucket);
@@ -386,6 +458,9 @@ public final class RequestDispatcher implements AutoCloseable {
         private final ExecutionContext context;
         private final Callable<T> action;
         private final Bucket bucket;
+        private final DispatchMetrics.Series series;
+        private final ToIntFunction<? super T> status;
+        private final long submittedAt;
         private final CompletableFuture<T> result = new CompletableFuture<>();
         private ScheduledFuture<?> timer;
         private long timerGeneration;
@@ -397,10 +472,14 @@ public final class RequestDispatcher implements AutoCloseable {
         private boolean reserved;
         private boolean finished;
 
-        private Task(ExecutionContext context, Callable<T> action, Bucket bucket) {
+        private Task(ExecutionContext context, Callable<T> action, Bucket bucket,
+                DispatchMetrics.Series series, ToIntFunction<? super T> status, long submittedAt) {
             this.context = context;
             this.action = action;
             this.bucket = bucket;
+            this.series = series;
+            this.status = status;
+            this.submittedAt = submittedAt;
         }
 
         /**
