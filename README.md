@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="branding/logo.svg" alt="Axiom" height="96">
+</p>
+
 # Axiom
 
 [![Build](https://github.com/matrixjnr/axiom/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/matrixjnr/axiom/actions/workflows/build.yml)
