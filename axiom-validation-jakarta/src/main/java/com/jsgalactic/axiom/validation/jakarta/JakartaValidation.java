@@ -28,16 +28,21 @@ import org.hibernate.validator.messageinterpolation.ExpressionLanguageFeatureLev
  * }</pre>
  *
  * <p>Constraints may be placed on record components, fields and container elements; {@code @Valid}
- * cascades into nested objects and collection elements. Each constraint violation becomes a
+ * cascades into nested objects and collection elements. Put it on the type argument
+ * ({@code List<@Valid Item>}): {@code @Valid List<Item>} also cascades, but the provider logs
+ * deprecation warning {@code HV000271}, which is left visible on purpose. Groups and group
+ * sequences are passed to {@link #create(Class[])}; a class-level {@code @GroupSequence}
+ * redefining the default group is honored. Executable validation (method parameters and
+ * return values) is not offered: this validator checks values only. Each constraint violation becomes a
  * {@link Violation} whose field is the property path ({@code items[2].sku}; map keys and set
- * positions are omitted, class-level constraints report the object's path or
- * {@value FieldPath#ROOT}) and whose code is the constraint annotation's simple name in snake case
+ * positions are omitted, class-level constraints report the object's path or, for the validated
+ * value itself, the empty {@link FieldPath#ROOT}) and whose code is the constraint annotation's simple name in snake case
  * ({@code NotBlank} becomes {@code not_blank}, {@code DecimalMin} becomes {@code decimal_min}).
  * Provider messages and invalid values are never read into violations. Message interpolation is
  * disabled entirely, no Expression Language implementation is used, and {@code META-INF/validation.xml}
  * is ignored, so a template containing {@code ${...}} is never evaluated. Violations are sorted
  * by field and code and capped at {@link Validation#MAX_VIOLATIONS}. A {@code null} value is
- * reported as {@code not_null} at {@value FieldPath#ROOT}.
+ * reported as {@code not_null} on the whole value.
  *
  * <p>Instances are thread-safe and meant to be created once at startup and shared; creation
  * bootstraps the provider and is comparatively expensive. Close the instance when the application

@@ -107,6 +107,52 @@ class JacksonBodyCodecTest {
                 "type_mismatch", "item.quantity");
     }
 
+    /** The first problem in document order is reported, whichever kind of problem it is. */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "overflow, then duplicate key   | {\"item\":{\"name\":\"a\",\"quantity\":99999999999},\"any\":1,\"any\":2} | type_mismatch   | item.quantity",
+            "duplicate key, then overflow   | {\"any\":1,\"any\":2,\"item\":{\"name\":\"a\",\"quantity\":99999999999}} | duplicate_field |",
+            "overflow, then syntax error    | {\"item\":{\"name\":\"a\",\"quantity\":99999999999},\"any\":POISON}          | type_mismatch   | item.quantity",
+            "syntax error, then overflow    | {\"any\":POISON,\"item\":{\"name\":\"a\",\"quantity\":99999999999}}          | malformed_json  |",
+            "overflow, then excess nesting  | {\"item\":{\"name\":\"a\",\"quantity\":99999999999},\"any\":%s}              | type_mismatch   | item.quantity",
+            "overflow, then trailing        | {\"item\":{\"name\":\"a\",\"quantity\":99999999999}} 7                            | type_mismatch   | item.quantity",
+            "overflow, then bad UTF-8       | {\"item\":{\"name\":\"a\",\"quantity\":99999999999},\"any\":\"\u00e9\"}      | type_mismatch   | item.quantity",
+    })
+    void reportsTheFirstProblemInDocumentOrder(String name, String json, String code, String field) {
+        var text = json.replace("%s", "[".repeat(JacksonBodyCodec.MAX_NESTING_DEPTH + 1));
+        var bytes = text.contains("\u00e9") ? corrupt(text) : utf8(text);
+        assertDecodeFailure(bytes, Holder.class, code, field);
+    }
+
+    /** Replaces the {@code é} marker with a lone continuation byte, which is not valid UTF-8. */
+    private static byte[] corrupt(String text) {
+        var head = utf8(text.substring(0, text.indexOf('\u00e9')));
+        var tail = utf8(text.substring(text.indexOf('\u00e9') + 1));
+        var bytes = new byte[head.length + 1 + tail.length];
+        System.arraycopy(head, 0, bytes, 0, head.length);
+        bytes[head.length] = (byte) 0x80;
+        System.arraycopy(tail, 0, bytes, head.length + 1, tail.length);
+        return bytes;
+    }
+
+    @Test void reportsInvalidUtf8AtItsPositionInTheDocument() {
+        // Invalid bytes after a syntax error do not mask it, and before one they are reported first.
+        var invalid = new byte[] {(byte) 0x80};
+        assertDecodeFailure(concat(utf8("{\"any\":POISON,\"x\":\""), invalid, utf8("\"}")), Holder.class, "malformed_json", null);
+        assertDecodeFailure(concat(utf8("{\"any\":\""), invalid, utf8("\",\"x\":POISON}")), Holder.class, "invalid_encoding", null);
+        assertDecodeFailure(concat(utf8("{\"any\":1,\"any\":2,\"x\":\""), invalid, utf8("\"}")), Holder.class, "duplicate_field", null);
+        assertDecodeFailure(concat(utf8("{\"name\":\"caf"), new byte[] {(byte) 0xc3}), Item.class, "invalid_encoding", null);
+        // The parser looks one token ahead after a name; a later invalid byte must not hide an earlier mismatch.
+        assertDecodeFailure(concat(utf8("{\"item\":{\"name\":\"a\",\"quantity\":99999999999},\"any\":"), invalid, utf8("}")),
+                Holder.class, "type_mismatch", "item.quantity");
+    }
+
+    private static byte[] concat(byte[]... parts) {
+        var out = new java.io.ByteArrayOutputStream();
+        for (var part : parts) { out.writeBytes(part); }
+        return out.toByteArray();
+    }
+
     @Test void mapKeysAreNeverReportedAsFields() {
         var json = "{\"id\":\"o\",\"items\":[],\"extras\":{\"POISON<key>\":{\"name\":\"x\",\"quantity\":\"bad\"}}}";
         assertDecodeFailure(utf8(json), Order.class, "type_mismatch", "extras");

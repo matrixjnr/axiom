@@ -36,11 +36,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.jsgalactic.axiom.codec.spi.BodyCodec;
 import com.jsgalactic.axiom.error.DecodeException;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
@@ -245,36 +245,53 @@ public final class JacksonBodyCodec implements BodyCodec {
      * Reads the content as strict UTF-8. RFC 8259 lets parsers ignore a UTF-8 byte order mark;
      * other encodings are not detected.
      */
-    private static Reader reader(ByteBuffer content) {
-        var decoder = StandardCharsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT);
+    private static StrictUtf8Reader reader(ByteBuffer content) {
         int at = content.position();
         if (content.remaining() >= 3 && (content.get(at) & 0xff) == 0xef && (content.get(at + 1) & 0xff) == 0xbb
                 && (content.get(at + 2) & 0xff) == 0xbf) {
             content.position(at + 3);
         }
-        return new InputStreamReader(new BufferInputStream(content), decoder);
+        return new StrictUtf8Reader(content);
     }
 
-    /** Streams a buffer's remaining bytes, advancing its position. */
-    private static final class BufferInputStream extends InputStream {
-        private final ByteBuffer buffer;
+    /**
+     * Decodes a buffer as UTF-8 and reports malformed input only once every character before it
+     * has been delivered, so the parser handles the content in document order: a syntax or type
+     * problem before an invalid byte is reported first, as is the invalid byte itself otherwise.
+     */
+    private static final class StrictUtf8Reader extends Reader {
+        private final ByteBuffer bytes;
+        private final CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        private final CharBuffer decoded = CharBuffer.allocate(8192).limit(0);
 
-        BufferInputStream(ByteBuffer buffer) { this.buffer = buffer; }
+        private long delivered;
 
-        @Override public int read() { return buffer.hasRemaining() ? buffer.get() & 0xff : -1; }
+        StrictUtf8Reader(ByteBuffer bytes) { this.bytes = bytes; }
 
-        @Override public int read(byte[] target, int offset, int length) {
+        @Override public int read(char[] target, int offset, int length) throws IOException {
             Objects.checkFromIndexSize(offset, length, target.length);
             if (length == 0) { return 0; }
-            if (!buffer.hasRemaining()) { return -1; }
-            int count = Math.min(length, buffer.remaining());
-            buffer.get(target, offset, count);
+            if (!decoded.hasRemaining()) {
+                decoded.clear();
+                var result = decoder.decode(bytes, decoded, true);
+                decoded.flip();
+                if (!decoded.hasRemaining()) {
+                    if (result.isError()) { result.throwException(); }
+                    return -1;
+                }
+            }
+            int count = Math.min(length, decoded.remaining());
+            decoded.get(target, offset, count);
+            delivered += count;
             return count;
         }
 
-        @Override public int available() { return buffer.remaining(); }
+        /** The number of characters returned so far, which is the offset of an encoding failure. */
+        long delivered() { return delivered; }
+
+        @Override public void close() { }
     }
 
     /**
@@ -287,7 +304,7 @@ public final class JacksonBodyCodec implements BodyCodec {
     private DecodeException classify(IOException failure, ByteBuffer content) {
         if (causedBy(failure, StreamConstraintsException.class)) { return new DecodeException("limit_exceeded"); }
         if (causedBy(failure, StreamReadException.class) || causedBy(failure, CharacterCodingException.class)) {
-            var tokenFailure = scan(content);
+            var tokenFailure = scan(content, offsetOf(failure));
             if (tokenFailure != null) { return tokenFailure; }
         }
         if (failure instanceof UnrecognizedPropertyException unknown) {
@@ -310,13 +327,17 @@ public final class JacksonBodyCodec implements BodyCodec {
     }
 
     /**
-     * Reads every token of the content, with duplicate keys detected here rather than by the
-     * parser, and returns the first token-level failure, or null when the token stream is valid.
+     * Reads the tokens of the content, with duplicate keys detected here rather than by the
+     * parser, and returns the first token-level failure, or null when none comes before
+     * {@code limit}. Tokens that start after the character offset where the data binder failed
+     * are not examined, so the failure that comes first in the document is the one reported.
      */
-    private DecodeException scan(ByteBuffer content) {
+    private DecodeException scan(ByteBuffer content, long limit) {
         var names = new ArrayDeque<Set<String>>();
-        try (var parser = scanFactory.createParser(reader(content.duplicate()))) {
+        var reader = reader(content.duplicate());
+        try (var parser = scanFactory.createParser(reader)) {
             for (var token = parser.nextToken(); token != null; token = parser.nextToken()) {
+                if (parser.currentTokenLocation().getCharOffset() > limit) { return null; }
                 switch (token) {
                     case START_OBJECT -> names.push(new HashSet<>());
                     case START_ARRAY -> names.push(Set.of());
@@ -329,12 +350,27 @@ public final class JacksonBodyCodec implements BodyCodec {
             }
             return null;
         } catch (CharacterCodingException malformed) {
-            return new DecodeException("invalid_encoding");
-        } catch (StreamConstraintsException limit) {
-            return new DecodeException("limit_exceeded");
+            // The parser can look one token ahead, so the invalid byte may lie beyond the limit.
+            return reader.delivered() > limit ? null : new DecodeException("invalid_encoding");
+        } catch (StreamConstraintsException exceeded) {
+            return offsetOf(exceeded) > limit ? null : new DecodeException("limit_exceeded");
         } catch (IOException malformed) {
-            return new DecodeException("malformed_json");
+            return offsetOf(malformed) > limit ? null : new DecodeException("malformed_json");
         }
+    }
+
+    /**
+     * The character offset at which the first stream-level cause of a failure was detected, or
+     * {@link Long#MAX_VALUE} when it has none (an encoding failure is ordered by the reader).
+     */
+    private static long offsetOf(Throwable failure) {
+        for (var cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof StreamReadException read && read.getLocation() != null
+                    && read.getLocation().getCharOffset() >= 0) {
+                return read.getLocation().getCharOffset();
+            }
+        }
+        return Long.MAX_VALUE;
     }
 
     private static boolean causedBy(Throwable failure, Class<? extends Throwable> type) {

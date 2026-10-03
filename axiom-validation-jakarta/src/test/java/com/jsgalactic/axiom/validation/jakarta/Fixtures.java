@@ -49,6 +49,24 @@ final class Fixtures {
 
     record Draft(@NotBlank String title, @NotBlank(groups = Publishing.class) String body) {}
 
+    /** Cheap checks run first, expensive ones only when they pass. */
+    interface Basic {}
+
+    interface Costly {}
+
+    /** A group sequence: validation stops at the first group with violations. */
+    @jakarta.validation.GroupSequence({Basic.class, Costly.class})
+    interface BasicThenCostly {}
+
+    record Account(@NotBlank(groups = Basic.class) String name, @Size(min = 5, groups = Costly.class) String password) {}
+
+    /** Redefines the default group as a sequence: the class's own constraints, then {@link Costly}. */
+    @jakarta.validation.GroupSequence({Sequenced.class, Costly.class})
+    record Sequenced(@NotBlank String name, @Size(min = 5, groups = Costly.class) String password) {}
+
+    /** Cascades with {@code @Valid} on the container itself, the form Hibernate Validator deprecates. */
+    record Legacy(@Valid List<Item> items) {}
+
     /** Fails every value and tries to make the provider evaluate expressions in its messages. */
     @Constraint(validatedBy = Interpolating.Check.class)
     @Target({FIELD, METHOD, PARAMETER, TYPE_USE, ANNOTATION_TYPE})

@@ -32,7 +32,10 @@ public class DecodeException extends BadRequestException {
      */
     public DecodeException(String code, String field) {
         super(code);
-        if (field != null) { new Violation(field, code); }
+        if (field != null) {
+            if (field.isEmpty()) { throw new IllegalArgumentException("A decode failure field must not be empty"); }
+            new Violation(field, code);
+        }
         this.field = field;
     }
 

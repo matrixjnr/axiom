@@ -165,7 +165,7 @@ public final class Rules<T> implements Validator<T> {
     }
 
     /**
-     * Adds a check of the whole value, reported at {@value FieldPath#ROOT}.
+     * Adds a check of the whole value, reported at the whole value ({@link FieldPath#ROOT}).
      *
      * @param test predicate returning true for valid values; never called with null
      * @param code violation code
@@ -211,7 +211,7 @@ public final class Rules<T> implements Validator<T> {
     }
 
     /**
-     * Checks a value; {@code null} is reported as {@code not_null} at {@value FieldPath#ROOT}.
+     * Checks a value; {@code null} is reported as {@code not_null} at the whole value ({@link FieldPath#ROOT}).
      *
      * @param value value to check
      * @return immutable violations, at most {@link Validation#MAX_VIOLATIONS}
