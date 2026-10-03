@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Request-scoped view and response settings for one handler invocation.
@@ -130,6 +131,123 @@ public interface Context {
      */
     default List<String> queryAll(String name) {
         return request().queryAll(name);
+    }
+
+    /**
+     * Returns the first value of a query parameter as an {@code int}. Accepts an optional leading
+     * {@code -} and one to 19 ASCII digits (no {@code +}, spaces, separators or exponent); leading zeros
+     * are accepted within that length. An absent parameter is empty. A parameter that is present but not an {@code int}
+     * (including the empty value and one out of range) is the client's error: the failure is a
+     * {@link BadRequestException} with code {@code invalid_query_parameter}, answered 400 like any
+     * other {@link com.jsgalactic.axiom.error.AxiomException}; it never carries the value or the name.
+     * A repeated parameter uses its first value, as {@link #query(String)} does.
+     *
+     * @param name decoded parameter name
+     * @return the value, if the parameter is present
+     * @throws BadRequestException if the value is not an {@code int}
+     */
+    default Optional<Integer> queryInt(String name) {
+        return query(name).map(value -> (int) parseInteger(value, Integer.MIN_VALUE, Integer.MAX_VALUE,
+                "invalid_query_parameter"));
+    }
+
+    /**
+     * Returns the first value of a query parameter as a {@code long}, with the rules and the
+     * failure of {@link #queryInt(String)}.
+     *
+     * @param name decoded parameter name
+     * @return the value, if the parameter is present
+     * @throws BadRequestException with code {@code invalid_query_parameter} if the value is not a {@code long}
+     */
+    default Optional<Long> queryLong(String name) {
+        return query(name).map(value -> parseInteger(value, Long.MIN_VALUE, Long.MAX_VALUE,
+                "invalid_query_parameter"));
+    }
+
+    /**
+     * Returns the first value of a query parameter as a {@link UUID}. Accepts only the canonical
+     * 36-character form, {@code 8-4-4-4-12} hexadecimal digits in either case, and nothing else
+     * (the lenient forms of {@link UUID#fromString} are rejected). The failure is as for
+     * {@link #queryInt(String)}.
+     *
+     * @param name decoded parameter name
+     * @return the value, if the parameter is present
+     * @throws BadRequestException with code {@code invalid_query_parameter} if the value is not a UUID
+     */
+    default Optional<UUID> queryUuid(String name) {
+        return query(name).map(value -> parseUuid(value, "invalid_query_parameter"));
+    }
+
+    /**
+     * Reads a raw path capture as an {@code int}, with the rules of {@link #queryInt(String)}. A
+     * capture that is not an {@code int} is the client's error: a {@link BadRequestException} with
+     * code {@code invalid_path_parameter}, answered 400, which never carries the value. Captures are
+     * not percent-decoded first, so an escaped digit is not a number.
+     *
+     * @param name capture name declared in the route template
+     * @return the value
+     * @throws IllegalArgumentException if the name is not declared by the matched route
+     * @throws BadRequestException if the capture is not an {@code int}
+     */
+    default int pathInt(String name) {
+        return (int) parseInteger(path(name), Integer.MIN_VALUE, Integer.MAX_VALUE, "invalid_path_parameter");
+    }
+
+    /**
+     * Reads a raw path capture as a {@code long}; see {@link #pathInt(String)}.
+     *
+     * @param name capture name declared in the route template
+     * @return the value
+     * @throws IllegalArgumentException if the name is not declared by the matched route
+     * @throws BadRequestException with code {@code invalid_path_parameter} if the capture is not a {@code long}
+     */
+    default long pathLong(String name) {
+        return parseInteger(path(name), Long.MIN_VALUE, Long.MAX_VALUE, "invalid_path_parameter");
+    }
+
+    /**
+     * Reads a raw path capture as a {@link UUID}, with the rules of {@link #queryUuid(String)}; see
+     * {@link #pathInt(String)} for the failure.
+     *
+     * @param name capture name declared in the route template
+     * @return the value
+     * @throws IllegalArgumentException if the name is not declared by the matched route
+     * @throws BadRequestException with code {@code invalid_path_parameter} if the capture is not a UUID
+     */
+    default UUID pathUuid(String name) {
+        return parseUuid(path(name), "invalid_path_parameter");
+    }
+
+    private static long parseInteger(String value, long min, long max, String code) {
+        int length = value.length();
+        int start = length > 0 && value.charAt(0) == '-' ? 1 : 0;
+        // At most 19 digits fit a long; reject longer input before any arithmetic.
+        if (length == start || length - start > 19) { throw new BadRequestException(code); }
+        long result = 0;
+        for (int i = start; i < length; i++) {
+            char c = value.charAt(i);
+            if (c < '0' || c > '9') { throw new BadRequestException(code); }
+            int digit = c - '0';
+            // Accumulate negatively so Long.MIN_VALUE needs no special case.
+            if (result < (Long.MIN_VALUE + digit) / 10) { throw new BadRequestException(code); }
+            result = result * 10 - digit;
+        }
+        if (start == 0) {
+            if (result == Long.MIN_VALUE) { throw new BadRequestException(code); }
+            result = -result;
+        }
+        if (result < min || result > max) { throw new BadRequestException(code); }
+        return result;
+    }
+
+    private static UUID parseUuid(String value, String code) {
+        if (value.length() != 36) { throw new BadRequestException(code); }
+        for (int i = 0; i < 36; i++) {
+            char c = value.charAt(i);
+            boolean hyphen = i == 8 || i == 13 || i == 18 || i == 23;
+            if (hyphen ? c != '-' : Character.digit(c, 16) < 0 || c > 'f') { throw new BadRequestException(code); }
+        }
+        return UUID.fromString(value);
     }
 
     /**

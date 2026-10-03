@@ -343,8 +343,8 @@ All captures are untrusted client input. A wildcard remainder spans several
 segments and contains `/`; the rules above keep `..` and encoded separators out of
 it, but resolving it against a file system still requires the application's own
 containment check (for example, normalizing a `Path` and verifying its prefix).
-Typed parameter conversion is separate work; request body limits are described in
-[request bodies](bodies.md).
+Typed conversion is in [typed parameters](#typed-parameters); request body limits are
+described in [request bodies](bodies.md).
 
 ## Query parameters
 
@@ -380,7 +380,43 @@ case-sensitive.
 `ctx.query(name)` returns the first value, `ctx.queryAll(name)` an immutable list
 of every value in order (empty when absent); `Request` has the same methods. Values
 are decoded on each call rather than cached, which the limits keep cheap. Typed
-conversion is left to the application, as for path captures.
+conversion is described next.
+
+## Typed parameters
+
+Query parameters and path captures convert to numbers and UUIDs with one small set of
+accessors on `Context`:
+
+| Source | `int` | `long` | `UUID` |
+| --- | --- | --- | --- |
+| Query parameter (first value) | `Optional<Integer> queryInt(name)` | `Optional<Long> queryLong(name)` | `Optional<UUID> queryUuid(name)` |
+| Path capture | `int pathInt(name)` | `long pathLong(name)` | `UUID pathUuid(name)` |
+
+```java
+int page = ctx.queryInt("page").orElse(1);
+UUID id = ctx.pathUuid("id");
+```
+
+An absent query parameter is an empty `Optional`; a path capture is always present
+for a declared name, and an undeclared name is the same `IllegalArgumentException` as
+for `ctx.path(name)` (a handler bug, 500 over HTTP). A repeated query parameter uses
+its first value; read `ctx.queryAll(name)` to convert the others yourself.
+
+Parsing is strict. Integers are an optional leading `-` and one to 19 ASCII digits
+within the type's range; leading zeros are accepted. A leading `+`, spaces, digit
+separators, exponents, hexadecimal, non-ASCII digits and out-of-range values are
+rejected, and so is an empty value (`?page=`). A UUID is the canonical 36-character
+`8-4-4-4-12` form with hexadecimal digits in either case; the lenient forms that
+`UUID.fromString` takes (`1-1-1-1-1`) are rejected. A path capture is converted raw,
+without percent-decoding, so `%31` is not the number 1.
+
+A value that does not convert is the client's error: the accessor throws
+`BadRequestException` and the client receives a **400** problem response (see
+[errors](errors.md)) with code `invalid_query_parameter` or `invalid_path_parameter`.
+The exception message and the response contain neither the value nor the parameter
+name, and no `NumberFormatException` or parser output ever reaches the caller. Other
+types (booleans, enums, dates) are left to the application; throw a
+`BadRequestException` with your own code for a value it cannot accept.
 
 ## Implementation and verification
 

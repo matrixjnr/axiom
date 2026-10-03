@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add typed parameter accessors `Context.queryInt`, `queryLong`, `queryUuid`, `pathInt`, `pathLong` and `pathUuid`; strict parsing, and a value that does not convert answers 400 with code `invalid_query_parameter` or `invalid_path_parameter` without echoing input.
 - Customise the router's own 404, 405 and 501 answers with `Application.notFound`, `methodNotAllowed` and `notImplemented` handlers instead of middleware; the 405 `Allow` header is always preserved. **Binary incompatible (pre-release):** `Application` gained these three methods.
 - Add `Application.recognizeMethods(...)` to declare extension methods that no route has, so they are answered 404 rather than 501 on unrouted paths. **Binary incompatible (pre-release):** `Application` gained `recognizeMethods(String...)`.
 - Add `Context.automaticOptions()` so an explicit OPTIONS route, such as a wildcard preflight handler, can answer the requests it does not handle with the automatic 204 and accurate `Allow` list.
