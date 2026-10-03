@@ -76,6 +76,10 @@ public final class ResponseSerialization {
      * @return a description naming the broken rule, or {@code null} when the response is sendable
      */
     public static String rejection(Response response) {
+        if (response.isStreaming()) {
+            return headersSendable(response.headers()) ? null
+                    : "Response headers exceed " + MAX_HEADER_BYTES + " bytes or are not Latin-1";
+        }
         var body = response.body();
         if (body != null && !(body instanceof byte[]) && !(body instanceof String)) {
             return "Response body of type " + body.getClass().getName()

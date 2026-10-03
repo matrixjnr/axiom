@@ -19,12 +19,21 @@ import java.util.regex.Pattern;
  * {@code Context.json}); without such a codec the HTTP transport answers 500. Two responses are equal when their statuses,
  * headers (names compared case-insensitively), and bodies are equal, comparing byte arrays
  * by content and other bodies with {@link Object#equals(Object)}.
+ * <p>
+ * A response can instead be a stream (see {@link #stream}): its bytes are produced by a
+ * {@link StreamBody} while the connection is open rather than held in memory. {@link #body()}
+ * returns that {@code StreamBody}; it is never encoded by a codec.
  */
 public final class Response {
+    /** Default cap on the bytes of a streamed response body: 64 MiB. */
+    public static final long DEFAULT_STREAM_LIMIT = 64L * 1024 * 1024;
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
     private final int status;
     private final Object body;
     private final Map<String, String> headers;
+
+    /** The body of a streamed response: what writes it and the most bytes it may write. */
+    private record Streaming(StreamBody writer, long maxBytes) { }
 
     private Response(int status, Object body, Map<String, String> headers) {
         validateStatus(status);
@@ -44,12 +53,55 @@ public final class Response {
      * @param status final HTTP status (200-599)
      * @param body body value or null
      * @return a response with a content type for String or byte[] bodies
+     * @throws IllegalArgumentException for a {@link StreamBody}; use {@link #stream}
      */
     public static Response of(int status, Object body) {
+        if (body instanceof StreamBody) {
+            throw new IllegalArgumentException("A StreamBody must be sent with Response.stream");
+        }
         Map<String, String> headers = body instanceof String
                 ? Map.of("Content-Type", "text/plain; charset=utf-8")
                 : body instanceof byte[] ? Map.of("Content-Type", "application/octet-stream") : Map.of();
         return new Response(status, body, headers);
+    }
+
+    /**
+     * Creates a streamed response with the {@linkplain #DEFAULT_STREAM_LIMIT default byte cap}.
+     *
+     * @param status final HTTP status (200-599) other than 204, 205 and 304
+     * @param contentType Content-Type header value
+     * @param body writes the body after the head has been sent
+     * @return a streamed response
+     * @throws IllegalArgumentException for a status that cannot carry a body or an invalid content type
+     * @see #stream(int, String, long, StreamBody)
+     */
+    public static Response stream(int status, String contentType, StreamBody body) {
+        return stream(status, contentType, DEFAULT_STREAM_LIMIT, body);
+    }
+
+    /**
+     * Creates a streamed response. The head is sent first, then the runtime calls
+     * {@code body} on the handler's virtual thread, so the admission slot and the request deadline
+     * apply until it returns. On HTTP/1.1 the body is sent with chunked transfer encoding; on
+     * HTTP/1.0 it ends with the connection. A HEAD request receives the head only and
+     * {@code body} is not called. Any {@code Content-Length} header is ignored.
+     * <p>
+     * Once the head is sent the status cannot change. A body that throws, exceeds
+     * {@code maxBytes} or outlives the deadline ends the response by closing the connection, so the
+     * client sees a truncated body, never a second response. See {@link BodyWriter}.
+     *
+     * @param status final HTTP status (200-599) other than 204, 205 and 304
+     * @param contentType Content-Type header value
+     * @param maxBytes most body bytes the stream may write; positive
+     * @param body writes the body after the head has been sent
+     * @return a streamed response
+     * @throws IllegalArgumentException for a status that cannot carry a body, a non-positive cap or
+     *         an invalid content type
+     */
+    public static Response stream(int status, String contentType, long maxBytes, StreamBody body) {
+        Objects.requireNonNull(body, "body");
+        if (maxBytes <= 0) { throw new IllegalArgumentException("Stream limit must be positive"); }
+        return new Response(status, new Streaming(body, maxBytes), Map.of()).withHeader("Content-Type", contentType);
     }
 
     /**
@@ -125,8 +177,29 @@ public final class Response {
      * @return body value, with a defensive copy for byte arrays
      */
     public Object body() {
-        return body instanceof byte[] bytes ? bytes.clone() : body;
+        return body instanceof byte[] bytes ? bytes.clone() : body instanceof Streaming stream ? stream.writer : body;
     }
+
+    /**
+     * Reports whether the body is produced by a {@link StreamBody}.
+     *
+     * @return true for a response made by {@link #stream}
+     */
+    public boolean isStreaming() { return body instanceof Streaming; }
+
+    /**
+     * Returns the body writer of a streamed response.
+     *
+     * @return the writer, or null when the response is not streaming
+     */
+    public StreamBody streamBody() { return body instanceof Streaming stream ? stream.writer : null; }
+
+    /**
+     * Returns the byte cap of a streamed response.
+     *
+     * @return the cap, or zero when the response is not streaming
+     */
+    public long streamLimit() { return body instanceof Streaming stream ? stream.maxBytes : 0; }
 
     /**
      * Returns immutable, case-insensitive header map.
@@ -190,6 +263,8 @@ public final class Response {
                     : '"' + text.substring(0, 80) + "\"... (" + text.length() + " chars)";
         } else if (body instanceof byte[] bytes) {
             description = "byte[" + bytes.length + "]";
+        } else if (body instanceof Streaming stream) {
+            description = "stream(limit=" + stream.maxBytes + ")";
         } else {
             description = body.getClass().getName();
         }
