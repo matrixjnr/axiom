@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Customise the router's own 404, 405 and 501 answers with `Application.notFound`, `methodNotAllowed` and `notImplemented` handlers instead of middleware; the 405 `Allow` header is always preserved. **Binary incompatible (pre-release):** `Application` gained these three methods.
 - Add `Application.recognizeMethods(...)` to declare extension methods that no route has, so they are answered 404 rather than 501 on unrouted paths. **Binary incompatible (pre-release):** `Application` gained `recognizeMethods(String...)`.
 - Add `Context.automaticOptions()` so an explicit OPTIONS route, such as a wildcard preflight handler, can answer the requests it does not handle with the automatic 204 and accurate `Allow` list.
 - List `OPTIONS` in the `Allow` header of 405 responses, since every routed path answers it (RFC 9110 section 15.5.6); the list now equals the automatic OPTIONS answer.

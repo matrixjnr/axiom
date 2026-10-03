@@ -60,6 +60,9 @@ final class DefaultApplication implements Application {
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
     private final Set<String> recognizedMethods = new java.util.TreeSet<>();
+    private Handler notFoundHandler;
+    private Handler methodNotAllowedHandler;
+    private Handler notImplementedHandler;
     /** Group callbacks currently running; startup is refused while any is open. */
     private int openGroups;
     private final List<Server> listeners = new ArrayList<>();
@@ -142,6 +145,27 @@ final class DefaultApplication implements Application {
         }
         registrations.put(route, new Registration(handler, scope, routeMiddleware));
         return route;
+    }
+
+    @Override
+    public synchronized Application notFound(Handler handler) {
+        requireState(State.CONFIGURING);
+        notFoundHandler = Objects.requireNonNull(handler, "handler");
+        return this;
+    }
+
+    @Override
+    public synchronized Application methodNotAllowed(Handler handler) {
+        requireState(State.CONFIGURING);
+        methodNotAllowedHandler = Objects.requireNonNull(handler, "handler");
+        return this;
+    }
+
+    @Override
+    public synchronized Application notImplemented(Handler handler) {
+        requireState(State.CONFIGURING);
+        notImplementedHandler = Objects.requireNonNull(handler, "handler");
+        return this;
     }
 
     @Override
@@ -317,12 +341,37 @@ final class DefaultApplication implements Application {
         });
         var router = CompiledRouter.compile(chains, Set.copyOf(recognizedMethods));
         // Answers the router produces itself are wrapped by global middleware only.
-        var unmatched = Pipeline.compose(global, context -> ((DefaultContext) context).frameworkAnswer());
+        var unmatched = Pipeline.compose(global, unmatchedTerminal(notFoundHandler, methodNotAllowedHandler,
+                notImplementedHandler));
         runtime = snapshot(router, unmatched, new ErrorHandlers(errorHandlers), codecs);
         registrations.clear();
         shapes.clear();
         state = State.RUNNING;
         return this;
+    }
+
+    /**
+     * The innermost step for requests no route serves: the router's own answer, or the handler the
+     * application installed for its status. A handler runs with that status preset on the context;
+     * the 405 {@code Allow} list is the router's whatever the handler sets. The automatic OPTIONS
+     * answer (204) has no hook.
+     */
+    private static Handler unmatchedTerminal(Handler notFound, Handler methodNotAllowed, Handler notImplemented) {
+        return context -> {
+            var unmatched = (DefaultContext) context;
+            var answer = unmatched.frameworkAnswer();
+            var hook = switch (answer.status()) {
+                case 404 -> notFound;
+                case 405 -> methodNotAllowed;
+                case 501 -> notImplemented;
+                default -> null;
+            };
+            if (hook == null) { return answer; }
+            unmatched.status(answer.status());
+            var result = hook.handle(unmatched);
+            var response = result instanceof Response given ? given : unmatched.response(result);
+            return answer.status() == 405 ? response.withHeader("Allow", answer.headers().get("Allow")) : response;
+        };
     }
 
     private Runtime snapshot(CompiledRouter router, Handler unmatched, ErrorHandlers errors, Codecs codecs) {
@@ -574,6 +623,9 @@ final class DefaultApplication implements Application {
             root.middleware.clear();
             errorHandlers.clear();
             recognizedMethods.clear();
+            notFoundHandler = null;
+            methodNotAllowedHandler = null;
+            notImplementedHandler = null;
             shapes.clear();
             routePolicies.clear();
             owned = List.copyOf(listeners);

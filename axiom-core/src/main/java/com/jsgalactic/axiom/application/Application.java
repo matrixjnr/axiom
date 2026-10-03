@@ -86,6 +86,47 @@ public interface Application extends RouteGroup, AutoCloseable {
     Route route(String method, String path, Handler handler, Middleware... middleware);
 
     /**
+     * Customises the 404 answer for a path no template matches (and a recognized method; see
+     * {@link #recognizeMethods}) before startup, without middleware. The handler runs as the
+     * innermost step of the global middleware chain, with the status already set to 404, so
+     * {@code ctx.json(body)} and {@code ctx.text(text)} answer 404 and a returned {@code null}
+     * is a 404 without a body. It may return any {@link Response}, or throw: exceptions are mapped
+     * as for any handler, by {@link #error} handlers or into a problem response. No route matched:
+     * {@code ctx.route()} throws and {@code ctx.matchedRoute()} is empty. Without a handler the
+     * answer is the {@code application/problem+json} 404. A second call replaces the first.
+     *
+     * @param handler shared, thread-safe handler
+     * @return this application
+     * @throws IllegalStateException if configuration has ended
+     */
+    Application notFound(Handler handler);
+
+    /**
+     * Customises the 405 answer for a path some template matches but none serves the method of,
+     * before startup. It behaves as {@link #notFound} with the status preset to 405. The
+     * {@code Allow} header is always the router's list (see the method table above): it is set on the
+     * handler's response whatever the handler sets, so a custom answer cannot omit or contradict it.
+     * OPTIONS requests are never 405: they are answered automatically (see
+     * {@link com.jsgalactic.axiom.context.Context#automaticOptions()}), so this handler never sees one.
+     *
+     * @param handler shared, thread-safe handler
+     * @return this application
+     * @throws IllegalStateException if configuration has ended
+     */
+    Application methodNotAllowed(Handler handler);
+
+    /**
+     * Customises the 501 answer for an unrecognized method on a path no template matches, before
+     * startup. It behaves as {@link #notFound} with the status preset to 501. {@code CONNECT} is
+     * answered 501 before routing and middleware and is not customised.
+     *
+     * @param handler shared, thread-safe handler
+     * @return this application
+     * @throws IllegalStateException if configuration has ended
+     */
+    Application notImplemented(Handler handler);
+
+    /**
      * Declares methods this application recognizes although no route has them, before startup.
      * A request whose path matches no template is answered 404 for a recognized method and 501
      * for any other (RFC 9110 section 15.6.2). Recognized are the RFC 9110 methods, {@code PATCH},

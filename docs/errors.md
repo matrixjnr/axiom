@@ -111,8 +111,11 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
   answered with the generic 500 problem body, in memory, in `TestClient` and over
   HTTP. That 500 keeps a keep-alive connection open.
 - Router answers (404, 405, 501, automatic OPTIONS) are responses, not exceptions,
-  and are never offered; customize them with global middleware. Requests rejected
-  before routing (413, CONNECT) and listener errors are not offered either.
+  and are never offered. Customize them with `app.notFound`, `app.methodNotAllowed`
+  and `app.notImplemented` (see [customising router answers](routing.md#customising-router-answers)),
+  or with global middleware. Exceptions those handlers throw are offered like any
+  handler's. Requests rejected before routing (413, CONNECT) and listener errors are
+  not offered either.
 - A mapped failure is logged at WARNING with the request ID and the exception,
   server-side only, unless it is an `AxiomException` below 500 answered below
   500 (an expected client error). Translations by throwing an `AxiomException`

@@ -238,6 +238,45 @@ proxies, logs and access rules see differ from the one the application executes.
 application that must serve clients limited to GET and POST can register an explicit
 POST route that performs the action.
 
+### Customising router answers
+
+The 404, 405 and 501 answers the router produces itself can be replaced with
+dedicated handlers, without middleware:
+
+```java
+app.notFound(ctx -> ctx.json("{\"error\":\"no such resource\"}"));
+app.methodNotAllowed(ctx -> ctx.text("try another method"));
+app.notImplemented(ctx -> ctx.text("unsupported method " + ctx.method()));
+```
+
+| Hook | Replaces | Status preset on the context |
+| --- | --- | --- |
+| `notFound` | 404: no template matches the path and the method is [recognized](#custom-methods) | 404 |
+| `methodNotAllowed` | 405: a template matches the path but none has the method | 405 |
+| `notImplemented` | 501: no template matches the path and the method is not recognized | 501 |
+
+A hook is an ordinary handler. It runs as the innermost step of the global
+[middleware](middleware.md) chain, which therefore still wraps the answer (as it does
+the built-in ones), and group and route middleware do not run. The context's status is
+already the hook's status, so `ctx.json(body)`, `ctx.text(text)` and a returned
+`null` answer 404, 405 or 501; return a `Response` to choose another status. No route
+matched: `ctx.route()` throws and `ctx.matchedRoute()` is empty; use `ctx.path()`,
+`ctx.method()` and `ctx.execution().requestId()` for what the default problem body
+would carry. A custom body is a normal response, so it is subject to `Accept`
+negotiation (406) like any handler response, and nothing is escaped or restricted for
+you: never echo request data into it unfiltered. Exceptions thrown by a hook are
+mapped like those of any handler, by [error handlers](errors.md#error-handlers) or
+into a problem response; throwing an `AxiomException` is the way to keep the problem
+format with a different code.
+
+For 405 the router sets `Allow` on the hook's response whatever the hook set, so a
+custom answer cannot omit or contradict the list (see [Methods](#methods)). Over HEAD
+the body is suppressed as always. Not customisable by these hooks: the automatic
+[OPTIONS](#automatic-options) answer and `OPTIONS *` (use an explicit OPTIONS route
+that returns `ctx.automaticOptions()` for what it does not handle), and answers
+produced before routing: 400, 413 and CONNECT's 501. Each hook is set at most once
+before `start()`; a second call replaces the first.
+
 ## Conflicts and startup
 
 Identical method/template pairs fail at registration. So do distinct templates
