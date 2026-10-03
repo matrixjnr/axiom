@@ -101,7 +101,27 @@ the workflow artifacts and the release. Until then the dependency list in
 `gradle/verification-metadata.xml` is committed and enforced. After a dependency or
 plugin version change, regenerate it with the command in `docs/build.md`, review the
 diff, and commit it together with the version change. Checksums are
-trust-on-first-use; consider enabling signature verification later.
+trust-on-first-use.
+
+Trust model and review. Gradle signature verification (`verify-signatures`) was
+evaluated and is not enabled. Of the 263 jar and POM files then in the root metadata, 259 have a
+detached `.asc` on Maven Central (the others are plugin portal artifacts and one old
+parent POM), but verification would need a keyring entry for every
+signing key of 151 components, including Gradle plugin portal artifacts that are not
+signed, and every update would add or change keys to review. The checksums therefore
+trust Maven Central and the plugin portal as served when the entry was first recorded;
+a later change of content under the same version fails the build. A reviewer of a
+metadata change checks that: only components of the changed dependency appear in the
+diff; versions match the catalog; no existing checksum changed (a changed checksum for an
+unchanged version is a red flag and blocks the change); every `.module` has its `.pom`
+(`python3 .github/scripts/verify-pom-checksums.py`, run by the `build` job); and, for new
+components, that the group and name are the expected ones. Revisit signatures if the
+dependency set shrinks or a project publishes its keys in a verifiable way.
+
+To regenerate on a dependency update pull request, check out its branch, run the commands
+in `docs/build.md` (root build, then the consumers), run `verify-pom-checksums.py --fix`,
+and push the result on top of the bot's commit. Dependabot also covers `build-logic` and
+the `compatibility/` consumers; their metadata is regenerated the same way.
 
 ## Netty and Jackson update policy
 
@@ -135,7 +155,8 @@ reviewed more closely than other dependency updates.
 
 - `build.yml`: `./gradlew clean check` and the hello smoke run on JDK 21, Linux, for
   pushes to `main` and pull requests. Pull requests also run the `commits` job, which
-  builds each commit of the PR (up to 20, see `docs/build.md`).
+  builds each commit of the PR (up to 20, tip only for `dependabot/` branches, see
+  `docs/build.md`).
 - `compatibility.yml`: weekly and on demand; runs `./gradlew compatibilityTest`
   (Gradle Kotlin, Gradle Groovy and Maven consumers).
 - `release.yml`: on `v*` tags; skeleton described above.
