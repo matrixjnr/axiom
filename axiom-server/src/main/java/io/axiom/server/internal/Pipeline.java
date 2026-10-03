@@ -44,10 +44,15 @@ final class Pipeline {
         };
     }
 
-    /** The rest of a chain for one request; confined to the request's thread like the context. */
+    /**
+     * The rest of a chain for one request. Confined to the request's thread like the context: a
+     * call from any other thread fails before reading {@code used}, so the flag needs no
+     * synchronization.
+     */
     private static final class Link implements Middleware.Next {
         private final Handler inner;
         private final Context context;
+        private final Thread owner = Thread.currentThread();
         private boolean used;
 
         Link(Handler inner, Context context) {
@@ -57,6 +62,9 @@ final class Pipeline {
 
         @Override
         public Response run() throws Exception {
+            if (Thread.currentThread() != owner) {
+                throw new IllegalStateException("next.run() must be called on the request's thread");
+            }
             if (used) {
                 throw new IllegalStateException("next.run() may be called once, and only while the middleware runs");
             }

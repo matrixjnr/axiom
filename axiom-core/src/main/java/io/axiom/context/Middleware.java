@@ -51,7 +51,8 @@ public interface Middleware {
          *
          * @return the response of the rest of the chain
          * @throws Exception whatever the rest of the chain throws
-         * @throws IllegalStateException if called a second time, or after the middleware returned
+         * @throws IllegalStateException if called a second time, after the middleware returned, or
+         *         from a thread other than the request's
          */
         Response run() throws Exception;
     }

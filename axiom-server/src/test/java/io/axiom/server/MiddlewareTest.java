@@ -202,6 +202,31 @@ class MiddlewareTest {
     }
 
     @Test
+    void rejectsContinuationsFromAnotherThread() throws Exception {
+        var failure = new AtomicReference<Throwable>();
+        try (var app = Axiom.create()) {
+            app.get("/offloaded", ctx -> {
+                calls.add("handler");
+                return "ran";
+            }, (ctx, next) -> {
+                var other = Thread.ofPlatform().start(() -> {
+                    try {
+                        next.run();
+                    } catch (Throwable thrown) {
+                        failure.set(thrown);
+                    }
+                });
+                other.join(10_000);
+                return Response.of(202, null);
+            });
+            app.start();
+            assertThat(app.handle(Request.get("/offloaded")).status()).isEqualTo(202);
+            assertThat(failure.get()).isInstanceOf(IllegalStateException.class).hasMessageContaining("thread");
+            assertThat(calls).isEmpty();
+        }
+    }
+
+    @Test
     void globalMiddlewareWrapsRouterAnswersButGroupAndRouteMiddlewareDoNot() throws Exception {
         var routes = new ArrayList<String>();
         try (var app = Axiom.create()) {

@@ -52,8 +52,9 @@ translate or let propagate.
   today (`String` to text, `null` to 204, the context status). Codec encoding and
   the Accept check (406) happen once, after the whole chain, so a middleware sees
   `ctx.json(value)` bodies unencoded and can short-circuit with `ctx.json(...)` too.
-- `next.run()` may be called at most once, and only while the middleware runs;
-  a second or late call throws `IllegalStateException`.
+- `next.run()` may be called at most once, only while the middleware runs and
+  only on the request's thread; a second, late or other-thread call throws
+  `IllegalStateException`.
 - Returning `null` is a programming error (`IllegalStateException`), treated like
   any other exception.
 - The context is the handler's context: the same thread confinement rules apply,
