@@ -93,7 +93,7 @@ for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 | 400 | Empty body or codec failure in `ctx.body` | Runtime |
 | 400 | Path capture that `ctx.pathDecoded` cannot decode safely (malformed UTF-8, or a decoded separator, backslash, NUL or dot segment); code `invalid_path_encoding` | Runtime |
 | 404 | No route matches the path | Runtime |
-| 405 | Route exists for other methods; `Allow` lists them | Runtime |
+| 405 | Route exists for other methods, including every TRACE request to a routed path; `Allow` lists them | Runtime |
 | 406 | Accept excludes the codec response's media type, decided after the handler ran (see [negotiation](bodies.md#accept-negotiation-406)) | Runtime |
 | 408 | Request head not complete within ten seconds, or body not complete by the request deadline | Listener |
 | 413 | Body over `maxRequestBody` | Listener and runtime |

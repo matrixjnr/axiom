@@ -111,6 +111,18 @@ them (RFC 9112 section 3.2.2), but normalizing one would mean choosing between t
 target's authority and `Host`, so Axiom does not and treats them as an unsupported
 target.
 
+### TRACE
+
+TRACE routes cannot be registered: `app.route("TRACE", ...)` throws
+`IllegalArgumentException`. A TRACE response echoes the request message, which
+includes cookies and `Authorization` headers; together with a script that can send
+TRACE, that leaks credentials that are otherwise hidden from scripts (cross-site
+tracing), and an application has no safe use for the echo. A TRACE request is routed
+like any other method that no route has: **405** with `Allow` for a path that has
+routes and 404 otherwise, each with the usual problem body that contains no request
+data. `Allow` never lists TRACE. Methods are case-sensitive, so `trace` is an
+ordinary extension method and may be registered.
+
 ## Conflicts and startup
 
 Identical method/template pairs fail at registration. So do distinct templates

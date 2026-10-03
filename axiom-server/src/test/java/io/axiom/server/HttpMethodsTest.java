@@ -140,6 +140,32 @@ class HttpMethodsTest {
     }
 
     @Test
+    void refusesTraceRoutes() {
+        try (var app = Axiom.create()) {
+            assertThatIllegalArgumentException().isThrownBy(() -> app.route("TRACE", "/x", ctx -> ctx.request()))
+                    .withMessageContaining("TRACE");
+            assertThatIllegalArgumentException().isThrownBy(() -> app.route("TRACE", "/*any", ctx -> "x"));
+            assertThat(app.routes()).isEmpty();
+        }
+    }
+
+    @Test
+    void answersTraceWith405OnRoutedPathsAnd404ElsewhereWithoutReflectingTheRequest() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/x", ctx -> "x");
+            app.start();
+            var request = new Request("TRACE", "/x", Map.of("Cookie", "session=secret"),
+                    Body.of("text/plain", "body-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            var trace = app.handle(request);
+            assertThat(trace.status()).isEqualTo(405);
+            assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD");
+            assertThat(new String((byte[]) trace.body(), java.nio.charset.StandardCharsets.UTF_8))
+                    .doesNotContain("secret").doesNotContain("Cookie").doesNotContain("TRACE");
+            assertThat(app.handle(new Request("TRACE", "/missing")).status()).isEqualTo(404);
+        }
+    }
+
+    @Test
     void doesNotFoldTheCaseOfMethods() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/x", ctx -> "upper");

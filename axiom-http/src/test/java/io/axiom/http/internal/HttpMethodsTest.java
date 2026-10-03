@@ -110,6 +110,24 @@ class HttpMethodsTest {
         }
     }
 
+    @Test void answersTraceWith405WithoutReflectingTheRequest() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/x", ctx -> "x");
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("TRACE /x HTTP/1.1\r\nHost: a\r\nCookie: session=secret\r\nAuthorization: Bearer token\r\n\r\n");
+                var trace = wire.read(false);
+                assertThat(trace.status()).isEqualTo(405);
+                assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD");
+                assertThat(trace.headers()).containsEntry("Content-Type", "application/problem+json");
+                assertThat(trace.headers().get("Content-Type")).isNotEqualTo("message/http");
+                assertThat(trace.text()).doesNotContain("secret").doesNotContain("token").doesNotContain("TRACE");
+                wire.write("TRACE /missing HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).status()).isEqualTo(404);
+                assertThat(wire.get("/x").text()).isEqualTo("x");
+            }
+        }
+    }
+
     @Test void matchesMethodTokensCaseSensitively() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.route("M-SEARCH", "/x", ctx -> ctx.method());

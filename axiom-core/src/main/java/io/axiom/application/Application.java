@@ -41,8 +41,9 @@ public interface Application extends AutoCloseable {
      * @param path absolute path template without query or fragment
      * @param handler callback invoked for matching requests
      * @return the registered route identity
-     * @throws IllegalArgumentException for a method that is not a token, an invalid template, or a
-     *         duplicate or same-shape route for one method
+     * @throws IllegalArgumentException for a method that is not a token, for {@code TRACE} (whose
+     *         echo of the request would expose credentials; TRACE requests are answered 405 or 404),
+     *         for an invalid template, or for a duplicate or same-shape route for one method
      * @throws IllegalStateException if configuration has ended
      */
     Route route(String method, String path, Handler handler);

@@ -84,6 +84,10 @@ final class DefaultApplication implements Application {
         requireState(State.CONFIGURING);
         Objects.requireNonNull(handler, "handler");
         var route = new Route(method, path);
+        if (method.equals("TRACE")) {
+            // A TRACE response reflects the request, including credentials (cross-site tracing).
+            throw new IllegalArgumentException("TRACE routes are not supported: echoing requests can expose credentials");
+        }
         if (registrations.containsKey(route)) {
             throw new IllegalArgumentException("Duplicate route: " + method + " " + path);
         }

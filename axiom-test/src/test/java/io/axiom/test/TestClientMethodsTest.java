@@ -54,6 +54,18 @@ class TestClientMethodsTest {
     }
 
     @Test
+    void refusesTraceRoutesAndAnswersTraceWith405() throws Exception {
+        var app = Axiom.create();
+        app.get("/x", ctx -> "x");
+        assertThatIllegalArgumentException().isThrownBy(() -> app.route("TRACE", "/x", ctx -> "x"));
+        try (var client = TestClient.start(app)) {
+            var trace = client.execute(new Request("TRACE", "/x"));
+            assertThat(trace.status()).isEqualTo(405);
+            assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD");
+        }
+    }
+
+    @Test
     void admitsAutomaticOptionsUnderTheDefaultPolicy() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
