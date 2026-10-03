@@ -11,7 +11,7 @@ the Axiom API; versions come from the BOM.
 
 | Module | Package | Contents |
 | --- | --- | --- |
-| `axiom-security` | `com.jsgalactic.axiom.security` | `Authenticator`, policies (`Security`), `TrustedProxies`, `HeaderRedaction`, `SecurityHeaders`, `Cors` |
+| `axiom-security` | `com.jsgalactic.axiom.security` | `Authenticator`, policies (`Security`), `TrustedProxies`, `HeaderRedaction`, `SecurityHeaders`, `Cors`, `RateLimit`, `Sessions`, `Csrf`, `Cookies`, `SetCookie` |
 | `axiom-security-jwt` | `com.jsgalactic.axiom.security.jwt` | `JwtAuthenticator`: strict JWT bearer tokens (HMAC, RSA, RSA-PSS, ECDSA, EdDSA) |
 
 Core contributes the identity itself: `SecurityIdentity` and two `Context` methods, so
@@ -359,6 +359,193 @@ app.use(Cors.builder()
   exceptions, such as a 401 from a policy, so a browser reads the status instead of reporting
   a CORS failure; a preflight whose chain failed gets only `Vary`.
 
+## Rate limiting
+
+`RateLimit` is middleware that allows a number of requests per window for each key and answers
+the rest with 429.
+
+```java
+var general = RateLimit.builder(300, Duration.ofMinutes(1))
+        .key(RateLimitKey.clientAddress(proxies)).name("general").headers(true).build();
+var logins = RateLimit.builder(5, Duration.ofMinutes(1)).key(RateLimitKey.clientAddress(proxies)).name("login").build();
+app.use(general);                                        // every route
+app.post("/login", loginHandler, logins);                // a tighter budget for one route
+```
+
+- **Algorithms.** `TOKEN_BUCKET` (default) lets an idle key burst up to `burst` (default the
+  whole limit) and refills continuously; `SLIDING_WINDOW` weights the previous window by its
+  overlap, so a client cannot send twice the limit around a window boundary. Both keep constant
+  state per key.
+- **Keys.** `RateLimitKey` is a function of the `Context`: `peerAddress()` (default, ignores all
+  headers), `clientAddress(TrustedProxies)` (forwarding headers believed only from configured
+  proxies, see [above](#client-address-and-trusted-proxies)), `principal(fallback)` (the verified
+  identity, else the fallback; register the authenticating middleware first). Never key on a
+  header the client chooses freely. A request without a key (in-memory requests have no peer) and
+  a key longer than 512 characters share one `anonymous` budget.
+- **Rejection.** The problem response of a `TooManyRequestsException` (built with
+  `Context.problem`): 429 `application/problem+json`, code `rate_limited`, `Retry-After` in whole
+  seconds rounded up (so waiting that long suffices; at most one day). The request never reaches the
+  rest of the chain. The response is returned rather than thrown, so outer middleware such as
+  `SecurityHeaders` and `Cors` decorate it like any response; error handlers do not see it.
+- **Headers.** `headers(true)` adds `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`
+  (seconds) and `RateLimit-Policy` (`limit;w=seconds`) to allowed responses and to the 429,
+  following the IETF rate limit headers draft. Nested limiters keep the headers of the most
+  constraining one.
+- **Bounded memory.** At most `maxKeys` (10,000 by default) keys are tracked, in 16 independently
+  locked least-recently-used shards. A flood of distinct keys evicts the oldest and never grows the
+  map. An evicted key starts with a fresh budget, so size `maxKeys` above the number of keys that
+  are legitimately active within one window; no limiter can defend against keys an attacker can
+  mint at will, which is why keys come from the transport peer or the verified identity.
+- **Clock.** `clock(Clock)` is injectable. A clock that jumps backwards never blocks a key for more
+  than one window (stale future state is dropped); one that jumps forwards refills the budget.
+- **Metrics.** With `metrics(Metrics)`: counter `axiom.security.ratelimit.requests` (tags
+  `limiter`, `outcome` = `allowed` or `limited`), counter `axiom.security.ratelimit.evictions` and
+  gauge `axiom.security.ratelimit.keys` (tag `limiter`). The limiter name is yours (`name`); keys
+  are never tags.
+- **Scope.** Each instance has its own state and budget; a global limiter plus a per-route one both
+  apply. Group middleware never see 404/405 answers, so only a global limiter counts probing of
+  unknown paths. `acquire(key)` exposes the same budgets to code that is not a request handler.
+
+## Cookies
+
+`Cookies.of(request)` reads the `Cookie` header **strictly** (RFC 6265bis section 4.2): pairs
+separated by exactly `"; "`, token names, cookie-octet values (no quotes, commas, spaces,
+backslashes, non-ASCII), at most 128 pairs and 8 KiB by default. Anything else makes the whole
+header invalid: `Cookies.parse` throws, `Cookies.of` answers "no cookies", so a security decision
+never rests on a half-understood header. A name sent twice is ambiguous (a sibling sub-domain can
+plant a second cookie), so `get(name)` treats it as absent; `all(name)` shows every value.
+
+`SetCookie.of(name, value)` produces a header with `Secure`, `HttpOnly`, `SameSite=Lax`,
+`Path=/` and no `Domain` (host-only). Enforced when built: the name is a token, the value cookie
+octets, name plus value at most 4,096 bytes; `__Host-` requires `Secure`, `Path=/` and no `Domain`,
+`__Secure-` requires `Secure` (both matched case-insensitively, as browsers do); `SameSite=None`
+requires `Secure`; `Domain` is a lower-case DNS name without leading dot and not an IP address
+(setting it also sends the cookie to every sub-domain); `Path` starts with `/` and has no `;` or
+control characters; `Max-Age` is 0 to 400 days. `expire()` makes the deleting cookie.
+
+A response carries **one** `Set-Cookie` in Axiom's header model: `SetCookie.addTo` refuses to
+replace another, and `Sessions` fails the request (500, before changing the store) rather than
+drop a login silently. Issue the session cookie and your own cookies on different responses.
+
+## Sessions
+
+Sessions keep data on the server and hand the browser an unguessable identifier in a cookie.
+
+```java
+var sessions = Sessions.builder(InMemorySessionStore.builder()
+        .idleTimeout(Duration.ofMinutes(30)).absoluteTimeout(Duration.ofHours(8)).maxSessions(50_000).build())
+        .build();
+var security = Security.of(sessions.authenticator());   // SessionAuthenticator
+app.use(sessions);                                      // loads the session, sets the cookie
+app.use(security.authenticate());                       // identity from the session
+app.post("/login", ctx -> {
+    sessions.session(ctx).authenticate(verifiedIdentity);   // sign in: new identifier
+    return ctx.noContent();
+});
+app.post("/logout", ctx -> { sessions.session(ctx).invalidate(); return ctx.noContent(); });
+app.get("/account", handler, security.authenticated()); // 401 without a signed-in session
+```
+
+The complete, tested application is
+[`examples/browser-app`](https://github.com/matrixjnr/axiom/blob/main/examples/browser-app/src/main/java/example/browser/BrowserApp.java).
+
+- **Identifiers.** 256 random bits from `SecureRandom`, base64url (43 characters). A cookie is used
+  only if it has exactly that canonical shape *and* names a live session in the store; an
+  identifier the client invented or planted is never adopted. The identifier is not part of the
+  `Session` API, appears in no exception message or `toString()`, and the in-memory store keys its
+  map by the SHA-256 of it.
+- **Rotation.** `Session.authenticate(identity)` signs in and issues a **new** identifier when the
+  request completes; the old one stops working at once (atomic rename in the store), so an
+  identifier planted or sniffed before login is worthless (session fixation). Call it at every
+  sign-in and whenever the identity's roles or permissions change; `rotate()` rotates without
+  changing the identity. Rotation keeps the creation time, so it never extends the absolute
+  lifetime. `authenticate` keeps ordinary attributes and drops the reserved `axiom.*` ones (the
+  CSRF token).
+- **Lazy.** Reading never creates a session: anonymous traffic costs the store nothing and gets
+  no cookie. The first write (`attribute`, `authenticate`, a CSRF token) creates it.
+- **Atomic and transactional.** Writes are recorded and applied once, atomically
+  (`SessionStore.update`), when the request completes normally. A handler that throws changes
+  nothing and sets no cookie. Concurrent requests of one session do not overwrite each other's
+  attributes. If the session was ended elsewhere meanwhile (expired, logged out in another tab),
+  plain writes are dropped, never resurrecting it; a sign-in starts a new session.
+- **Timeouts and bounds** (`InMemorySessionStore`): idle timeout (30 minutes), absolute timeout
+  (8 hours), `maxSessions` (10,000). At capacity it drops expired sessions, then the least recently
+  used *anonymous* session, then the least recently used signed-in one, so anonymous sessions
+  cannot push users out while they remain. A session holds at most 64 attributes of 4,096
+  characters. Metrics: gauge `axiom.security.sessions`, counter `axiom.security.sessions.evictions`
+  (tag `reason` = `expired` or `capacity`).
+- **Cookie.** `Secure; HttpOnly; SameSite=Lax; Path=/`, host-only, named `__Host-sid` (`__Secure-sid`
+  with a path or domain, `sid` with `secure(false)` for local HTTP development). `HttpOnly` is not
+  configurable. Builder options: `cookieName`, `secure`, `sameSite`, `path`, `domain`, `maxAge`
+  (persistent cookie), `maxCookieHeader`. Inconsistent settings fail at `build()`.
+- **Failure behaviour.** Unknown, expired, forged, malformed, wrongly named or duplicated cookies
+  are all "no session" (anonymous); only a policy that needs an identity answers 401, with the
+  challenge of `sessions.authenticator(challenge)` (default `Cookie realm="session"`; cookies have no
+  standard scheme, so it is informational). `Sessions` must be registered before the policies that
+  use its authenticator; outside it the authenticator reads the store without creating anything.
+- **`SessionStore` SPI** (`create`, `find`, `update`, `rename`, `remove`): implement it for a
+  shared store. Contract: thread-safe, enforces timeouts and bounds itself, `update` and `rename`
+  atomic, `createdAt` kept by `rename`, identifiers never logged and ideally stored as digests.
+  The in-memory store is per process and lost on restart.
+
+## CSRF protection
+
+Cookie authentication sends credentials on cross-site requests, so state-changing requests need
+proof of origin. `Csrf` is middleware that checks every request whose method is not `GET`,
+`HEAD`, `OPTIONS` or `TRACE`.
+
+```java
+var csrf = Csrf.synchronizer(sessions).allowedOrigins("https://app.example.com").build();   // with sessions
+var csrf = Csrf.doubleSubmit(secretKey).build();            // without sessions: HMAC-signed cookie
+app.use(sessions); app.use(security.authenticate()); app.use(csrf);
+app.get("/csrf", ctx -> csrf.token(ctx));                   // the page sends it back as X-CSRF-Token
+```
+
+Rejections are ordinary `ForbiddenException`s, so error handlers can map them and
+`SecurityHeaders` and `Cors` decorate them through `Middleware.afterError`. Checks, in order; any failure is **403 `csrf_rejected`** (one code, so clients cannot probe which
+failed):
+
+1. `Sec-Fetch-Site`, when present: `same-origin` or `none` pass; `same-site` only with
+   `allowSameSite(true)`; `cross-site` or anything else fails (`fetchMetadata(false)` disables).
+2. `Origin`, when present: must be in `allowedOrigins` (exact `scheme://host[:port]`), or, without
+   any configured, match the `Host` header's host and port. `null` and malformed values fail.
+   A request without `Origin` is decided by the token.
+3. The token in the `X-CSRF-Token` header (`headerName`), compared in constant time (in the
+   double-submit variant: equal to the cookie *and* correctly signed). Tokens in query strings,
+   bodies and the `Cookie` header are not accepted.
+
+- **Synchronizer.** One random 256-bit token per session, created on first `token(ctx)` and
+  valid for the life of the session, discarded at sign-in (fetch a new one after login).
+- **Double submit.** Token `issued-at . nonce . HMAC-SHA256(key, binding, issued-at, nonce)`,
+  set in a `__Host-csrf` cookie (`Secure`, `SameSite=Lax`, readable by scripts unless
+  `httpOnly(true)`) when the request has no valid one and the response sets no other cookie. It is
+  bound to the authenticated principal (`binding(fn)` to change), so a cookie planted from a
+  sub-domain cannot be used for another user, and expires after `maxAge` (12 hours). After
+  sign-in the next safe request issues the token for the new binding. The key must be at least 32
+  random bytes; changing it invalidates all tokens.
+- `exemptWhen(predicate)` skips the checks, for example for requests with an `Authorization`
+  header, which a browser never attaches by itself. Do not exempt on anything an attacker's page can
+  cause.
+- Safe methods must not change state; CSRF protection assumes it. Keep `SameSite=Lax` or stricter on
+  the session cookie as the first layer.
+
+## Non-goals
+
+- **OAuth 2.0 and OpenID Connect flows.** Axiom verifies tokens (see
+  [JWT bearer tokens](#jwt-bearer-tokens)); authorization-code redirects, token issuance and
+  refresh belong to an identity provider or a dedicated library. After such a login, call
+  `Session.authenticate` with the verified identity to keep the user in a cookie session.
+- **Password storage, login forms and account management.** The application verifies credentials
+  (with a memory-hard hash such as Argon2id or scrypt from a library) and hands the identity to
+  `Session.authenticate`; `RateLimit` on the login route bounds guessing.
+- **A shared session store.** `SessionStore` is the extension point; Axiom ships the in-process
+  implementation only, so it adds no client library.
+- **Form-field and `Referer` CSRF checks, several `Set-Cookie` headers per response, "remember me"
+  cookies.** Tokens travel in a header, origin checks use `Origin` and `Sec-Fetch-Site`, a response
+  carries one `Set-Cookie`, and a long-lived login is a long absolute timeout (or a persistent
+  `maxAge`) on the session.
+- **Distributed rate limiting.** Limits are per process; a shared limit needs a shared store.
+
 ## Rejected alternatives
 
 - A generic attribute map on `Context`: more API and untyped; the identity is the one
@@ -371,10 +558,8 @@ app.use(Cors.builder()
   breaks silently when the proxy chain changes; trust is decided per address instead.
 - A middleware that rewrites the request's address: requests are immutable values;
   `TrustedProxies.resolve` is a pure function applications call where they need it.
-
-## Limitations
-
-- Security headers and other middleware headers are missing on problem responses
-  ([#96](https://github.com/matrixjnr/axiom/issues/96)).
-- No sessions, cookies, CSRF protection or OAuth flows; authentication is
-  per-request credentials only ([#122](https://github.com/matrixjnr/axiom/issues/122)).
+- Putting the session into `Context`: it would add a generic attribute map to core for one
+  consumer. `Sessions.session(ctx)` finds the request's session through the request instance, and
+  the existing `Authenticator` seam carries the identity to the policies.
+- Self-contained (stateless) sessions in the cookie: they cannot be revoked or rotated without
+  server state, which is the point of server-side sessions.
