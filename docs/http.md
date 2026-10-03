@@ -21,7 +21,9 @@ running handler keeps it running; its response is sent with `Connection: close`
 and queued pipelined requests on it are dropped unanswered. This holds for every
 response sent after `close()` is called, so it is already in force when a waiting
 request receives its 503. The connection then
-lingers briefly (see [wire behavior](#wire-behavior)) before it closes.
+lingers for at most 500 milliseconds (see [wire behavior](#wire-behavior)) before it
+closes; connections already lingering when the listener closes stop within the same
+bound, so they do not hold up shutdown.
 After a fixed five-second grace period, remaining connections close and their
 handlers are interrupted; then execution and I/O threads stop. Await
 `server.termination()` to join resource shutdown. Handlers must cooperate with
@@ -150,7 +152,8 @@ sent. If an earlier response itself closes the connection (a listener 5xx, a
 handler's `Connection: close`, or listener shutdown, which sends the running response
 with `Connection: close`), that response is the last one and the pending error is
 not sent. The 30-second inactivity timeout does not interrupt the running handler,
-but still closes the connection if a response write stalls.
+but still closes the connection if a response write stalls, and each response must
+be written within the response bound (see [resource limits](#resource-limits)).
 
 ## Resource limits
 
