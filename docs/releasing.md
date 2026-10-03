@@ -41,15 +41,12 @@ automatically; add it to `axiom-bom` as well.
    in a Maven layout and can push to any Maven-style URL. The Central portal accepts a
    bundle upload (zip of the signed repository layout, with checksums) or a staging
    API; the release workflow does not do either yet.
-6. Pin GitHub Actions to full commit SHAs. Workflows use tags (`actions/checkout@v4`,
-   `actions/setup-java@v4`, `gradle/actions/setup-gradle@v4`,
-   `actions/upload-artifact@v4`). Full SHAs could not be verified from the build
-   environment and were not guessed. Resolve each tag to its commit in the upstream
-   repository, replace the tag, and keep the tag in a trailing comment. This is an
-   owner action: it needs network access to GitHub that the automated build
-   environment does not have, so the tag pins remain until the owner does it.
-   `.github/dependabot.yml` already proposes weekly action updates; Dependabot
-   preserves the `# vX` comment style and keeps SHA pins current once they exist.
+6. GitHub Actions are pinned to full commit SHAs with the version as a trailing comment.
+   To add or update one by hand, resolve the tag with
+   `git ls-remote --tags https://github.com/<owner>/<repo> 'refs/tags/<tag>*'` (for an
+   annotated tag use the `^{}` line, which is the commit), write `@<sha> # <tag>`, and
+   check the SHA against the upstream release page. `.github/dependabot.yml` proposes weekly
+   action updates and preserves the comment style.
 7. Protect tags (`v*`) and limit who can push them; configure a protected environment
    with required reviewers for the publishing job when it exists.
 8. Check that empty sources and Javadoc jars of the starter are accepted by Central.
