@@ -110,6 +110,11 @@ try (var client = TestClient.start(TasksApi.create())) {
 - **Query parameters** decoded as strict UTF-8 with bounds ([routing](docs/routing.md#query-parameters)).
 - **Bounded request bodies** (Content-Length, chunked, `Expect: 100-continue`) and a
   strict Jackson JSON codec ([bodies](docs/bodies.md)).
+- **Streaming responses and server-sent events**: `Response.stream` and `Response.sse` write
+  the body from the handler's virtual thread with chunked encoding, backpressure from slow
+  clients, a byte cap and the request deadline; a disconnect, cap or shutdown aborts the writer
+  and closes the connection, and `TestClient.stream` reads them deterministically
+  ([streaming](docs/streaming.md)).
 - **Errors**: `application/problem+json` for every error, exceptions for common 4xx/5xx
   statuses, and a never-leak rule ([errors](docs/errors.md)).
 - **Middleware, route groups and error handlers**, composed once at startup
@@ -135,8 +140,8 @@ try (var client = TestClient.start(TasksApi.create())) {
 ## Not yet
 
 - TLS and HTTP/2
-- WebSocket and server-sent events
-- Streaming request and response bodies (bodies are buffered in memory)
+- WebSocket
+- Streaming request bodies (request bodies are buffered in memory)
 - Sessions, cookie authentication, CSRF, CORS and OAuth flows; JWKS key fetching
 - OpenTelemetry, tracing spans and metrics exporters other than Prometheus text
 - OpenAPI generation
@@ -287,7 +292,8 @@ Details are in [build decisions](docs/build.md).
 ## Documentation
 
 - [Programming model](docs/programming-model.md), [routing](docs/routing.md),
-  [request bodies and JSON](docs/bodies.md), [errors](docs/errors.md),
+  [request bodies and JSON](docs/bodies.md), [streaming and server-sent events](docs/streaming.md),
+  [errors](docs/errors.md),
   [middleware](docs/middleware.md), [validation](docs/validation.md), [security](docs/security.md),
   [observability](docs/observability.md)
 - [HTTP listeners](docs/http.md), [execution and deadlines](docs/execution.md),

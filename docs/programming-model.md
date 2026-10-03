@@ -125,6 +125,8 @@ and [admission](admission.md) for aggregate and route limits with bounded queues
 A handler returns an object or throws an exception:
 
 - `Response`: used as supplied, taking precedence over context status settings.
+  `Response.stream(...)` and `Response.sse(...)` return a body that is written while the
+  connection is open; see [streaming](streaming.md).
 - `String`: status 200 by default, with `text/plain; charset=utf-8`.
 - `byte[]`: status 200 by default, with `application/octet-stream`; copied defensively.
 - `null`: status 204 unless a status was explicitly set on the context.
