@@ -11,7 +11,10 @@ only when explicitly requested.
 Benchmarks cover routing (`RoutingBenchmark`, described below), JSON decode and
 encode with the Jackson codec (`JsonCodecBenchmark`), Accept negotiation
 (`NegotiationBenchmark`), dispatcher admission with free capacity and with a full
-queue (`AdmissionBenchmark`) and problem+json construction (`ProblemBenchmark`).
+queue (`AdmissionBenchmark`), problem+json construction (`ProblemBenchmark`), the
+request path and request ID generation under several threads (`RequestPathBenchmark`,
+`RequestIdBenchmark`) and chains of 0, 1, 5 and 20 middleware
+(`MiddlewareChainBenchmark`).
 See [docs/benchmarks.md](../../docs/benchmarks.md) for what each measures, how to
 run them and the methodology. No performance claims are made.
 
