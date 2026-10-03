@@ -28,6 +28,29 @@ tasks.register("integrationTest") {
     dependsOn(testTasks("integrationTest"))
 }
 
+// The CI unit-test matrix is generated from this task, so a module with unit tests cannot be left
+// out of CI: `./gradlew -q unitTestMatrix` prints {"include":[{"module":..,"path":..},..]} for every
+// module whose `test` task is enabled and has at least one test class not tagged integration.
+tasks.register("unitTestMatrix") {
+    group = "verification"
+    description = "Prints the GitHub Actions matrix of modules that have unit tests, as JSON."
+    val matrix = objects.property<String>()
+    // Evaluated after the modules are configured; the task output is only the printed JSON.
+    matrix.set(provider {
+        subprojects
+            .filter { "test" in it.tasks.names && it.tasks.named("test").get().enabled }
+            .filter { module ->
+                module.fileTree("src/test/java") { include("**/*.java") }.files.map { it.readText() }
+                    .any { it.contains("@Test") && !it.contains("Tag(\"integration\")") }
+            }
+            .joinToString(",", prefix = "{\"include\":[", postfix = "]}") { module ->
+                val path = module.path.removePrefix(":")
+                "{\"module\":\"${path.replace(':', '-')}\",\"path\":\":$path\",\"dir\":\"${path.replace(':', '/')}\"}"
+            }
+    })
+    doLast { println(matrix.get()) }
+}
+
 // Coverage (see docs/build.md). The aggregated report covers the library modules and the
 // integration-tests module, from the execution data of both test tasks. The BOM has no code;
 // examples and benchmarks are not library code. No class is excluded.

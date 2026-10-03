@@ -25,24 +25,33 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
       - run: ./gradlew assemble testClasses javadoc check -x test -x integrationTest
+  # The modules that have unit tests, read from the build (`./gradlew unitTestMatrix`), so a new
+  # module with tests is picked up without editing this file.
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      modules: ${{ steps.modules.outputs.modules }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+      - id: modules
+        run: |
+          modules="$(./gradlew -q --console=plain unitTestMatrix | grep '^{"include"')"
+          echo "Unit test modules: $modules"
+          echo "modules=$modules" >> "$GITHUB_OUTPUT"
   # Fast tests (no real sockets), one job per module that has them.
   unit:
+    needs: matrix
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      matrix:
-        module:
-          - axiom-core
-          - axiom-server
-          - axiom-http
-          - axiom-json
-          - axiom-test
-          - axiom-validation
-          - axiom-validation-jakarta
-          - axiom-security
-          - axiom-security-jwt
-          - axiom-metrics
+      matrix: ${{ fromJson(needs.matrix.outputs.modules) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
@@ -51,12 +60,12 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
       # Temurin 21 can measure per-thread allocation; fail instead of skipping if that changes.
-      - run: ./gradlew :${{ matrix.module }}:test -Daxiom.requireAllocationTests=true
+      - run: ./gradlew ${{ matrix.path }}:test -Daxiom.requireAllocationTests=true
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unit-test-reports-${{ matrix.module }}
-          path: ${{ matrix.module }}/build/reports/tests/test/
+          path: ${{ matrix.dir }}/build/reports/tests/test/
   # Tests tagged integration (real sockets, live listeners) and the integration-tests module.
   # One job, so the root task picks up every module's integrationTest and keeps their order.
   integration:
@@ -98,7 +107,7 @@ jobs:
   # only when every job above succeeded.
   check:
     if: always()
-    needs: [build, unit, integration, quality]
+    needs: [build, matrix, unit, integration, quality]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
