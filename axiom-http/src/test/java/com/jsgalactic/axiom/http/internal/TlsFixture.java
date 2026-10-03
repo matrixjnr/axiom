@@ -21,7 +21,8 @@ import javax.net.ssl.TrustManagerFactory;
  * is removed on close.
  */
 final class TlsFixture implements AutoCloseable {
-    private static final char[] PASSWORD = "changeit".toCharArray();
+    /** Random per run; protects only the throwaway test keystores. */
+    private static final char[] PASSWORD = java.util.UUID.randomUUID().toString().toCharArray();
     private final Path directory;
     private int sequence;
 

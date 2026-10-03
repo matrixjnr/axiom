@@ -5,8 +5,8 @@ the Axiom API; versions come from the BOM.
 
 | Module | Package | Contents |
 | --- | --- | --- |
-| `axiom-security` | `com.jsgalactic.axiom.security` | `Authenticator`, policies (`Security`), `TrustedProxies`, `HeaderRedaction`, `SecurityHeaders` |
-| `axiom-security-jwt` | `com.jsgalactic.axiom.security.jwt` | `JwtAuthenticator`: strict JWT bearer tokens (HMAC, RSA, ECDSA) |
+| `axiom-security` | `com.jsgalactic.axiom.security` | `Authenticator`, policies (`Security`), `TrustedProxies`, `HeaderRedaction`, `SecurityHeaders`, `Cors` |
+| `axiom-security-jwt` | `com.jsgalactic.axiom.security.jwt` | `JwtAuthenticator`: strict JWT bearer tokens (HMAC, RSA, RSA-PSS, ECDSA, EdDSA) |
 
 Core contributes the identity itself: `SecurityIdentity` and two `Context` methods, so
 handlers read the caller without depending on a security module.
@@ -30,10 +30,13 @@ app.group("/admin", admin -> {
 
 ## Identity
 
-`SecurityIdentity(principal, roles, permissions)` is an immutable record (core,
-`com.jsgalactic.axiom.context`). The sets are unmodifiable copies; names are 1 to 256
-characters without control characters and compare exactly. `toString()` shows the principal
-and grant counts, not the grants.
+`SecurityIdentity(principal, roles, permissions, attributes)` is an immutable record (core,
+`com.jsgalactic.axiom.context`). The sets and the attribute map are unmodifiable copies;
+names are 1 to 256 characters without control characters and compare exactly. Attributes are
+further verified facts as text (a tenant, an e-mail address): at most 64, values up to 2,048
+characters without control characters, read with `identity.attribute(name)`; no policy
+reads them. The three-argument constructor creates an identity without attributes.
+`toString()` shows the principal and the counts, not the grants or attributes.
 
 | Method | Meaning |
 | --- | --- |
@@ -114,8 +117,10 @@ Checks, in order:
 5. Key selection: by `kid` when present, otherwise the key registered without a key ID for
    the token's algorithm. The key must be registered for exactly that algorithm, so a
    public key can never be used as an HMAC secret (algorithm confusion).
-6. Signature: HMAC tags compared in constant time; RSA PKCS#1 v1.5; ECDSA in the JWS
-   fixed-length format (DER signatures are rejected).
+6. Signature: HMAC tags compared in constant time; RSA PKCS#1 v1.5; RSASSA-PSS with the
+   hash, MGF1 hash and salt length RFC 7518 fixes for the algorithm; ECDSA in the JWS
+   fixed-length format (DER signatures are rejected); Ed25519 with exactly 64 signature
+   bytes.
 7. Claims (only parsed after the signature verified): `exp` required; `exp`, `nbf`, `iat`
    are integer NumericDates checked with the clock skew (30 s by default, 0 to 5 min);
    `iss` must equal a configured issuer; `aud` (string or array of strings) must contain a
@@ -125,7 +130,13 @@ Checks, in order:
 | --- | --- | --- |
 | HS256, HS384, HS512 | `hmacKey(alg, secret)` | secret of at least 32, 48, 64 bytes |
 | RS256, RS384, RS512 | `publicKey(alg, rsaKey)` | RSA, at least 2048 bits |
+| PS256, PS384, PS512 | `publicKey(alg, rsaKey)` | RSA, at least 2048 bits; salt length equals the digest length |
 | ES256, ES384, ES512 | `publicKey(alg, ecKey)` | EC on P-256, P-384, P-521 respectively |
+| EdDSA | `publicKey(alg, edKey)` | Ed25519 only; Ed448 keys are refused |
+
+An RSA key registered for RS256 is not usable for PS256 (and the reverse): the registration
+names exactly one algorithm, and a token whose `kid` selects a key of another algorithm is
+refused.
 
 Each key method has an overload with a key ID. Issuer and audience are mandatory: the
 builder refuses to build without at least one key, issuer and audience. The identity's
@@ -133,9 +144,100 @@ principal is `sub`; roles come from `roles` and permissions from `scope` (config
 with `rolesClaim` and `permissionsClaim`), each a space-separated string or an array of
 strings, at most 256 entries. `clock(Clock)` makes time checks deterministic in tests.
 
-The authenticator is immutable and thread-safe; it holds its keys (including HMAC
-secrets) for its lifetime. `verify(token)` is public for tokens that do not arrive in
+### Key sets (JWKS)
+
+```java
+var jwt = JwtAuthenticator.builder()
+        .jwks(JwksSource.url(URI.create("https://login.example.com/.well-known/jwks.json")),
+              JwksOptions.defaults().refreshInterval(Duration.ofMinutes(15)))
+        .issuer("https://login.example.com").audience("notes-api")
+        .build();
+jwt.refreshKeys();   // optional: fetch now, e.g. at startup; false if the endpoint or set is unusable
+```
+
+The **application** configures the source (a URL, a file, or any `JwksSource`, which is also
+how tests inject a key set without a network); a token can never choose it. Keys embedded
+in tokens (`jku`, `x5u`, `jwk`, `x5c`) stay unused.
+
+| Option (`JwksOptions`) | Default | Meaning |
+| --- | --- | --- |
+| `maxBytes` | 64 KiB (1 KiB to 1 MiB) | longest accepted document; at most 100 keys |
+| `refreshInterval` | 10 min (1 s to 24 h) | the next token after this age triggers a refetch; the old set keeps serving meanwhile |
+| `minRefreshInterval` | 30 s (1 s up to the refresh interval) | shortest time between fetch attempts, successful or not |
+| `maxStale` | 24 h (refresh interval to 7 days) | after this long without a successful fetch no key of the set is used (fail closed) |
+| `defaultAlgorithm` | none | algorithm for keys that declare no `alg` |
+
+- **Fetching.** `JwksSource.url` uses `java.net.http`: `https` only (`http` only to
+  loopback, for development), no user information, **redirects are never followed** (any
+  3xx is a failure), status 200 with `application/json` or `application/jwk-set+json`
+  only. The body is read incrementally and abandoned beyond `maxBytes`; a 5 s default
+  timeout (100 ms to 60 s) covers connecting, the head and the whole body. No credentials or
+  cookies are sent. `JwksSource.file` reads a regular file with the same size bound.
+- **Caching and rotation.** The first token fetches the set (nothing is fetched at build
+  time); concurrent first requests wait for one fetch. A token whose `kid` is unknown
+  triggers a refetch, but never more often than `minRefreshInterval`, so a stream of random
+  key IDs causes one fetch per interval, and a failing endpoint is retried at that rate. A
+  retired key stops verifying once a fetch returns a set without it.
+- **Failure handling.** A fetch that fails, times out, is oversized or malformed, repeats
+  a key ID, or yields no usable key keeps the last good set (until `maxStale`). Rejected
+  tokens carry the fetch failure as the exception's cause for logs; clients only see
+  `invalid_token`.
+- **Keys are bound to their algorithm** exactly like static ones. A JWK must have a `kid`
+  and `kty` `RSA`, `EC` or `OKP`; its `alg` names the one algorithm it verifies (a PS256 key
+  cannot verify RS256, and no key of a set is ever an HMAC secret: `oct` keys are skipped).
+  Keys without `alg` are skipped unless `defaultAlgorithm` applies and fits the key type.
+  `use` must be `sig` and `key_ops` must contain `verify` when present. RSA keys need at
+  least 2048 (at most 8192) bits and an odd exponent, EC keys full-length coordinates on
+  the algorithm's curve and on the curve (invalid-curve points are rejected), OKP keys are
+  Ed25519 only. Individual unusable keys are skipped without discarding the others.
+- A statically registered key with the same key ID wins over the set's. Tokens without a
+  `kid` are verified only with static keys.
+- The document is fetched on the request thread that needs it (a virtual thread over
+  HTTP), at most one at a time per authenticator.
+
+### Further claims, revocation and replay
+
+Only `sub`, the roles claim and the permissions claim reach the identity by default.
+
+```java
+JwtAuthenticator.builder()
+        ...
+        .exposeClaims("tenant", "email", "email_verified")   // string, number, boolean claims as text
+        .attributes(claims -> Map.of("groups", String.join(",", claims.strings("groups"))))
+        .tokenCheck(claims -> !revoked.contains(claims.id().orElse("")))      // revocation
+        .tokenCheck(claims -> seenJti.add(claims.id().orElseThrow()))        // replay, last
+        .build();
+// handler: ctx.identity().orElseThrow().attribute("tenant")
+```
+
+- `exposeClaims` copies named scalar claims; an array or object claim, or a value that is
+  not a valid attribute, makes the token invalid (401), and absent or `null` claims are
+  skipped. `attributes(fn)` maps claims with application code through `JwtClaims`, whose
+  typed accessors (`string`, `strings`, `number`, `bool`, `text`, `id`, `subject`, `issuer`,
+  `expiresAt`) expose no JSON library type; a claim of the wrong type is an
+  `IllegalArgumentException`, answered 401.
+- `tokenCheck(TokenCheck)` runs **after** signature, expiry, issuer, audience and subject
+  verification and before attributes are built. `false` is 401 `invalid_token` with no
+  hint to the client. Checks run in registration order and stop at the first rejection, so
+  register one that records a `jti` last. Any exception other than
+  `IllegalArgumentException` propagates (500) so an unreachable revocation store fails
+  closed rather than accepting the token.
+- Axiom keeps no revocation or replay state: the application owns the store, its size
+  and its pruning (drop a `jti` after `claims.expiresAt()` plus the clock skew), and
+  shares it between instances if it runs more than one.
+
+The authenticator is thread-safe; statically registered keys (including HMAC secrets) are
+fixed for its lifetime. A configured key set is its only mutable state. `verify(token)` is public for tokens that do not arrive in
 `Authorization`.
+
+### Encrypted tokens (JWE) are a non-goal
+
+Axiom authenticates signed tokens only. A five-part compact JWE, a header with `enc`, and
+key-management algorithms (`dir`, `RSA-OAEP`, `A256KW`, `ECDH-ES`, ...) are rejected with the
+same 401 `invalid_token` as any other invalid token; tests cover each. Decrypting needs
+private key handling, content-encryption algorithms and a second parser surface that a
+bearer-token verifier should not carry. If tokens must be confidential, decrypt them at a
+gateway, or use opaque tokens and introspection, and hand Axiom the signed JWT.
 
 ## Client address and trusted proxies
 
@@ -145,7 +247,7 @@ socket; it is `null` for in-memory requests unless a test sets it with
 
 ```java
 static final TrustedProxies PROXIES = TrustedProxies.of("10.0.0.0/8", "fd00::/8");
-var origin = PROXIES.resolve(ctx.request());      // Optional<ClientOrigin>(address, scheme, forwarded)
+var origin = PROXIES.resolve(ctx.request());      // Optional<ClientOrigin>(address, scheme, forwarded, host, port)
 ```
 
 - Forwarding headers are believed only when the **peer** is a configured proxy.
@@ -159,6 +261,27 @@ var origin = PROXIES.resolve(ctx.request());      // Optional<ClientOrigin>(addr
   brackets are accepted.
 - `X-Forwarded-Proto` is used only when it is exactly `http` or `https`; without it the scheme
   is that of the connection (`Request.isSecure()`, true only on a TLS listener).
+- `X-Forwarded-Host` gives the original host (`ClientOrigin.host()`, lower case) and
+  `X-Forwarded-Port` the port (`ClientOrigin.port()`). Each is believed only as a single
+  value (a comma-separated list is ignored: nothing says which proxy to believe); the host
+  must be a DNS name, an IPv4 literal or a bracketed IPv6 literal, optionally with a port,
+  and the port 1 to 65535. A port inside the host wins over `X-Forwarded-Port`. Spaces,
+  paths, `@`, empty labels and out-of-range ports are ignored, never repaired. No default
+  port is inferred from the scheme.
+- **One header family at a time.** The default family is `X-Forwarded-*`;
+  `PROXIES.reading(ForwardedHeaders.FORWARDED)` selects RFC 7239 `Forwarded` instead. The
+  other family is ignored entirely, so a client cannot mix a spoofed header of one family
+  with a genuine one of the other.
+- `Forwarded` is parsed strictly: tokens and quoted strings only (a value with `:` or `[`
+  must be quoted, `for="[2001:db8::7]:4711"`), no whitespace around `=` or `;`, a repeated
+  parameter makes its element invalid, and an unterminated quote ignores the header. The
+  elements are walked right to left with the same trust rule and the 32-hop bound. `for`
+  must be an IPv4 literal or a bracketed IPv6 literal (port or obfuscated port allowed);
+  `unknown`, obfuscated identifiers (`_hidden`) and names stop the walk. `proto` and `host`
+  come from the element that vouches for the client address, since that proxy saw the
+  client's request.
+- Host and port are only as trustworthy as the proxy that sets them. Never build
+  password-reset or redirect URLs from them without an allow-list of your own hosts.
 - Ranges are IP literals or CIDR blocks with zero host bits; anything else is rejected at
   configuration time.
 
@@ -192,6 +315,47 @@ because exceptions pass through middleware before they become responses (tracked
 [#96](https://github.com/matrixjnr/axiom/issues/96); see the workaround in
 [middleware](middleware.md#middleware)).
 
+## CORS
+
+`Cors` is global middleware that answers browser preflights on top of the router's
+automatic `OPTIONS` (204 with `Allow`) and decorates cross-origin responses.
+
+```java
+app.use(Cors.builder()
+        .allowOrigin("https://app.example.com")
+        .allowMethods("GET", "POST", "DELETE")      // default: GET, HEAD
+        .allowHeaders("Content-Type", "Authorization")
+        .exposeHeaders("X-Request-ID")
+        .allowCredentials()
+        .maxAge(Duration.ofMinutes(10))             // default; 0 omits the header
+        .build());
+```
+
+- **Misconfiguration fails at `build()`**: no origin; the wildcard (`anyOrigin()`) together
+  with credentials or with listed origins; an origin that is not an exact lower-case
+  `http(s)://host[:port]` (no `*`, path, user information, `null`); `*` or invalid tokens as
+  methods or headers.
+- **Origins match exactly** against the request's `Origin` value, so a different scheme,
+  port, sub-domain suffix or a list of origins never matches. The matching origin is echoed
+  in `Access-Control-Allow-Origin` with `Vary: Origin` (`anyOrigin()` answers `*` and adds no
+  `Vary`).
+- **Preflight** is `OPTIONS` with `Origin` and `Access-Control-Request-Method`. The rest of
+  the chain runs first; a successful answer is decorated only when the origin is allowed, the
+  method is configured and in the route's `Allow`, and every requested header is configured
+  (at most 64). Anything else keeps the plain answer without CORS headers, so the browser
+  fails the preflight. An unrouted path stays 404. `Access-Control-Allow-Methods` lists the
+  configured methods the route allows; `Access-Control-Allow-Headers` echoes the requested,
+  validated headers. An application's own `OPTIONS` route (for example a wildcard route
+  returning `ctx.automaticOptions()` for what it does not handle) is decorated the same way
+  when its answer is a 2xx.
+- A request from another origin is **not rejected**: CORS is enforced by the browser and is
+  not authentication. It is answered without CORS headers. Keep authenticating every request.
+- Register it with `app.use` globally: group middleware never see router answers, so a
+  group-scoped instance would miss preflights. Like other middleware, it does not decorate
+  responses mapped from exceptions, such as a 401 from a policy; a browser then reports a
+  CORS failure instead of the 401 for such responses
+  ([#96](https://github.com/matrixjnr/axiom/issues/96)).
+
 ## Rejected alternatives
 
 - A generic attribute map on `Context`: more API and untyped; the identity is the one
@@ -207,15 +371,7 @@ because exceptions pass through middleware before they become responses (tracked
 
 ## Limitations
 
-- Keys are configured statically: no JWKS fetching or rotation
-  ([#118](https://github.com/matrixjnr/axiom/issues/118)).
-- Only HS, RS and ES algorithms; no PS256 or EdDSA, no encrypted tokens (JWE)
-  ([#119](https://github.com/matrixjnr/axiom/issues/119)).
-- JWT claims other than `sub` and the grant claims are not exposed, and there is no
-  revocation or replay check (`jti`) ([#120](https://github.com/matrixjnr/axiom/issues/120)).
-- Only `X-Forwarded-For` and `X-Forwarded-Proto` are read; not RFC 7239 `Forwarded` or
-  `X-Forwarded-Host`/`-Port` ([#121](https://github.com/matrixjnr/axiom/issues/121)).
 - Security headers and other middleware headers are missing on problem responses
   ([#96](https://github.com/matrixjnr/axiom/issues/96)).
-- No sessions, cookies, CSRF protection, CORS or OAuth flows; authentication is
+- No sessions, cookies, CSRF protection or OAuth flows; authentication is
   per-request credentials only ([#122](https://github.com/matrixjnr/axiom/issues/122)).

@@ -114,6 +114,61 @@ class HttpLingerLiveTest {
         }
     }
 
+    @Test void overTheNetworkAClientThatPausesWhileUploadingKeepsItsConnectionWhenTheQuietPeriodCoversThePause()
+            throws Exception {
+        app.maxRequestBody(16);
+        app.post("/", ctx -> "unreachable");
+        app.start();
+        // The quiet period is the tuning knob for slow uploaders (lingerQuietTimeout); this one far
+        // exceeds the pause, and the total bound is far away too.
+        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofHours(1))
+                        .withLingerQuiet(java.time.Duration.ofHours(1)));
+        try (var wire = new Wire(server)) {
+            // The declared body is over the limit, so the answer comes at once while the upload is
+            // only begun.
+            wire.write("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 1000\r\n\r\n" + "x".repeat(100));
+            assertThat(wire.read(false).status()).isEqualTo(413);
+            // The response and end of stream are in; the server now lingers. The client pauses until
+            // it has seen that (no timing assumption), then resumes its upload.
+            awaitLingering(server, 1);
+            wire.write("x".repeat(900));
+            assertThat(server.lingering()).as("still lingering after the pause").isEqualTo(1);
+            // Had the server closed with unread input, the client would see a reset, not a clean end.
+            assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+        } finally {
+            server.close();
+            server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void overTheNetworkAClientThatPausesLongerThanTheConfiguredQuietPeriodIsClosed() throws Exception {
+        app.maxRequestBody(16);
+        app.post("/", ctx -> "unreachable");
+        app.start();
+        // Only the quiet period can end lingering here, so a pause is what closes the connection.
+        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofHours(1))
+                        .withLingerQuiet(java.time.Duration.ofMillis(50)));
+        try (var wire = new Wire(server)) {
+            wire.write("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 1000\r\n\r\n" + "x".repeat(100));
+            assertThat(wire.read(false).status()).isEqualTo(413);
+            // The client stays connected and silent, mid-upload; the server gives up on it.
+            awaitNoConnections(server);
+        } finally {
+            server.close();
+            server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void awaitLingering(NettyServer server, int expected) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (server.lingering() != expected) {
+            assertThat(System.nanoTime()).as("lingering reaches " + expected).isLessThan(deadline);
+            Thread.onSpinWait();
+        }
+    }
+
     private static void awaitNoConnections(NettyServer server) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (server.connections() + server.lingering() != 0) {

@@ -282,9 +282,9 @@ class TlsListenerTest {
             assertThatThrownBy(() -> listen(fixture, TlsOptions.builder().sslContext(() -> null).build()))
                     .isInstanceOf(TlsConfigurationException.class).hasMessageContaining("returned null");
             assertThatThrownBy(() -> listen(fixture, TlsOptions.builder().sslContext(() -> {
-                throw new IllegalStateException("vault password hunter2 unavailable");
+                throw new IllegalStateException("vault secret-value unavailable");
             }).build())).isInstanceOf(TlsConfigurationException.class).hasMessageContaining("IllegalStateException")
-                    .satisfies(failure -> assertThat(failure.getMessage()).doesNotContain("hunter2"));
+                    .satisfies(failure -> assertThat(failure.getMessage()).doesNotContain("secret-value"));
         }
     }
 

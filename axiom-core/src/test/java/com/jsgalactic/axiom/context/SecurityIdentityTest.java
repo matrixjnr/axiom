@@ -54,6 +54,36 @@ class SecurityIdentityTest {
     }
 
     @Test
+    void carriesImmutableAttributesAndCountsThemInToString() {
+        var source = new java.util.HashMap<>(Map.of("tenant", "acme", "email", "ada@example.com"));
+        var identity = new SecurityIdentity("ada", Set.of(), Set.of(), source);
+        source.put("tenant", "evil");
+        assertThat(identity.attribute("tenant")).contains("acme");
+        assertThat(identity.attribute("missing")).isEmpty();
+        assertThat(identity.attributes()).containsOnlyKeys("tenant", "email");
+        assertThatThrownBy(() -> identity.attributes().put("x", "y")).isInstanceOf(UnsupportedOperationException.class);
+        assertThat(identity.toString()).contains("attributes=2").doesNotContain("acme", "ada@example.com");
+        assertThat(SecurityIdentity.of("ada").attributes()).isEmpty();
+        assertThat(new SecurityIdentity("ada", Set.of(), Set.of())).isEqualTo(SecurityIdentity.of("ada"));
+        var merged = identity.withAttributes(Map.of("tenant", "globex", "plan", "pro"));
+        assertThat(merged.attributes()).containsEntry("tenant", "globex").containsEntry("plan", "pro").containsEntry("email", "ada@example.com");
+        assertThat(identity.attribute("tenant")).contains("acme");
+    }
+
+    @Test
+    void rejectsUnusableAttributes() {
+        assertThatIllegalArgumentException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), Map.of("", "v")));
+        assertThatIllegalArgumentException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), Map.of("a\nb", "v")));
+        assertThatIllegalArgumentException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), Map.of("a", "v\r\nx")));
+        assertThatIllegalArgumentException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), Map.of("a", "x".repeat(2049))));
+        new SecurityIdentity("ada", Set.of(), Set.of(), Map.of("empty", "", "max", "x".repeat(2048)));
+        var many = new java.util.HashMap<String, String>();
+        for (int i = 0; i < 65; i++) { many.put("a" + i, "v"); }
+        assertThatIllegalArgumentException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), many));
+        assertThatNullPointerException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), null));
+    }
+
+    @Test
     void contextsWithoutIdentitySupportAreAnonymousAndRefuseIdentities() {
         Context context = new Double();
         assertThat(context.identity()).isEmpty();

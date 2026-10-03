@@ -45,7 +45,7 @@ final class TlsMaterial {
     private static final long MAX_PEM_BYTES = 1 << 20;
     private static final Pattern PEM = Pattern.compile(
             "-----BEGIN ([A-Z0-9 ]+)-----([A-Za-z0-9+/=\\s]*)-----END \\1-----");
-    private static final char[] STORE_PASSWORD = "axiom".toCharArray();
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final SSLContext context;
     private final String[] protocols;
@@ -160,12 +160,14 @@ final class TlsMaterial {
 
     private static SSLContext context(List<X509Certificate> chain, PrivateKey key, List<X509Certificate> trust,
             Path trustPath, Date now) throws TlsConfigurationException {
+        // The in-memory store is protected by a throwaway random password that exists only here.
+        var storePassword = Long.toHexString(RANDOM.nextLong()).toCharArray();
         try {
             var keys = KeyStore.getInstance("PKCS12");
             keys.load(null, null);
-            keys.setKeyEntry("server", key, STORE_PASSWORD, chain.toArray(new X509Certificate[0]));
+            keys.setKeyEntry("server", key, storePassword, chain.toArray(new X509Certificate[0]));
             var keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-            keyManagers.init(keys, STORE_PASSWORD);
+            keyManagers.init(keys, storePassword);
             javax.net.ssl.TrustManager[] trustManagers = null;
             if (trust != null) {
                 checkValidity(trustPath, trust, now);
@@ -177,7 +179,7 @@ final class TlsMaterial {
                 trustManagers = factory.getTrustManagers();
             }
             var context = SSLContext.getInstance("TLS");
-            context.init(keyManagers.getKeyManagers(), trustManagers, new SecureRandom());
+            context.init(keyManagers.getKeyManagers(), trustManagers, RANDOM);
             return context;
         } catch (TlsConfigurationException invalid) {
             throw invalid;
@@ -271,7 +273,7 @@ final class TlsMaterial {
                 default -> "Ed25519";
             };
             var challenge = new byte[32];
-            new SecureRandom().nextBytes(challenge);
+            RANDOM.nextBytes(challenge);
             var signer = Signature.getInstance(algorithm);
             signer.initSign(key);
             signer.update(challenge);

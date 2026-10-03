@@ -149,6 +149,55 @@ class ListenerOptionsTransportTest {
         }
     }
 
+    @Test void fullRegularAndLingeringPoolsHoldExactlyTheirSumOfSocketsAndRefuseTheNext() throws Exception {
+        var options = ListenerOptions.builder().maxConnections(3).maxLingeringConnections(2).build();
+        var probe = new Probe();
+        try (var app = Axiom.create().metrics(probe)) {
+            app.start();
+            var server = NettyServer.bind(app, LOOPBACK, TransportSettings.of(options));
+            var accepted = new java.util.ArrayList<DuplexEmbeddedChannel>();
+            try {
+                for (int i = 0; i < 3; i++) {
+                    var channel = new DuplexEmbeddedChannel();
+                    server.accept(channel, app);
+                    accepted.add(channel);
+                }
+                // Two connections move to the lingering pool, which frees two regular slots.
+                reject(accepted.get(0));
+                reject(accepted.get(1));
+                assertThat(server.lingering()).isEqualTo(2);
+                for (int i = 0; i < 2; i++) {
+                    var channel = new DuplexEmbeddedChannel();
+                    server.accept(channel, app);
+                    assertThat(channel.isActive()).isTrue();
+                    accepted.add(channel);
+                }
+                // Both pools are full: 3 + 2 open sockets, and the next connection is closed unanswered.
+                assertThat(server.connections()).isEqualTo(3);
+                assertThat(server.lingering()).isEqualTo(2);
+                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isEqualTo(3);
+                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isEqualTo(2);
+                var refused = new DuplexEmbeddedChannel();
+                server.accept(refused, app);
+                assertThat(refused.isActive()).isFalse();
+                // A further lingering connection finds the pool full and keeps its regular slot.
+                reject(accepted.get(2));
+                assertThat(server.connections()).isEqualTo(3);
+                assertThat(server.lingering()).isEqualTo(2);
+                // Closing a lingering connection frees its pool slot, and the gauges follow.
+                accepted.get(0).close();
+                assertThat(server.lingering()).isEqualTo(1);
+                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isEqualTo(1);
+            } finally {
+                for (var channel : accepted) { channel.finishAndReleaseAll(); }
+                server.close();
+                server.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+            assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isZero();
+            assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isZero();
+        }
+    }
+
     @Test void zeroLingeringConnectionsKeepsEveryLingeringConnectionOnItsRegularSlot() throws Exception {
         var options = ListenerOptions.builder().maxConnections(2).maxLingeringConnections(0).build();
         try (var app = Axiom.create()) {

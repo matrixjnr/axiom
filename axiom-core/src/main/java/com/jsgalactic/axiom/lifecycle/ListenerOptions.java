@@ -40,6 +40,7 @@ public final class ListenerOptions {
     private final int maxConnections;
     private final int maxLingeringConnections;
     private final int maxPipelinedRequests;
+    private final long maxInFlightBodyBytes;
     private final int maxRequestLine;
     private final int maxHeaderBytes;
     private final int ioThreads;
@@ -58,6 +59,7 @@ public final class ListenerOptions {
         maxConnections = b.maxConnections;
         maxLingeringConnections = b.maxLingeringConnections;
         maxPipelinedRequests = b.maxPipelinedRequests;
+        maxInFlightBodyBytes = b.maxInFlightBodyBytes;
         maxRequestLine = b.maxRequestLine;
         maxHeaderBytes = b.maxHeaderBytes;
         ioThreads = b.ioThreads;
@@ -94,6 +96,7 @@ public final class ListenerOptions {
         b.maxConnections = maxConnections;
         b.maxLingeringConnections = maxLingeringConnections;
         b.maxPipelinedRequests = maxPipelinedRequests;
+        b.maxInFlightBodyBytes = maxInFlightBodyBytes;
         b.maxRequestLine = maxRequestLine;
         b.maxHeaderBytes = maxHeaderBytes;
         b.ioThreads = ioThreads;
@@ -126,6 +129,8 @@ public final class ListenerOptions {
     public int maxLingeringConnections() { return maxLingeringConnections; }
     /** @return outstanding requests per connection, including the running one */
     public int maxPipelinedRequests() { return maxPipelinedRequests; }
+    /** @return request body bytes this listener holds at once, across all its connections */
+    public long maxInFlightBodyBytes() { return maxInFlightBodyBytes; }
     /** @return longest request line in bytes */
     public int maxRequestLine() { return maxRequestLine; }
     /** @return largest header section in bytes */
@@ -141,7 +146,8 @@ public final class ListenerOptions {
                 + ", shutdownLingerTimeout=" + shutdownLingerTimeout + ", handshakeTimeout=" + handshakeTimeout
                 + ", tls=" + tls + ", maxDiscardedInput=" + maxDiscardedInput
                 + ", maxConnections=" + maxConnections + ", maxLingeringConnections=" + maxLingeringConnections
-                + ", maxPipelinedRequests=" + maxPipelinedRequests + ", maxRequestLine=" + maxRequestLine
+                + ", maxPipelinedRequests=" + maxPipelinedRequests + ", maxInFlightBodyBytes=" + maxInFlightBodyBytes
+                + ", maxRequestLine=" + maxRequestLine
                 + ", maxHeaderBytes=" + maxHeaderBytes + ", ioThreads=" + ioThreads + "]";
     }
 
@@ -164,6 +170,7 @@ public final class ListenerOptions {
         private int maxConnections = 128;
         private int maxLingeringConnections = 32;
         private int maxPipelinedRequests = 8;
+        private long maxInFlightBodyBytes = 64L * 1024 * 1024;
         private int maxRequestLine = 4096;
         private int maxHeaderBytes = 8192;
         private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
@@ -337,6 +344,29 @@ public final class ListenerOptions {
          */
         public Builder maxPipelinedRequests(int requests) {
             maxPipelinedRequests = range("maxPipelinedRequests", requests, 1, 1024);
+            return this;
+        }
+
+        /**
+         * Sets the request body bytes the listener holds at once, summed over all its connections:
+         * bodies being received, bodies of pipelined requests waiting behind a running one, and
+         * the bodies of requests whose handler is running. A declared {@code Content-Length} is
+         * reserved in full when the request head arrives and a chunked body is counted as it
+         * arrives; the reservation is returned when the request's response is final or its
+         * connection ends. A request that does not fit is answered 503 and its connection closes
+         * after the earlier responses; the handler is never invoked. The default equals the largest
+         * configurable {@code maxRequestBody}, so any permitted body fits when the listener is
+         * otherwise idle. A listener refuses to start when the budget is smaller than the
+         * application's {@code maxRequestBody}, because no such body could ever be accepted.
+         * @param bytes 1 to 1 TiB; the default is 64 MiB
+         * @return this builder
+         * @throws IllegalArgumentException if out of range
+         */
+        public Builder maxInFlightBodyBytes(long bytes) {
+            if (bytes < 1 || bytes > (1L << 40)) {
+                throw new IllegalArgumentException("maxInFlightBodyBytes must be from 1 to " + (1L << 40) + ": " + bytes);
+            }
+            maxInFlightBodyBytes = bytes;
             return this;
         }
 

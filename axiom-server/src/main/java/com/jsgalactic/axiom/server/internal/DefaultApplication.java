@@ -73,6 +73,35 @@ final class DefaultApplication implements Application {
     private volatile int maxRequestBody = 1024 * 1024;
     private volatile State state = State.CONFIGURING;
     private volatile Runtime runtime;
+    private final ShutdownHooks hooks;
+    /** The registered JVM shutdown hook, or null; guarded by this. */
+    private Thread shutdownHook;
+    /** The longest shutdown grace period of any listener bound so far; guarded by this. */
+    private Duration longestGrace = ListenerOptions.defaults().shutdownGrace();
+
+    /** Registration of JVM shutdown hooks; a seam so tests can run a hook without ending the JVM. */
+    interface ShutdownHooks {
+        void add(Thread hook);
+        void remove(Thread hook);
+    }
+
+    /** Time added to the longest grace period for the stop of executors and event loops. */
+    static final Duration SHUTDOWN_HOOK_MARGIN = Duration.ofSeconds(5);
+    private final Duration hookMargin;
+
+    DefaultApplication() {
+        this(new ShutdownHooks() {
+            @Override public void add(Thread hook) { java.lang.Runtime.getRuntime().addShutdownHook(hook); }
+            @Override public void remove(Thread hook) { java.lang.Runtime.getRuntime().removeShutdownHook(hook); }
+        });
+    }
+
+    DefaultApplication(ShutdownHooks hooks) { this(hooks, SHUTDOWN_HOOK_MARGIN); }
+
+    DefaultApplication(ShutdownHooks hooks, Duration hookMargin) {
+        this.hooks = hooks;
+        this.hookMargin = hookMargin;
+    }
 
     @Override
     public Server listen(InetSocketAddress address, ListenerOptions options) throws IOException {
@@ -87,17 +116,58 @@ final class DefaultApplication implements Application {
         var provider = providers.next();
         if (providers.hasNext()) { throw new IllegalStateException("Multiple HTTP transport providers"); }
         start();
-        var server = provider.bind(this, address, options);
+        return adopt(provider.bind(this, address, options), options);
+    }
+
+    /** Takes ownership of a bound listener, or closes it when the application closed meanwhile. */
+    Server adopt(Server server, ListenerOptions options) {
         synchronized (this) {
             if (state != State.CLOSED) {
                 listeners.removeIf(listener -> listener.termination().toCompletableFuture().isDone());
                 listeners.add(server);
+                if (options.shutdownGrace().compareTo(longestGrace) > 0) { longestGrace = options.shutdownGrace(); }
                 return server;
             }
         }
         // The application closed while binding; it must not leave an unowned listener behind.
         server.close();
         throw new IllegalStateException("Application closed while the listener was binding");
+    }
+
+    @Override
+    public Application closeOnJvmShutdown() {
+        synchronized (this) {
+            if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+            if (shutdownHook != null) { return this; }
+            var hook = new Thread(this::shutdownFromJvm, "axiom-shutdown");
+            hooks.add(hook); // IllegalStateException when the JVM is already shutting down
+            shutdownHook = hook;
+        }
+        return this;
+    }
+
+    /** The shutdown hook: closes the application, then waits for its listeners, within a bound. */
+    private void shutdownFromJvm() {
+        List<Server> owned;
+        Duration wait;
+        synchronized (this) {
+            owned = List.copyOf(listeners);
+            wait = longestGrace.plus(hookMargin);
+        }
+        close();
+        long deadline = System.nanoTime() + wait.toNanos();
+        for (var server : owned) {
+            try {
+                server.termination().toCompletableFuture()
+                        .get(Math.max(0, deadline - System.nanoTime()), java.util.concurrent.TimeUnit.NANOSECONDS);
+            } catch (TimeoutException | java.util.concurrent.ExecutionException unfinished) {
+                LOG.log(System.Logger.Level.WARNING,
+                        "A listener had not terminated " + wait + " after JVM shutdown began", unfinished);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     @Override
@@ -621,7 +691,10 @@ final class DefaultApplication implements Application {
     @Override
     public void close() {
         List<Server> owned;
+        Thread hook;
         synchronized (this) {
+            hook = shutdownHook;
+            shutdownHook = null;
             runtime = runtime == null ? snapshot(null, null, ErrorHandlers.NONE, Codecs.of(List.of())) : runtime.withoutRouter();
             state = State.CLOSED;
             registrations.clear();
@@ -637,6 +710,11 @@ final class DefaultApplication implements Application {
             listeners.clear();
         }
         owned.forEach(Server::close);
+        // An explicit close makes the hook unnecessary; the hook itself, or a JVM already shutting
+        // down, must not unregister.
+        if (hook != null && Thread.currentThread() != hook) {
+            try { hooks.remove(hook); } catch (IllegalStateException shuttingDown) { /* The hook is running or due. */ }
+        }
     }
 
     private void requireState(State expected) {

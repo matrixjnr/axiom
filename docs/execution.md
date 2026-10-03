@@ -86,6 +86,17 @@ within a grace period, then cancels what remains and closes connections.
 idempotent and nonblocking, including inside a handler; termination may wait
 indefinitely for code that refuses interruption.
 
+## Descriptors and connection limits
+
+Execution capacity is not the only resource a listener needs. Each listener holds up to
+`maxConnections + maxLingeringConnections` sockets, 160 by default (128 regular and 32
+lingering after their last response), each a file descriptor, plus a few for the listening socket
+and event loops. Set the descriptor limit of the process and any connection-based limit of a load
+balancer in front of it from that sum over all listeners, and the connection cap at or above the
+admission capacity ([admission](admission.md)). The gauge `axiom.http.connections` (tag
+`state=open` or `lingering`) reports both pools; see [HTTP listeners](http.md#resource-limits)
+and [observability](observability.md).
+
 ## Synchronous execution
 
 `app.handle(request)` still executes on the calling thread. It maps

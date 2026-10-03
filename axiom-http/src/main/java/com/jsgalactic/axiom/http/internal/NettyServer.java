@@ -59,6 +59,7 @@ final class NettyServer implements Server {
     private final CompletableFuture<Void> stopped;
     private final AtomicBoolean closing = new AtomicBoolean();
     private final ConnectionSlots slots;
+    private final BodyBudget bodyBudget;
     private final TransportSettings settings;
     private final HttpDecoderConfig decoderConfig;
     private static final System.Logger LOG = System.getLogger(NettyServer.class.getName());
@@ -76,8 +77,9 @@ final class NettyServer implements Server {
         this.tls = tls;
         this.tlsMetrics = new TlsMetrics(metrics);
         var options = settings.options();
-        slots = new ConnectionSlots(options.maxConnections(), options.maxLingeringConnections());
+        slots = new ConnectionSlots(options.maxConnections(), options.maxLingeringConnections(), metrics);
         decoderConfig = decoderConfig(options);
+        bodyBudget = new BodyBudget(options.maxInFlightBodyBytes());
         io = new MultiThreadIoEventLoopGroup(options.ioThreads(),
                 Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());
         channels = new DefaultChannelGroup(io.next(), true);
@@ -93,6 +95,11 @@ final class NettyServer implements Server {
     /** Binds with non-default bounds; for tests that must tolerate a slow machine or observe one bound. */
     static NettyServer bind(Application application, InetSocketAddress address, TransportSettings settings)
             throws IOException {
+        // No body of the application's permitted size could ever be accepted by a smaller budget.
+        if (settings.options().maxInFlightBodyBytes() < application.maxRequestBody()) {
+            throw new IllegalArgumentException("maxInFlightBodyBytes (" + settings.options().maxInFlightBodyBytes()
+                    + ") must be at least the application's maxRequestBody (" + application.maxRequestBody() + ")");
+        }
         // Invalid key material stops startup before any thread or socket exists.
         var tlsOptions = settings.options().tls();
         var material = tlsOptions.isPresent() ? TlsMaterial.load(tlsOptions.get()) : null;
@@ -153,7 +160,7 @@ final class NettyServer implements Server {
         channel.pipeline().addLast(
                 new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS),
                 new RequestDecoder(decoderConfig), new HttpResponseEncoder(),
-                new HttpConnection(application, handlers, settings, slot, closing::get));
+                new HttpConnection(application, handlers, settings, slot, closing::get, bodyBudget));
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */
@@ -218,6 +225,8 @@ final class NettyServer implements Server {
     TransportSettings settings() { return settings; }
     /** Connections holding a regular slot; for tests. */
     int connections() { return slots.open(); }
+    /** Request body bytes currently reserved against this listener's budget; for tests. */
+    long bodyBytesInFlight() { return bodyBudget.used(); }
     /** Lingering connections that no longer hold a regular slot; for tests. */
     int lingering() { return slots.lingering(); }
     @Override public InetSocketAddress localAddress() { return address; }

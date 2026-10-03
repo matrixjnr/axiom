@@ -31,6 +31,35 @@ handlers are interrupted; then execution and I/O threads stop. Await
 interruption; termination cannot complete while a handler refuses to stop.
 Direct in-memory `app.handle` calls remain the caller's responsibility.
 
+### Shutdown on SIGTERM
+
+Nothing closes an application by itself: Axiom never installs a JVM shutdown hook unless asked, so
+a library or test that embeds it is not surprised. **Closing on `SIGTERM` is opt-in.** A service
+run by a container runtime or Kubernetes, which stops it with `SIGTERM`, calls
+`app.closeOnJvmShutdown()` once at startup:
+
+```java
+var app = Axiom.create().closeOnJvmShutdown();
+app.get("/", ctx -> "ok");
+var server = app.listen(new InetSocketAddress("0.0.0.0", 8080));
+server.termination().toCompletableFuture().join(); // keeps main alive until the drain is done
+```
+
+When the JVM begins to shut down (`SIGTERM`, `SIGINT`, `System.exit` or the end of the last
+non-daemon thread) the hook closes the application and waits for every listener to terminate. The
+drain is the graceful shutdown described above, within each listener's `shutdownGrace`: running
+requests finish and are answered with `Connection: close`, waiting requests get 503, and what is
+left is interrupted after the grace period. The wait is bounded by the longest `shutdownGrace` of
+the application's listeners plus five seconds, so a handler that ignores interruption cannot keep the
+JVM from exiting. Closing makes the application not `RUNNING`, so a `Health` readiness probe
+reports DOWN from then on; if a load balancer needs time to notice, call `health.beginDrain()` and
+wait before the JVM exits (see [observability](observability.md#health-and-readiness)). The grace
+period must fit inside the platform's own kill timeout (Kubernetes
+`terminationGracePeriodSeconds`, 30 seconds by default). Calling it twice registers one hook,
+an explicit `app.close()` unregisters it, and it throws `IllegalStateException` on a closed
+application or when the JVM is already shutting down. Hooks of different libraries run concurrently
+and in no defined order.
+
 Open [streams](streaming.md#shutdown) are the exception to the grace period: they are cancelled
 as soon as `close()` begins, because they may never end by themselves. Their handlers' writes
 fail with `SHUTDOWN`, and their connections close without a final chunk, so the client sees the
@@ -126,7 +155,12 @@ reset. The quiet period is longer than a typical TCP retransmission timeout, so 
 single lost segment does not end it. The trade-off is a client that is still sending
 but pauses for longer (a very lossy link, or a client that stalls between writes): its
 next bytes arrive at a closed connection, the operating system answers with a reset,
-and response bytes the client has not read yet may be lost. Once the listener is
+and response bytes the client has not read yet may be lost. The quiet period is the
+`lingerQuietTimeout` listener option (see [listener options](#listener-options)): raise it
+for clients known to upload slowly or over lossy links, up to the `lingerTimeout` total, which
+is the hard bound either way. The cost of a longer period is that a client which reads the
+response and then idles keeps its lingering connection (and its socket) for that long, which
+the lingering pool and its bound limit (see [resource limits](#resource-limits)). Once the listener is
 closing, lingering lasts at most 500 milliseconds in total by default, so lingering connections
 barely delay shutdown. A lingering connection holds no request data and no longer
 counts against the connection limit (see [resource limits](#resource-limits)).
@@ -181,7 +215,8 @@ without a response and without consuming a slot. A connection that only lingers 
 data and its remaining life is bounded by the linger caps. At most 32 connections per
 listener linger this way by default; beyond that a lingering connection keeps its slot until it
 closes, so a listener never has more than 160 open sockets by default (the connection cap plus
-the lingering pool). The listening socket requests a 1024-entry accept
+the lingering pool). The gauge `axiom.http.connections` (tag `state` = `open` or `lingering`)
+reports both pools, see [observability](observability.md). The listening socket requests a 1024-entry accept
 backlog and sets SO_REUSEADDR so a restart can rebind while old connections
 linger in TIME_WAIT. Connections use TCP_NODELAY and a 32/128 KiB write-buffer
 water mark. A connection holds at most eight outstanding requests, including the
@@ -200,9 +235,10 @@ chunked body gets 413 as soon as its running total exceeds the limit. Per connec
 the bodies of waiting pipelined requests and the body being received (`2 × L`
 together; a request that would exceed that share is answered 503 after the earlier
 responses and the connection closes), so `3 × L` with
-`L = maxRequestBody`. These bounds are per connection and per listener, not
-global: 128 connections allow about `384 × L` per listener; see
-[request bodies](bodies.md#memory-per-connection). Body bytes are copied out of
+`L = maxRequestBody`. Across all of a listener's connections, request bodies are further
+limited by `maxInFlightBodyBytes` (64 MiB by default): a request whose body does not fit in what
+remains is answered 503 and its connection closes, instead of the listener holding up to
+`128 × 3 × L`; see [request bodies](bodies.md#memory-per-connection). Body bytes are copied out of
 network buffers as they arrive, so no Netty buffer is retained across reads.
 Response bodies are limited to 1 MiB of encoded bytes (a `String` counts its UTF-8
 bytes) and response headers to 8 KiB, counted as name, value and four characters
@@ -217,8 +253,10 @@ within 30 seconds of handing it to the socket: a client that keeps reading a few
 bytes at a time never looks inactive, so without this bound it could hold a
 connection indefinitely. When the bound passes, the connection closes and the
 client receives a truncated response; at the 1 MiB response limit this needs a
-client reading slower than about 35 KB/s. The bound covers final responses, not the
-interim `100 Continue`, which carries no body. A [stream](streaming.md) is not a response of at
+client reading slower than about 35 KB/s. The same bound applies to the write of the interim
+`100 Continue`, tracked separately from the final response because the client may send its body
+while that write is pending: a client that never reads loses the connection after
+`responseTimeout` instead of after the inactivity timeout. A [stream](streaming.md) is not a response of at
 most 1 MiB: its body is limited by its own byte cap (64 MiB by default), by the request
 deadline, and by the same 30 seconds for a client that takes no data, applied to each wait for
 the channel to become writable rather than to the whole stream. The inactivity timeout does not
@@ -264,7 +302,7 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `shutdownGrace` | 5 s | 0 to 1 day | Time `close()` lets running exchanges finish before connections close and handlers are interrupted; zero interrupts at once |
 | `idleTimeout` | 30 s | 1 ms to 1 day | Network inactivity after which a connection closes |
 | `headTimeout` | 10 s | 1 ms to 1 day | Time from a request's first byte until its head is complete (408) |
-| `responseTimeout` | 30 s | 1 ms to 1 day | Time to write one response to the socket |
+| `responseTimeout` | 30 s | 1 ms to 1 day | Time to write one response to the socket, including an interim `100 Continue` |
 | `lingerTimeout` | 2 s | 1 ms to 1 day | Total linger after the last response |
 | `lingerQuietTimeout` | 500 ms | 1 ms to 1 day | Silence that ends lingering |
 | `shutdownLingerTimeout` | 500 ms | 1 ms to 1 day | Total linger once the listener is closing (the smaller of this and `lingerTimeout` applies) |
@@ -274,15 +312,24 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `maxConnections` | 128 | 1 to 1,000,000 | Open connections per listener |
 | `maxLingeringConnections` | 32 | 0 to 1,000,000 | Lingering connections that stop counting against `maxConnections`; zero keeps them on their regular slots |
 | `maxPipelinedRequests` | 8 | 1 to 1024 | Outstanding requests per connection, including the running one |
+| `maxInFlightBodyBytes` | 64 MiB | 1 byte to 1 TiB | Request body bytes the listener holds at once, across connections (503 beyond); must be at least the application's `maxRequestBody` |
 | `maxRequestLine` | 4096 | 256 to 65,536 | Longest request line in bytes (414 beyond) |
 | `maxHeaderBytes` | 8192 | 256 to 1 MiB | Largest header section in bytes (431 beyond) |
 | `ioThreads` | processors, at least 2 | 1 to 1024 | I/O threads of the listener; handlers never run on them |
 
 Choosing values:
 
-- Total open sockets are at most `maxConnections + maxLingeringConnections`. The worst-case memory
-  held for request bodies grows linearly with `maxConnections` (see
-  [request bodies](bodies.md#memory-per-connection)).
+- **File descriptors and load balancers.** A listener can hold `maxConnections +
+  maxLingeringConnections` sockets (160 by default) plus its listening socket, its event-loop
+  selectors and wakeup pipes, and the files and outbound connections the application itself opens.
+  Raise the process descriptor limit (`ulimit -n`, container or systemd `LimitNOFILE`) above the
+  sum over all listeners with headroom, and size any connection limit on a load balancer or
+  proxy in front of the listener to the same sum, not to `maxConnections`. The lingering pool
+  is only used briefly, but a burst of connections that all end at once can fill it.
+- Total open sockets are at most `maxConnections + maxLingeringConnections`. The memory held for
+  request bodies is capped by `maxInFlightBodyBytes` however many connections are open (see
+  [request bodies](bodies.md#memory-per-connection)); lower it to bound heap use under many slow
+  uploaders, and raise it together with `maxRequestBody` when large bodies must upload concurrently.
 - The connection cap and admission are independent limits. A connection over the cap is closed
   at once without a response, so the client sees a closed connection, never a 503; admission 503s
   are only produced for requests on accepted connections. A cap below the application's admission

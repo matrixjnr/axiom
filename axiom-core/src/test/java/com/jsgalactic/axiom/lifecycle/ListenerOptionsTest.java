@@ -21,6 +21,7 @@ class ListenerOptionsTest {
         assertThat(defaults.maxConnections()).isEqualTo(128);
         assertThat(defaults.maxLingeringConnections()).isEqualTo(32);
         assertThat(defaults.maxPipelinedRequests()).isEqualTo(8);
+        assertThat(defaults.maxInFlightBodyBytes()).isEqualTo(64L * 1024 * 1024);
         assertThat(defaults.maxRequestLine()).isEqualTo(4096);
         assertThat(defaults.maxHeaderBytes()).isEqualTo(8192);
         assertThat(defaults.ioThreads()).isEqualTo(Math.max(2, Runtime.getRuntime().availableProcessors()));
@@ -33,7 +34,7 @@ class ListenerOptionsTest {
                 .responseTimeout(Duration.ofSeconds(4)).lingerTimeout(Duration.ofSeconds(5))
                 .lingerQuietTimeout(Duration.ofSeconds(6)).shutdownLingerTimeout(Duration.ofSeconds(7))
                 .maxDiscardedInput(8).maxConnections(9).maxLingeringConnections(10).maxPipelinedRequests(11)
-                .maxRequestLine(512).maxHeaderBytes(1024).ioThreads(3).build();
+                .maxInFlightBodyBytes(12).maxRequestLine(512).maxHeaderBytes(1024).ioThreads(3).build();
         assertThat(options.shutdownGrace()).isEqualTo(Duration.ofSeconds(1));
         assertThat(options.idleTimeout()).isEqualTo(Duration.ofSeconds(2));
         assertThat(options.headTimeout()).isEqualTo(Duration.ofSeconds(3));
@@ -45,6 +46,7 @@ class ListenerOptionsTest {
         assertThat(options.maxConnections()).isEqualTo(9);
         assertThat(options.maxLingeringConnections()).isEqualTo(10);
         assertThat(options.maxPipelinedRequests()).isEqualTo(11);
+        assertThat(options.maxInFlightBodyBytes()).isEqualTo(12);
         assertThat(options.maxRequestLine()).isEqualTo(512);
         assertThat(options.maxHeaderBytes()).isEqualTo(1024);
         assertThat(options.ioThreads()).isEqualTo(3);
@@ -64,7 +66,7 @@ class ListenerOptionsTest {
         var high = ListenerOptions.builder().shutdownGrace(day).idleTimeout(day).headTimeout(day)
                 .responseTimeout(day).lingerTimeout(day).lingerQuietTimeout(day).shutdownLingerTimeout(day)
                 .maxDiscardedInput(1 << 30).maxConnections(1_000_000).maxLingeringConnections(1_000_000)
-                .maxPipelinedRequests(1024).maxRequestLine(65_536).maxHeaderBytes(1024 * 1024).ioThreads(1024)
+                .maxPipelinedRequests(1024).maxInFlightBodyBytes(1L << 40).maxRequestLine(65_536).maxHeaderBytes(1024 * 1024).ioThreads(1024)
                 .build();
         assertThat(high.maxHeaderBytes()).isEqualTo(1024 * 1024);
     }
@@ -83,6 +85,10 @@ class ListenerOptionsTest {
         checkInt("maxConnections", (b, v) -> b.maxConnections(v), 0, -1, 1_000_001);
         checkInt("maxLingeringConnections", (b, v) -> b.maxLingeringConnections(v), -1, 1_000_001);
         checkInt("maxPipelinedRequests", (b, v) -> b.maxPipelinedRequests(v), 0, 1025);
+        for (long value : new long[] {0, -1, (1L << 40) + 1}) {
+            assertThatThrownBy(() -> ListenerOptions.builder().maxInFlightBodyBytes(value))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("maxInFlightBodyBytes");
+        }
         checkInt("maxRequestLine", (b, v) -> b.maxRequestLine(v), 255, 65_537);
         checkInt("maxHeaderBytes", (b, v) -> b.maxHeaderBytes(v), 255, 1024 * 1024 + 1);
         checkInt("ioThreads", (b, v) -> b.ioThreads(v), 0, 1025);

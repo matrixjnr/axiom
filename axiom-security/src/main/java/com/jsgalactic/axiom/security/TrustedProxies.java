@@ -7,8 +7,10 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
  * Decides a request's client address and scheme, believing {@code X-Forwarded-For} and
@@ -33,22 +35,41 @@ import java.util.Optional;
  * proxy. Addresses are never resolved through DNS. Entries may carry a port
  * ({@code 192.0.2.1:4711}, {@code [2001:db8::1]:4711}), which is ignored.</li>
  * <li>When the peer is trusted, {@code X-Forwarded-Proto} supplies the scheme if it is exactly one
- * value, {@code http} or {@code https} (any case); otherwise the scheme is that of the connection.</li>
+ * value, {@code http} or {@code https} (any case); otherwise the scheme is that of the connection ({@link Request#scheme()}).</li>
+ * <li>{@code X-Forwarded-Host} supplies the host (and its port, if any) when it is exactly one
+ * value that is a DNS name, an IPv4 literal or a bracketed IPv6 literal; {@code X-Forwarded-Port}
+ * supplies the port, 1 to 65535, when the host carries none. Lists, names that are not valid host
+ * names (spaces, paths, credentials, {@code @}) and out-of-range ports are ignored.</li>
  * </ul>
- * Trust only proxies that overwrite or append to these headers; a trusted proxy that passes a
- * client's {@code X-Forwarded-For} through unchanged lets the client choose its address. The RFC
- * 7239 {@code Forwarded} header and {@code X-Forwarded-Host} are not read.
+ * <p><b>Header family.</b> By default the {@code X-Forwarded-*} family is read. {@link
+ * #reading(ForwardedHeaders)} selects the RFC 7239 {@code Forwarded} header instead; exactly one
+ * family is ever read, so mixing a spoofed header of one with a genuine header of the other cannot
+ * happen. {@code Forwarded} is parsed strictly (tokens and quoted strings; an element with a
+ * repeated or malformed parameter is invalid; no whitespace around {@code =} or {@code ;}), then
+ * walked right to left with the same trust rule and the same 32-hop bound as above. The {@code for}
+ * value must be an IPv4 literal or a quoted, bracketed IPv6 literal, with an optional port;
+ * obfuscated identifiers ({@code _hidden}), {@code unknown} and names stop the walk. {@code proto}
+ * and {@code host} are taken from the element that vouches for the client address (the one whose
+ * {@code for} became the client), because that proxy describes what the client sent. A header
+ * with an unterminated quoted string is ignored as a whole.
+ *
+ * <p>Trust only proxies that overwrite or append to these headers; a trusted proxy that passes a
+ * client's forwarding headers through unchanged lets the client choose its address and host. The
+ * host and port are client-influenced input as soon as the proxy does not set them itself: never
+ * use them for security decisions such as password-reset links without an allow-list.
  *
  * <p>Immutable and thread-safe; configure once and share.
  */
 public final class TrustedProxies {
     private static final int MAX_HOPS = 32;
-    private static final TrustedProxies NONE = new TrustedProxies(List.of());
+    private static final TrustedProxies NONE = new TrustedProxies(List.of(), ForwardedHeaders.X_FORWARDED);
 
     private final List<Range> ranges;
+    private final ForwardedHeaders family;
 
-    private TrustedProxies(List<Range> ranges) {
+    private TrustedProxies(List<Range> ranges, ForwardedHeaders family) {
         this.ranges = List.copyOf(ranges);
+        this.family = family;
     }
 
     /**
@@ -71,7 +92,18 @@ public final class TrustedProxies {
     public static TrustedProxies of(String... ranges) {
         var parsed = new ArrayList<Range>(ranges.length);
         for (var range : ranges) { parsed.add(Range.parse(Objects.requireNonNull(range, "range"))); }
-        return new TrustedProxies(parsed);
+        return new TrustedProxies(parsed, ForwardedHeaders.X_FORWARDED);
+    }
+
+    /**
+     * Returns a copy that reads the given header family instead of the default
+     * {@link ForwardedHeaders#X_FORWARDED}. Only that family is read; the other is ignored.
+     *
+     * @param headers the family the trusted proxies set
+     * @return a copy with the same trusted ranges
+     */
+    public TrustedProxies reading(ForwardedHeaders headers) {
+        return new TrustedProxies(ranges, Objects.requireNonNull(headers, "headers"));
     }
 
     /**
@@ -99,6 +131,12 @@ public final class TrustedProxies {
         if (peer == null) { return Optional.empty(); }
         var client = peer.getAddress();
         if (!isTrusted(client)) { return Optional.of(new ClientOrigin(client, request.scheme(), false)); }
+        return Optional.of(family == ForwardedHeaders.FORWARDED ? fromForwarded(request, client)
+                : fromXForwarded(request, client));
+    }
+
+    private ClientOrigin fromXForwarded(Request request, InetAddress peer) {
+        var client = peer;
         boolean forwarded = false;
         var chain = request.header("X-Forwarded-For").orElse("");
         int end = chain.length();
@@ -111,13 +149,56 @@ public final class TrustedProxies {
             if (!isTrusted(hop)) { break; }
             end = comma < 0 ? 0 : comma;
         }
-        var scheme = request.scheme();
-        var proto = request.header("X-Forwarded-Proto").map(value -> value.trim().toLowerCase(Locale.ROOT));
-        if (proto.isPresent() && (proto.get().equals("http") || proto.get().equals("https"))) {
-            scheme = proto.get();
-            forwarded = true;
+        var proto = request.header("X-Forwarded-Proto").orElse(null);
+        var scheme = scheme(proto, request.scheme());
+        forwarded |= proto != null && proto.trim().equalsIgnoreCase(scheme);
+        // One value only: a list means several proxies appended and nothing says which one to believe.
+        var hostHeader = request.header("X-Forwarded-Host").orElse(null);
+        var authority = single(hostHeader) ? Forwarded.authority(hostHeader.trim()) : null;
+        int port = authority == null ? 0 : authority.port();
+        if (port == 0) {
+            var text = request.header("X-Forwarded-Port").map(String::trim).orElse(null);
+            port = single(text) ? Forwarded.port(text) : 0;
         }
-        return Optional.of(new ClientOrigin(client, scheme, forwarded));
+        return origin(client, scheme, forwarded, authority, port);
+    }
+
+    private ClientOrigin fromForwarded(Request request, InetAddress peer) {
+        var client = peer;
+        Map<String, String> vouching = null;
+        var header = request.header("Forwarded").orElse(null);
+        var elements = header == null ? null : Forwarded.parse(header);
+        if (elements != null) {
+            for (int i = elements.size() - 1, hops = 0; i >= 0 && hops < MAX_HOPS; i--, hops++) {
+                var element = elements.get(i);
+                var hop = element == null ? null : Forwarded.node(element.get("for"));
+                if (hop == null) { break; }
+                client = hop;
+                vouching = element;
+                if (!isTrusted(hop)) { break; }
+            }
+        }
+        if (vouching == null) { return new ClientOrigin(client, request.scheme(), false); }
+        // Proto and host come from the element of the proxy that saw the client: the one vouching for it.
+        var authority = Forwarded.authority(vouching.get("host"));
+        return origin(client, scheme(vouching.get("proto"), request.scheme()), true, authority, authority == null ? 0 : authority.port());
+    }
+
+    private static ClientOrigin origin(InetAddress client, String scheme, boolean forwarded, Forwarded.Authority authority,
+            int port) {
+        boolean extra = !scheme.equals("http") || authority != null || port != 0;
+        return new ClientOrigin(client, scheme, forwarded || extra,
+                Optional.ofNullable(authority == null ? null : authority.host()),
+                port == 0 ? OptionalInt.empty() : OptionalInt.of(port));
+    }
+
+    private static String scheme(String value, String connection) {
+        var proto = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return proto.equals("http") || proto.equals("https") ? proto : connection;
+    }
+
+    private static boolean single(String value) {
+        return value != null && value.indexOf(',') < 0;
     }
 
     /** Parses one X-Forwarded-For entry: an IP literal with an optional port, or null. */
