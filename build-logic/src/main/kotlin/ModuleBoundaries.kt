@@ -16,7 +16,9 @@ object ModuleBoundaries {
         // Authentication, policies and HTTP security helpers; the JWT adapter builds on them and,
         // like every security module, uses only the JDK (no JSON or crypto library).
         "axiom-security" to setOf("axiom-core"),
-        "axiom-security-jwt" to setOf("axiom-core", "axiom-security")
+        "axiom-security-jwt" to setOf("axiom-core", "axiom-security"),
+        // In-memory metrics registry and Prometheus text rendering; JDK only, no metrics library.
+        "axiom-metrics" to setOf("axiom-core")
     )
 
     /** Modules that exist only to run tests and are never published. */
