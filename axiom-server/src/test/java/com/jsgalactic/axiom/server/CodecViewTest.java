@@ -44,7 +44,11 @@ class CodecViewTest {
 
     @Test void passesTheBodyAsAReadOnlyViewWithoutCopyingIt(@TempDir Path services) throws Exception {
         var threads = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
-        assumeTrue(threads.isThreadAllocatedMemorySupported() && threads.isThreadAllocatedMemoryEnabled());
+        boolean measurable = threads.isThreadAllocatedMemorySupported() && threads.isThreadAllocatedMemoryEnabled();
+        if (Boolean.getBoolean("axiom.requireAllocationTests")) {
+            assertThat(measurable).as("thread allocation measurement is required by axiom.requireAllocationTests").isTrue();
+        }
+        assumeTrue(measurable);
         var allocated = new AtomicLong(-1);
         var app = Axiom.create().maxRequestBody(LARGE);
         app.post("/view", ctx -> {
@@ -61,7 +65,8 @@ class CodecViewTest {
             Response response = running.handle(post("/view", ViewCodec.MEDIA_TYPE, content));
             assertThat(response.body()).isEqualTo("readOnly=true;remaining=" + LARGE + ";first=v");
         }
-        assumeTrue(allocated.get() >= 0, "allocation is not measurable on the handler thread");
+        // The handler ran on this thread, so a missing measurement is a test defect, not a skip.
+        assertThat(allocated.get()).as("allocation measured on the handler thread").isGreaterThanOrEqualTo(0);
         assertThat(allocated.get()).as("bytes allocated while decoding an %d-byte body", LARGE)
                 .isLessThan(LARGE / 8);
     }

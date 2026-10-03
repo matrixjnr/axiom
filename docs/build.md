@@ -170,9 +170,11 @@ and are skipped (JUnit assumption) on a JVM that cannot measure it. Passing
 `-Daxiom.requireAllocationTests=true` to Gradle turns that skip into a failure; the Build
 workflow sets it, and the `axiom.java-test` convention forwards it to every test JVM
 (`test` and `integrationTest` alike).
-Locally it is off by default so a different JDK does not break `check`. Currently only
-the `axiom-json` test (`decodesFromAReadOnlyViewWithoutCopyingIt`) honors the flag; the
-`axiom-server` `CodecViewTest` case still skips silently (tracked as a limitation).
+Locally it is off by default so a different JDK does not break `check`. Every allocation-based
+test honors the flag, so none of them can be skipped (or pass vacuously) in CI: the `axiom-json`
+read-only-view test, the `axiom-server` `CodecViewTest` case and the `axiom-http`
+`HttpConnectionTest` allocation case. The `unit`, `integration`, `quality` and per-commit jobs
+pass the flag on Temurin 21, which supports the measurement.
 
 ## Hygiene and deferred items
 
