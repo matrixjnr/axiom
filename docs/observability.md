@@ -71,13 +71,39 @@ queue timeouts and capacity refusals as `5xx` (503), matching the responses clie
 is not stored and is counted in `droppedSeries()`, so putting user input into a tag cannot exhaust
 memory. Names are dotted lowercase words, tag keys lowercase words (`le` is reserved), tag values
 are truncated at 256 characters, and one name always has one kind and one set of tag keys. Tests
-read values with `counterValue`, `gaugeValue` and `timerSnapshot`. Timers are histograms with the
-fixed upper bounds 1 ms, 5 ms, 10 ms, 25 ms, 50 ms, 100 ms, 250 ms, 500 ms, 1 s, 2.5 s, 5 s and
-10 s.
+read values with `counterValue`, `gaugeValue` and `timerSnapshot`. Timers are histograms, by default
+with the upper bounds 1 ms, 5 ms, 10 ms, 25 ms, 50 ms, 100 ms, 250 ms, 500 ms, 1 s, 2.5 s, 5 s and
+10 s (`MetricsRegistry.DEFAULT_BUCKETS`).
 
-`PrometheusText.render(registry)` produces text exposition format 0.0.4: dots become
-underscores, counters end in `_total`, timers become `<name>_seconds` histograms with `_bucket`,
-`_sum` and `_count`, and tag values are escaped. Reads are not an atomic snapshot across series.
+Settings that differ from the defaults go through the builder, before the application starts:
+
+```java
+var registry = MetricsRegistry.builder()
+        .maxSeries(8192)
+        .timerBuckets(List.of(Duration.ofMillis(5), Duration.ofMillis(50), Duration.ofMillis(500), Duration.ofSeconds(5)))
+        .timerBuckets("axiom.http.request.duration", List.of(Duration.ofMillis(1), Duration.ofMillis(10), Duration.ofSeconds(1)))
+        .help("shop.orders", "Orders placed, by payment kind.")
+        .build();
+```
+
+- `timerBuckets(bounds)` sets the bounds of every timer without its own; `timerBuckets(name, bounds)`
+  sets those of one timer whatever its tags, including the runtime's own timers. Bounds are positive,
+  strictly ascending and at most 64; a larger observation falls into the implicit `+Inf` bucket.
+  A series takes the bounds in force when it is first created.
+- `help(name, text)` is one line of at most 512 characters for the `# HELP` line. The runtime's own
+  metrics have help text built in, which `help` overrides.
+- The registry keeps **no quantiles and no exemplars**, by design. Quantiles computed inside one
+  process cannot be aggregated across instances, whereas the histogram buckets can
+  (`histogram_quantile` in Prometheus); and an exemplar is a per-request identifier, which must never
+  become a tag and has no place in a bounded registry. Put exemplars in an exporter that has the
+  request at hand.
+
+`PrometheusText.render(registry)` produces text exposition format 0.0.4: a `# HELP` line where the
+metric has help text, then `# TYPE`; dots become underscores, counters end in `_total`, timers become
+`<name>_seconds` histograms with `_bucket`, `_sum` and `_count`, and tag values are escaped. The
+registry reports on itself with `axiom_metrics_series` (gauge: stored series) and
+`axiom_metrics_dropped_series_total` (counter: series refused at the limit), so a full registry is
+visible and can be alerted on. Reads are not an atomic snapshot across series.
 
 ## Health and readiness
 
@@ -124,8 +150,7 @@ as a metric tag. The framework request ID (`ctx.execution().requestId()`, sent a
 - No OpenTelemetry integration: Axiom neither creates spans nor exports traces.
 - `tracestate` is not parsed or propagated, and incoming `traceparent` is not copied into
   responses or log records automatically.
-- The registry has fixed histogram buckets, no quantiles, exemplars or help text, and no
-  per-listener view; there is no JMX, StatsD or OTLP exporter.
+- The registry has no per-listener view; there is no JMX, StatsD or OTLP exporter.
 - Metrics cover admitted requests, streams and connection counts, not bytes, body decoding or codec work.
 - Health checks have no result caching, and there is no startup probe.
 
