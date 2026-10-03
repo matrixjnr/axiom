@@ -1,6 +1,7 @@
 package com.jsgalactic.axiom.server.internal;
 
 import com.jsgalactic.axiom.context.Context;
+import com.jsgalactic.axiom.context.SecurityIdentity;
 import com.jsgalactic.axiom.error.DecodeException;
 import com.jsgalactic.axiom.error.UnsupportedMediaTypeException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
@@ -20,6 +21,7 @@ final class DefaultContext implements Context {
     private final Response frameworkAnswer;
     private int status = 200;
     private boolean explicitStatus;
+    private SecurityIdentity identity;
 
     private final Codecs codecs;
 
@@ -64,6 +66,19 @@ final class DefaultContext implements Context {
     public Request request() { return request; }
 
     @Override public ExecutionContext execution() { return execution; }
+
+    @Override
+    public java.util.Optional<SecurityIdentity> identity() { return java.util.Optional.ofNullable(identity); }
+
+    @Override
+    public Context identity(SecurityIdentity identity) {
+        java.util.Objects.requireNonNull(identity, "identity");
+        if (this.identity != null) {
+            throw new IllegalStateException("This request already has a security identity; it can be set only once");
+        }
+        this.identity = identity;
+        return this;
+    }
 
     @Override
     public <T> T body(Class<T> type) {

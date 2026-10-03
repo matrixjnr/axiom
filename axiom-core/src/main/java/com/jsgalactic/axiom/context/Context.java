@@ -35,6 +35,35 @@ public interface Context {
      */
     ExecutionContext execution();
     /**
+     * Returns the authenticated caller of this request, if authentication middleware attached
+     * one. Empty means anonymous: no authenticator ran, or the request carried no credentials.
+     * Error handlers see the identity set before the failure.
+     *
+     * @return the request's identity, if any
+     */
+    default Optional<SecurityIdentity> identity() {
+        return Optional.empty();
+    }
+
+    /**
+     * Attaches the authenticated caller to this request. Authentication middleware call this once
+     * credentials have been verified; handlers and inner middleware then read it with
+     * {@link #identity()}. The identity can be set at most once per request, so code that runs
+     * later in the chain cannot replace a verified identity with another one. It lives as long as
+     * the context: it is never shared with other requests and is gone when the request ends.
+     *
+     * @param identity verified identity
+     * @return this context
+     * @throws IllegalStateException if an identity is already set
+     * @throws UnsupportedOperationException if this context cannot hold an identity (the runtime's
+     *         contexts can; this default exists for application test doubles)
+     */
+    default Context identity(SecurityIdentity identity) {
+        Objects.requireNonNull(identity, "identity");
+        throw new UnsupportedOperationException("This context cannot hold a security identity");
+    }
+
+    /**
      * Returns the case-sensitive HTTP method.
      *
      * @return the case-sensitive HTTP method
