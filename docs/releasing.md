@@ -1,3 +1,9 @@
+---
+title: Releasing
+parent: Operations
+nav_order: 4
+---
+
 # Releasing
 
 Nothing has been published yet. This page lists what the build does, what the owner

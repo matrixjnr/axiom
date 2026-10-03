@@ -1,3 +1,9 @@
+---
+title: Streaming and SSE
+parent: Guides
+nav_order: 8
+---
+
 # Streaming responses and server-sent events
 
 A handler normally returns a complete body, which is limited to 1 MiB and held in memory. When the

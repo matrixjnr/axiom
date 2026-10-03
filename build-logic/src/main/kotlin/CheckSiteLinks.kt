@@ -9,15 +9,19 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 
 /**
- * Fails when a generated page links to a file or an anchor that does not exist in the site, or to
- * a site-absolute path (which breaks under a project path such as `/axiom/`). External links
- * (`http:`, `https:`, `mailto:`) are not fetched. Links into `api/` (the aggregated Javadoc) are
- * verified against the files when [verifyApi] is set and otherwise accepted.
+ * Fails when a page of the built site (the output of Jekyll with the aggregated Javadoc copied to
+ * `api/`, see docs/site.md) links to a file or an anchor that does not exist, or to a path outside
+ * the site's base path. External links (`http:`, `https:`, `mailto:`) are not fetched. The Javadoc's
+ * own pages are not scanned; links into it must resolve to a file.
  */
 abstract class CheckSiteLinks : DefaultTask() {
     @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE) abstract val siteDir: DirectoryProperty
 
-    @get:Input abstract val verifyApi: Property<Boolean>
+    /** The public address of the site (`https://matrixjnr.github.io/axiom`); links to it are checked as local ones. */
+    @get:Input abstract val siteUrl: Property<String>
+
+    /** The site's base path (`/axiom`), or empty when it is served from the root of a domain. */
+    @get:Input abstract val baseUrl: Property<String>
 
     init {
         // The Javadoc directory is checked by existence, not declared as an input.
@@ -27,8 +31,11 @@ abstract class CheckSiteLinks : DefaultTask() {
     @TaskAction
     fun check() {
         val root = siteDir.get().asFile
-        val pages = root.listFiles { f -> f.isFile && f.name.endsWith(".html") }.orEmpty().associate { it.name to it.readText() }
-        val problems = problems(pages, verifyApi.get()) { path -> root.resolve(path).exists() }
+        val pages = root.walkTopDown().filter { it.isFile && it.name.endsWith(".html") }
+            .map { it.relativeTo(root).invariantSeparatorsPath }
+            .filter { !it.startsWith("api/") }
+            .associateWith { root.resolve(it).readText() }
+        val problems = problems(pages, siteUrl.get(), baseUrl.get()) { path -> root.resolve(path).isFile }
         if (problems.isNotEmpty()) {
             throw GradleException(problems.joinToString("\n", prefix = "The site has broken links:\n") { "  - $it" })
         }
@@ -40,32 +47,35 @@ abstract class CheckSiteLinks : DefaultTask() {
         private val SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
         /**
-         * The problems of [pages] (file name to HTML); [exists] tells whether a path relative to the
-         * site root exists, for links that leave the page set (stylesheet, Javadoc).
+         * The problems of [pages] (path relative to the site root to HTML); [isFile] tells whether a
+         * path relative to the site root is a file, for links that leave the page set (stylesheets,
+         * scripts, images, Javadoc).
          */
-        fun problems(pages: Map<String, String>, verifyApi: Boolean, exists: (String) -> Boolean): List<String> {
-            val ids = pages.mapValues { (_, html) -> ID.findAll(html).map { unescape(it.groupValues[1]) }.toList() }
+        fun problems(pages: Map<String, String>, siteUrl: String, baseUrl: String, isFile: (String) -> Boolean): List<String> {
+            val ids = pages.mapValues { (_, html) -> ID.findAll(html).map { unescape(it.groupValues[1]) }.toSet() }
             val problems = mutableListOf<String>()
             for ((name, html) in pages.toSortedMap()) {
-                ids.getValue(name).groupBy { it }.filterValues { it.size > 1 }.keys
-                    .forEach { problems += "$name: duplicate id '$it'" }
                 for (match in ATTRIBUTE.findAll(html)) {
-                    val link = unescape(match.groupValues[2])
-                    if (link.isEmpty() || SCHEME.containsMatchIn(link)) continue
-                    if (link.startsWith("/")) {
-                        problems += "$name: '$link' is site-absolute and breaks under a project path"
-                        continue
-                    }
-                    val path = link.substringBefore('#').substringBefore('?')
+                    val link = unescape(match.groupValues[2]).let { if (it.startsWith("$siteUrl/") || it == siteUrl) it.removePrefix(siteUrl.removeSuffix(baseUrl)) else it }
+                    if (link.isEmpty() || link.startsWith("//") || SCHEME.containsMatchIn(link)) continue
                     val fragment = if (link.contains('#')) link.substringAfter('#') else null
-                    val target = if (path.isEmpty()) name else path
+                    var path = link.substringBefore('#').substringBefore('?')
+                    if (path.startsWith("/")) {
+                        if (baseUrl.isNotEmpty() && path != baseUrl && !path.startsWith("$baseUrl/")) {
+                            problems += "$name: '$link' is outside the site's base path $baseUrl"
+                            continue
+                        }
+                        path = path.removePrefix(baseUrl).removePrefix("/")
+                    } else if (path.isNotEmpty()) {
+                        path = DocsLinks.normalize(name.substringBeforeLast('/', "") + "/" + path).orEmpty()
+                    }
+                    var target = if (link.startsWith("#") || link.startsWith("?")) name else path
+                    if (target.isEmpty() || target.endsWith("/")) target += "index.html"
                     if (target in pages) {
                         if (!fragment.isNullOrEmpty() && fragment !in ids.getValue(target)) {
                             problems += "$name: '$link' points to a missing anchor in $target"
                         }
-                    } else if (target.startsWith("api/") && !verifyApi) {
-                        continue
-                    } else if (!exists(target)) {
+                    } else if (!isFile(target)) {
                         problems += "$name: '$link' points to a file that does not exist"
                     }
                 }

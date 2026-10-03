@@ -1,5 +1,6 @@
 name: Docs
-# Builds the documentation site (docs/site.md) and deploys it to GitHub Pages. Pull requests only
+# Builds the documentation site (docs/site.md: Jekyll with the just-the-docs theme, both pinned by
+# site/Gemfile.lock, plus the aggregated Javadoc) and deploys it to GitHub Pages. Pull requests only
 # build it and keep the result as an artifact; a push to main (or a manual run on main) deploys.
 # This workflow is separate from build.yml: the aggregate `check` job does not depend on it. The
 # repository must have Settings -> Pages -> Source set to "GitHub Actions" for the deploy job.
@@ -9,6 +10,8 @@ on:
     paths:
       - 'docs/**'
       - 'README.md'
+      - 'site/**'
+      - 'branding/**'
       - '**/src/main/java/**'
       - 'build.gradle.kts'
       - 'build-logic/**'
@@ -18,6 +21,8 @@ on:
     paths:
       - 'docs/**'
       - 'README.md'
+      - 'site/**'
+      - 'branding/**'
       - '**/src/main/java/**'
       - 'build.gradle.kts'
       - 'build-logic/**'
@@ -31,7 +36,7 @@ concurrency:
   group: docs-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  # Pages, aggregated Javadoc and the link and anchor check (`./gradlew docsSite`).
+  # Jekyll source and aggregated Javadoc (Gradle), the site (Jekyll), and the link and anchor checks.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -44,7 +49,16 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
-      - run: ./gradlew docsSite
+      # Fails on a broken link or anchor in the Markdown, then writes build/jekyll and build/docs-api.
+      - run: ./gradlew checkDocsLinks jekyllSource aggregateJavadoc
+      # Gems come from site/Gemfile.lock only, installed with the lock frozen (hashes verified).
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: '3.3.6'
+          bundler-cache: true
+          working-directory: site
+      - run: site/build.sh
+      - run: ./gradlew checkSiteLinks
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: build/site

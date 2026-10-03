@@ -1,3 +1,9 @@
+---
+title: Bodies and JSON
+parent: Guides
+nav_order: 3
+---
+
 # Request bodies and JSON
 
 A handler reads the request body through its context:
