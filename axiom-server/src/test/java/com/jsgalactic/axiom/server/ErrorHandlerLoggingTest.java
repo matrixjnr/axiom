@@ -1,6 +1,9 @@
 package com.jsgalactic.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
@@ -26,7 +29,7 @@ import org.junit.jupiter.api.Test;
 class ErrorHandlerLoggingTest {
     private static final String POISON = "POISON<script>secret";
     // Held strongly so the logging configuration keeps the handler while the test runs.
-    private final Logger logger = Logger.getLogger("com.jsgalactic.axiom.server.internal.DefaultApplication");
+    private final Logger logger = Logger.getLogger("com.jsgalactic.axiom.failures");
     private final List<LogRecord> records = new CopyOnWriteArrayList<>();
     private final Handler capture = new Handler() {
         @Override public void publish(LogRecord record) { records.add(record); }
@@ -93,6 +96,92 @@ class ErrorHandlerLoggingTest {
             app.start();
             assertThat(call(app, ExecutionContext.create(Duration.ofSeconds(10))).status()).isEqualTo(404);
             assertThat(records).isEmpty();
+        }
+    }
+
+    /** Captures what the application logs through a logger of its own. */
+    private static final class Capture implements System.Logger {
+        final List<String> entries = new CopyOnWriteArrayList<>();
+        final List<Throwable> thrown = new CopyOnWriteArrayList<>();
+        @Override public String getName() { return "capture"; }
+        @Override public boolean isLoggable(Level level) { return true; }
+        @Override public void log(Level level, java.util.ResourceBundle bundle, String message, Throwable thrown) {
+            entries.add(level + " " + message);
+            this.thrown.add(thrown);
+        }
+        @Override public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
+            entries.add(level + " " + format);
+        }
+    }
+
+    @Test
+    void aTranslatedServerErrorIsLoggedOnceNotTwice() throws Exception {
+        var failure = new NoSuchElementException(POISON);
+        try (var app = app(failure)) {
+            app.error(NoSuchElementException.class, (ctx, mapped) -> { throw new InternalServerErrorException(); });
+            app.start();
+            var response = call(app, ExecutionContext.create(Duration.ofSeconds(10)));
+            assertThat(response.status()).isEqualTo(500);
+            assertThat(records).singleElement().satisfies(record -> {
+                assertThat(record.getThrown()).isSameAs(failure);
+                assertThat(record.getMessage()).contains("500");
+            });
+        }
+    }
+
+    @Test
+    void anAxiomServerErrorWithoutAHandlerIsLoggedOnce() throws Exception {
+        var failure = new InternalServerErrorException();
+        try (var app = app(failure)) {
+            app.start();
+            assertThat(call(app, ExecutionContext.create(Duration.ofSeconds(10))).status()).isEqualTo(500);
+            assertThat(records).singleElement().satisfies(record -> assertThat(record.getThrown()).isSameAs(failure));
+        }
+    }
+
+    @Test
+    void theLoggerAndLevelAreConfigurable() throws Exception {
+        var capture = new Capture();
+        var failure = new NoSuchElementException(POISON);
+        try (var app = app(failure)) {
+            app.failureLog(capture, System.Logger.Level.INFO);
+            app.error(NoSuchElementException.class, (ctx, mapped) -> Response.of(409, "mapped"));
+            app.start();
+            var execution = ExecutionContext.create(Duration.ofSeconds(10));
+            assertThat(call(app, execution).status()).isEqualTo(409);
+            assertThat(records).as("the default logger stays silent").isEmpty();
+            assertThat(capture.entries).singleElement().asString()
+                    .startsWith("INFO ").contains(execution.requestId()).doesNotContain("POISON");
+            assertThat(capture.thrown).containsExactly(failure);
+        }
+    }
+
+    @Test
+    void offSilencesMappedFailuresButNotADefectiveErrorHandler() throws Exception {
+        var capture = new Capture();
+        try (var app = app(new NoSuchElementException(POISON))) {
+            app.failureLog(capture, System.Logger.Level.OFF);
+            app.get("/defect", ctx -> { throw new IllegalStateException(); });
+            app.error(NoSuchElementException.class, (ctx, mapped) -> Response.of(409, "mapped"));
+            app.error(IllegalStateException.class, (ctx, mapped) -> { throw new UnsupportedOperationException(); });
+            app.start();
+            assertThat(call(app, ExecutionContext.create(Duration.ofSeconds(10))).status()).isEqualTo(409);
+            assertThat(capture.entries).isEmpty();
+            assertThat(app.handle(Request.get("/defect")).status()).isEqualTo(500);
+            assertThat(capture.entries).singleElement().asString().startsWith("ERROR ");
+        }
+    }
+
+    @Test
+    void rejectsInvalidConfiguration() {
+        try (var app = Axiom.create()) {
+            assertThatNullPointerException().isThrownBy(() -> app.failureLog(null, System.Logger.Level.INFO));
+            assertThatNullPointerException().isThrownBy(() -> app.failureLog(new Capture(), null));
+            assertThatIllegalArgumentException()
+                    .isThrownBy(() -> app.failureLog(new Capture(), System.Logger.Level.ALL));
+            app.start();
+            assertThatIllegalStateException()
+                    .isThrownBy(() -> app.failureLog(new Capture(), System.Logger.Level.INFO));
         }
     }
 }

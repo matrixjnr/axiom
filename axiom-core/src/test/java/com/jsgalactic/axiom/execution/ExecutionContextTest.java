@@ -50,4 +50,24 @@ class ExecutionContextTest {
         assertThat(second).startsWith(prefix);
         assertThat(Long.parseLong(second.substring(17), 16)).isGreaterThan(Long.parseLong(first.substring(17), 16));
     }
+
+    @Test void extendingMovesTheDeadlineLaterButNeverEarlierOrBackFromExpiry() {
+        var clock = new AtomicLong(1_000);
+        var context = ExecutionContext.create(Duration.ofNanos(100), clock::get);
+        assertThat(context.isDeadlineExtended()).isFalse();
+        context.extendDeadline(Duration.ofNanos(50)); // Would end sooner: ignored.
+        assertThat(context.remainingTime()).isEqualTo(Duration.ofNanos(100));
+        assertThat(context.isDeadlineExtended()).isFalse();
+        clock.addAndGet(60);
+        context.extendDeadline(Duration.ofNanos(500));
+        assertThat(context.remainingTime()).isEqualTo(Duration.ofNanos(500));
+        assertThat(context.isDeadlineExtended()).isTrue();
+        clock.addAndGet(500);
+        assertThat(context.isExpired()).isTrue();
+        context.extendDeadline(Duration.ofNanos(500)); // Too late: an expired deadline stays expired.
+        assertThat(context.isExpired()).isTrue();
+        assertThatThrownBy(() -> context.extendDeadline(Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> context.extendDeadline(Duration.ofDays(2))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> context.extendDeadline(null)).isInstanceOf(NullPointerException.class);
+    }
 }

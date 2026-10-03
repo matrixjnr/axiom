@@ -4,9 +4,12 @@ import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.BodyWriter;
 import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.http.StreamAbortedException.Reason;
+import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import io.netty.channel.Channel;
 import io.netty.handler.codec.http.DefaultHttpContent;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Condition;
@@ -35,14 +38,17 @@ final class ChannelBodyWriter implements BodyWriter {
     private final ExecutionContext execution;
     private final long limit;
     private final long stallNanos;
-    private final StreamMetrics metrics;
+    private final StreamMetrics.Scope metrics;
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition changed = lock.newCondition();
     private final AtomicReference<Reason> aborted = new AtomicReference<>();
+    private final List<Runnable> shutdownActions = new ArrayList<>();
+    private volatile boolean shutdown;
     private volatile boolean ended;
     private volatile long written;
 
-    ChannelBodyWriter(Channel channel, ExecutionContext execution, long limit, long stallNanos, StreamMetrics metrics) {
+    ChannelBodyWriter(Channel channel, ExecutionContext execution, long limit, long stallNanos,
+            StreamMetrics.Scope metrics) {
         this.channel = channel;
         this.execution = execution;
         this.limit = limit;
@@ -67,7 +73,7 @@ final class ChannelBodyWriter implements BodyWriter {
             buffer.writeBytes(bytes, offset + sent, piece);
             // A failed write means the connection is gone; the next write or wait reports it.
             channel.writeAndFlush(new DefaultHttpContent(buffer)).addListener(done -> {
-                if (!done.isSuccess()) { abort(Reason.CLIENT_DISCONNECTED); }
+                if (!done.isSuccess()) { abort(shutdown ? Reason.SHUTDOWN : Reason.CLIENT_DISCONNECTED); }
             });
             sent += piece;
             written += piece;
@@ -75,6 +81,47 @@ final class ChannelBodyWriter implements BodyWriter {
     }
 
     @Override public long bytesWritten() { return written; }
+
+    @Override public boolean shutdownRequested() { return shutdown; }
+
+    @Override public void onShutdown(Runnable action) {
+        Objects.requireNonNull(action, "action");
+        lock.lock();
+        try {
+            if (!shutdown) { shutdownActions.add(action); return; }
+        } finally {
+            lock.unlock();
+        }
+        run(action);
+    }
+
+    /**
+     * Tells the body that the listener is closing, once: from now on {@link #shutdownRequested}
+     * is true and the registered actions run. Writes keep working until the grace period ends.
+     */
+    void beginShutdown() {
+        List<Runnable> actions;
+        lock.lock();
+        try {
+            if (shutdown) { return; }
+            shutdown = true;
+            actions = List.copyOf(shutdownActions);
+            shutdownActions.clear();
+            changed.signalAll();
+        } finally {
+            lock.unlock();
+        }
+        actions.forEach(ChannelBodyWriter::run);
+    }
+
+    private static void run(Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException failure) {
+            System.getLogger(ChannelBodyWriter.class.getName())
+                    .log(System.Logger.Level.WARNING, "A stream shutdown action failed", failure);
+        }
+    }
 
     /** The reason the stream was aborted, or null. */
     Reason aborted() { return aborted.get(); }
@@ -95,7 +142,7 @@ final class ChannelBodyWriter implements BodyWriter {
 
     private void check() throws StreamAbortedException {
         if (aborted.get() == null) {
-            if (!channel.isActive()) { abort(Reason.CLIENT_DISCONNECTED); }
+            if (!channel.isActive()) { abort(shutdown ? Reason.SHUTDOWN : Reason.CLIENT_DISCONNECTED); }
             else if (execution.isExpired()) { abort(Reason.TIMEOUT); }
         }
         if (aborted.get() != null) { throw failure(); }

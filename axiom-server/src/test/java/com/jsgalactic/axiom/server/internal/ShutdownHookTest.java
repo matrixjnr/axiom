@@ -1,12 +1,14 @@
 package com.jsgalactic.axiom.server.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
+import com.jsgalactic.axiom.observability.Health;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -114,5 +116,70 @@ class ShutdownHookTest {
         assertThat(hook.isAlive()).as("gave up waiting").isFalse();
         assertThat(stuck.closed.getCount()).isZero();
         assertThat(stuck.terminated).isNotDone();
+    }
+
+    @Test void theHookDrainsFirstWaitsForTheBalancerAndOnlyThenClosesTheApplication() throws Exception {
+        var hooks = new Hooks();
+        var app = new DefaultApplication(hooks);
+        app.start();
+        var server = new FakeServer();
+        app.adopt(server, ListenerOptions.defaults());
+        var health = Health.builder(app).readiness("db", () -> true).build();
+        var order = new ArrayList<String>();
+        app.onDrain(() -> { throw new IllegalStateException("a broken action must not stop the shutdown"); });
+        app.onDrain(() -> order.add("drain: ready=" + health.readiness().status() + ", state=" + app.state()));
+        var paused = new ArrayList<Duration>();
+        app.drainPause(delay -> {
+            paused.add(delay);
+            order.add("pause: draining=" + health.isDraining() + ", state=" + app.state() + ", closed="
+                    + (server.closed.getCount() == 0));
+        });
+        assertThat(health.isDraining()).isFalse();
+        app.closeOnJvmShutdown(Duration.ofSeconds(7));
+        app.closeOnJvmShutdown(Duration.ofSeconds(99)); // The first call's delay stays.
+        var hook = hooks.added.getFirst();
+        hook.start();
+        assertThat(server.closed.await(30, TimeUnit.SECONDS)).isTrue();
+        server.terminated.complete(null);
+        hook.join(TimeUnit.SECONDS.toMillis(30));
+        assertThat(paused).containsExactly(Duration.ofSeconds(7));
+        // Readiness was already DOWN, by the drain action, while the application still served and the listener was open.
+        assertThat(order).containsExactly("drain: ready=DOWN, state=RUNNING",
+                "pause: draining=true, state=RUNNING, closed=false");
+        assertThat(app.state()).isEqualTo(Application.State.CLOSED);
+    }
+
+    @Test void withoutADelayTheHookDoesNotPauseAndValidatesTheDelay() throws Exception {
+        var hooks = new Hooks();
+        var app = new DefaultApplication(hooks);
+        app.start();
+        var drained = new java.util.concurrent.atomic.AtomicInteger();
+        app.onDrain(drained::incrementAndGet);
+        app.drainPause(delay -> { throw new AssertionError("must not pause for a zero delay"); });
+        assertThatIllegalArgumentException().isThrownBy(() -> app.closeOnJvmShutdown(Duration.ofSeconds(-1)));
+        assertThatIllegalArgumentException().isThrownBy(() -> app.closeOnJvmShutdown(Duration.ofHours(2)));
+        assertThat(hooks.added).isEmpty();
+        app.closeOnJvmShutdown();
+        var hook = hooks.added.getFirst();
+        hook.start();
+        hook.join(TimeUnit.SECONDS.toMillis(30));
+        assertThat(drained).hasValue(1);
+        assertThat(app.state()).isEqualTo(Application.State.CLOSED);
+        assertThatIllegalStateException().isThrownBy(() -> app.onDrain(() -> { })).withMessageContaining("closed");
+    }
+
+    @Test void drainActionsDoNotRunOnAnExplicitCloseAndHealthKeepsServingUntilTheHookRuns() {
+        var hooks = new Hooks();
+        var app = new DefaultApplication(hooks);
+        app.start();
+        var drained = new java.util.concurrent.atomic.AtomicInteger();
+        app.onDrain(drained::incrementAndGet);
+        var health = Health.builder(app).build();
+        app.closeOnJvmShutdown(Duration.ofSeconds(1));
+        assertThat(health.readiness().status()).isEqualTo(Health.Status.UP);
+        app.close();
+        assertThat(drained).hasValue(0);
+        assertThat(health.isDraining()).isFalse();
+        assertThat(health.readiness().status()).isEqualTo(Health.Status.DOWN);
     }
 }

@@ -1,6 +1,5 @@
 package com.jsgalactic.axiom.server.internal;
 
-import com.jsgalactic.axiom.context.Context;
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.http.Response;
@@ -17,27 +16,43 @@ final class Pipeline {
      * Wraps a handler in middleware, outermost first. The handler's result is mapped to a
      * response with the context's settings before the innermost middleware sees it.
      */
-    static Handler compose(List<Middleware> middleware, Handler handler) {
+    static Handler compose(List<Middleware> middleware, Handler handler, List<ErrorHandlers> scopes,
+                           FailureLog log, boolean development) {
         Handler chain = context -> {
             var result = handler.handle(context);
             return result instanceof Response response ? response : context.response(result);
         };
         for (int i = middleware.size() - 1; i >= 0; i--) {
-            chain = wrap(middleware.get(i), chain);
+            chain = wrap(middleware.get(i), chain, i, middleware.size());
         }
-        return chain;
+        return new ErrorBoundary(chain, middleware.toArray(new Middleware[0]), scopes, log, development);
     }
 
-    private static Handler wrap(Middleware middleware, Handler inner) {
+    /**
+     * Wraps one middleware. The context records how many middleware are on the stack, so that an
+     * exception leaves behind exactly the ones that were entered when it was thrown: entering sets
+     * the count to this middleware's depth, a normal return restores the enclosing depth, and an
+     * exception is counted where it first comes into view, either leaving {@code next.run()} (from
+     * the inner middleware or the handler) or leaving a middleware that threw it itself. A
+     * middleware that catches an exception and throws another one is therefore counted, and the
+     * ones it had called are not.
+     */
+    private static Handler wrap(Middleware middleware, Handler inner, int index, int size) {
         return context -> {
-            var next = new Link(inner, context);
+            var state = (DefaultContext) context;
+            state.entered(index + 1);
+            var next = new Link(inner, state, Math.min(index + 2, size));
             try {
                 var response = middleware.handle(context, next);
                 if (response == null) {
                     throw new IllegalStateException("Middleware " + middleware.getClass().getName()
                             + " returned null; return a Response, for example next.run()");
                 }
+                state.entered(index);
                 return response;
+            } catch (Exception | Error failure) {
+                state.observed(failure, index + 1);
+                throw failure;
             } finally {
                 next.used = true;
             }
@@ -51,13 +66,15 @@ final class Pipeline {
      */
     private static final class Link implements Middleware.Next {
         private final Handler inner;
-        private final Context context;
+        private final DefaultContext context;
+        private final int depth;
         private final Thread owner = Thread.currentThread();
         private boolean used;
 
-        Link(Handler inner, Context context) {
+        Link(Handler inner, DefaultContext context, int depth) {
             this.inner = inner;
             this.context = context;
+            this.depth = depth;
         }
 
         @Override
@@ -69,7 +86,12 @@ final class Pipeline {
                 throw new IllegalStateException("next.run() may be called once, and only while the middleware runs");
             }
             used = true;
-            return (Response) inner.handle(context);
+            try {
+                return (Response) inner.handle(context);
+            } catch (Exception | Error failure) {
+                context.observed(failure, depth);
+                throw failure;
+            }
         }
     }
 }

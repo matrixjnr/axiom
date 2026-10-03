@@ -172,7 +172,9 @@ public interface Application extends RouteGroup, AutoCloseable {
     /**
      * Maps exceptions of a class and its subclasses to responses before startup. When a handler
      * or middleware throws, the registered class nearest to the exception's class in its
-     * superclass chain wins, after every middleware has unwound. {@link com.jsgalactic.axiom.error.AxiomException}
+     * superclass chain wins, after every middleware has unwound; the response is then decorated by
+     * the middleware through {@link com.jsgalactic.axiom.context.Middleware#afterError}.
+     * {@link com.jsgalactic.axiom.error.AxiomException}
      * keeps its built-in problem response unless a handler is registered for
      * {@code AxiomException} or one of its subclasses: the built-in mapping counts as registered
      * for {@code AxiomException}, so a handler for {@code Exception} does not replace it.
@@ -292,6 +294,51 @@ public interface Application extends RouteGroup, AutoCloseable {
     Metrics metrics();
 
     /**
+     * Chooses where and at which level the runtime logs failures it answered, before startup. The
+     * default is the logger named {@code com.jsgalactic.axiom.failures} at
+     * {@link System.Logger.Level#WARNING}.
+     *
+     * <p>Each request failure is logged at most once, with the request ID and the exception, and
+     * never reaches a response: a 5xx {@link com.jsgalactic.axiom.error.AxiomException} answered
+     * by the built-in problem response, and an exception that an {@link #error error handler}
+     * mapped (including one it translated into an {@code AxiomException}), unless it is an
+     * {@code AxiomException} below 500 answered below 500, which is an expected client error and
+     * is not logged. A failing error handler is a defect of the application and is always logged
+     * at {@link System.Logger.Level#ERROR} on the same logger. Failures the listener answers
+     * itself are logged by the transport.
+     *
+     * @param logger destination, for example {@code System.getLogger("audit")}
+     * @param level level of the entries; {@link System.Logger.Level#OFF} silences them
+     * @return this application
+     * @throws IllegalArgumentException if {@code level} is {@link System.Logger.Level#ALL}
+     * @throws IllegalStateException if configuration has ended
+     */
+    Application failureLog(System.Logger logger, System.Logger.Level level);
+
+    /**
+     * Turns on development errors, before startup. Off by default, and there is no way to turn it
+     * on by configuration value: the application must call this method.
+     *
+     * <p>Responses the runtime builds for failures (an
+     * {@link com.jsgalactic.axiom.error.AxiomException}'s problem response, the generic 500 of a
+     * failing error handler, and the 500 for an exception that nothing maps, which is otherwise
+     * thrown from {@link #handle(Request)}) then carry an extra {@code debug} member in the
+     * problem document with the exception's class name, message, up to 64 stack frames and up to 8
+     * causes. These can contain internal details and request content, which production responses
+     * never do. Responses built by error handlers are unchanged, and failures the listener
+     * answers itself have no exception to show.
+     *
+     * <p>To make it impossible to expose this by accident, {@link #listen} refuses to bind an
+     * address that is not a loopback address while it is on, and a warning is logged when the
+     * application starts. A reverse proxy or tunnel in front of a loopback listener would still
+     * forward the details: do not use it there.
+     *
+     * @return this application
+     * @throws IllegalStateException if configuration has ended
+     */
+    Application developmentErrors();
+
+    /**
      * Resolves a route identity without executing user code. Requires a running application.
      * @param request request to match using the same precedence as handle
      * @return matching method/template, or empty for 404/405
@@ -356,8 +403,8 @@ public interface Application extends RouteGroup, AutoCloseable {
      * non-String, non-byte[] bodies are
      * encoded by that codec. Exceptions from handlers and middleware are first offered to the
      * handlers registered with {@link #error}; a failing error handler produces the generic 500
-     * problem response. Other handler exceptions propagate unchanged; this method is not a
-     * network error boundary.
+     * problem response. Other handler exceptions propagate unchanged, unless
+     * {@link #developmentErrors()} is on; this method is not a network error boundary.
      *
      * @param request request to execute
      * @return mapped handler result
@@ -398,7 +445,8 @@ public interface Application extends RouteGroup, AutoCloseable {
      * handler that ignores interruption cannot keep the JVM from exiting. Because the application
      * is no longer {@link State#RUNNING} from the moment it closes, a
      * {@link com.jsgalactic.axiom.observability.Health} readiness probe reports DOWN; call
-     * {@code Health.beginDrain()} from your own hook earlier if load balancers need time to notice.
+     * {@code Health.beginDrain()} from your own hook earlier if load balancers need time to notice;
+     * {@link #closeOnJvmShutdown(Duration)} does that wait for you.
      *
      * <p>Idempotent: the hook is registered once. An explicit {@link #close()} unregisters it. The
      * hook runs alongside other shutdown hooks, in no defined order, and the JVM's logging may
@@ -408,6 +456,37 @@ public interface Application extends RouteGroup, AutoCloseable {
      * @throws IllegalStateException if the application is closed or the JVM is already shutting down
      */
     Application closeOnJvmShutdown();
+
+    /**
+     * Like {@link #closeOnJvmShutdown()}, but the hook first runs the actions registered with
+     * {@link #onDrain}, which tell the outside world that this instance is going away (a
+     * {@link com.jsgalactic.axiom.observability.Health} readiness probe turns DOWN), then waits
+     * {@code drainDelay} so that a load balancer can notice and stop sending traffic, and only then
+     * closes the application and its listeners as described above. The wait is spent in the hook
+     * thread, so choose a delay well under the container's termination grace period, which also has
+     * to cover the listeners' own shutdown grace. If this method is called twice, the first call's
+     * delay is kept.
+     *
+     * @param drainDelay time between the drain actions and the close; zero for none, at most one hour
+     * @return this application
+     * @throws IllegalArgumentException if the delay is negative or longer than one hour
+     * @throws IllegalStateException if the application is closed or the JVM is already shutting down
+     */
+    Application closeOnJvmShutdown(Duration drainDelay);
+
+    /**
+     * Registers an action that starts draining, such as {@code Health.beginDrain()} (which a
+     * {@code Health} registers on its own). It runs once, on the shutdown hook thread, at the start of
+     * the JVM shutdown hook of {@link #closeOnJvmShutdown(Duration)}, before the drain delay and
+     * before the application closes, and never when {@link #closeOnJvmShutdown()} was not used. It
+     * must be quick and must not block; an exception it throws is logged and does not stop the other
+     * actions or the shutdown. Actions run in registration order.
+     *
+     * @param action what to run
+     * @return this application
+     * @throws IllegalStateException if the application is closed
+     */
+    Application onDrain(Runnable action);
 
     /**
      * Permanently rejects new requests. Already accepted requests may finish.

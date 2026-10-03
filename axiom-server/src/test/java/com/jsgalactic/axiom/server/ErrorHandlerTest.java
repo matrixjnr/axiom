@@ -137,6 +137,23 @@ class ErrorHandlerTest {
     }
 
     @Test
+    void errorsAreNeverAnswered406ButTheSameBodyOnASuccessIs() throws Exception {
+        record Problem(String reason) { }
+        try (var app = Axiom.create()) {
+            app.get("/ok", ctx -> ctx.json(new Problem("fine")));
+            app.get("/fail", ctx -> { throw new IllegalStateException(); });
+            app.error(IllegalStateException.class, (ctx, failure) -> ctx.status(409).json(new Problem("busy")));
+            app.start();
+            var rejects = Map.of("Accept", "text/plain");
+            assertThat(app.handle(Request.get("/ok").withHeaders(rejects)).status()).isEqualTo(406);
+            var error = app.handle(Request.get("/fail").withHeaders(rejects));
+            assertThat(error.status()).isEqualTo(409);
+            assertThat(error.headers()).containsEntry("Content-Type", "application/json");
+            assertThat(text(error)).isEqualTo("reason=busy");
+        }
+    }
+
+    @Test
     void failuresAfterTheContextStatusChangedIgnoreThatStatus() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/builtin", ctx -> {
@@ -194,7 +211,8 @@ class ErrorHandlerTest {
             for (var path : List.of("/throws", "/null")) {
                 var response = app.handle(Request.get(path));
                 assertThat(response.status()).isEqualTo(500);
-                assertThat(response.headers()).containsEntry("Content-Type", "application/problem+json");
+                assertThat(response.headers()).containsEntry("Content-Type", "application/problem+json")
+                        .containsEntry("Connection", "close"); // like the listener's own 500
                 assertThat(text(response)).matches(
                         "\\{\"status\":500,\"code\":\"internal_server_error\",\"requestId\":\"[A-Za-z0-9_-]+-[0-9a-f]+\"}");
                 assertThat(text(response) + response.headers()).doesNotContain("POISON", "script", "passwd",
