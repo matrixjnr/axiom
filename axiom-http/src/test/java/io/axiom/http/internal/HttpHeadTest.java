@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.axiom.http.Response;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
  * request on the same connection, so any body byte sent after a HEAD response would corrupt
  * the next status line and fail the test.
  */
+@Tag("integration")
 class HttpHeadTest {
     private static Fixture fixture(AtomicInteger calls) {
         var fixture = new Fixture();

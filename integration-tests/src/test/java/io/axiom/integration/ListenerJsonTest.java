@@ -12,11 +12,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Tag;
 
 /**
  * The JSON contract over a live HTTP/1.1 listener, using a raw socket so that header values and
  * body bytes are sent exactly as written. Each request uses its own connection.
  */
+@Tag("integration")
 class ListenerJsonTest extends JsonContractTest {
     @Override Client open() throws IOException {
         Application app = OrdersApi.create();

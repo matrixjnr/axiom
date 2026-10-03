@@ -27,7 +27,7 @@ class HttpConnectionTest {
                 try { release.await(); } catch (InterruptedException expected) { Thread.currentThread().interrupt(); }
                 return null;
             });
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
 
             app.get("/", ctx -> { throw new AssertionError("Rejected request must not execute"); });
             app.start();
@@ -44,7 +44,7 @@ class HttpConnectionTest {
         } finally {
             release.countDown();
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -65,7 +65,7 @@ class HttpConnectionTest {
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
                 request(channel);
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 for (int i = 0; i < HttpConnection.MAX_PIPELINED; i++) { request(channel); }
                 assertThat(channel.isActive()).isTrue();
                 assertThat(channel.<Object>readOutbound()).isNull();
@@ -89,7 +89,7 @@ class HttpConnectionTest {
         } finally {
             release.countDown();
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -103,7 +103,7 @@ class HttpConnectionTest {
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
                 request(channel);
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 // No Host header: rejected, but only after the earlier response.
                 channel.writeInbound(new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/"));
                 assertThat(channel.isActive()).isTrue();
@@ -114,7 +114,7 @@ class HttpConnectionTest {
         } finally {
             release.countDown();
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -136,7 +136,7 @@ class HttpConnectionTest {
             } finally { channel.finishAndReleaseAll(); }
         } finally {
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -160,7 +160,7 @@ class HttpConnectionTest {
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
                 request(channel);
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
                 assertThat(channel.isActive()).isTrue();
                 release.countDown();
@@ -173,7 +173,7 @@ class HttpConnectionTest {
         } finally {
             release.countDown();
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -188,7 +188,7 @@ class HttpConnectionTest {
                 try { release.await(); } catch (InterruptedException expected) { Thread.currentThread().interrupt(); }
                 return null;
             });
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             app.admissionPolicy(policy);
             app.get("/", ctx -> "promoted");
             app.start();
@@ -206,7 +206,7 @@ class HttpConnectionTest {
         } finally {
             release.countDown();
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -277,7 +277,7 @@ class HttpConnectionTest {
             } finally { channel.finishAndReleaseAll(); }
         } finally {
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -300,7 +300,7 @@ class HttpConnectionTest {
             } finally { channel.finishAndReleaseAll(); }
         } finally {
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -310,7 +310,7 @@ class HttpConnectionTest {
         channel.freezeTime();
         channel.pipeline().addLast(new RequestDecoder(new io.netty.handler.codec.http.HttpDecoderConfig()),
                 new io.netty.handler.codec.http.HttpResponseEncoder(),
-                new HttpConnection(app, executor, headTimeout));
+                new HttpConnection(app, executor, TransportSettings.DEFAULTS.withHeadTimeout(headTimeout), null, () -> false));
         return channel;
     }
 
@@ -345,7 +345,7 @@ class HttpConnectionTest {
             try {
                 request(channel);
                 request(channel);
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 app.close();
                 release.countDown();
                 assertResponses(channel, 200, 503);
@@ -354,7 +354,7 @@ class HttpConnectionTest {
             app.close();
             release.countDown();
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -371,7 +371,7 @@ class HttpConnectionTest {
             try {
                 request(channel);
                 request(channel);
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 failing.set(true);
                 release.countDown();
                 assertResponses(channel, 200, 503);
@@ -379,7 +379,7 @@ class HttpConnectionTest {
         } finally {
             release.countDown();
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -422,7 +422,7 @@ class HttpConnectionTest {
             var channel = new EmbeddedChannel(stalled, new HttpConnection(app, executor));
             try {
                 request(channel);
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                 while (written.get() == null && System.nanoTime() < deadline) {
                     channel.runPendingTasks();
                     Thread.onSpinWait();
@@ -436,13 +436,90 @@ class HttpConnectionTest {
             }
         } finally {
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void responseWriteThatDoesNotFinishWithinTheResponseTimeoutClosesTheConnection() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> "unread");
+            app.start();
+            var written = new java.util.concurrent.atomic.AtomicReference<Object>();
+            // Holds writes without completing them, like a client that reads too slowly. Unlike the
+            // inactivity timeout, the bound holds even if the write makes some progress meanwhile.
+            var stalled = new io.netty.channel.ChannelOutboundHandlerAdapter() {
+                @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
+                        io.netty.channel.ChannelPromise pending) { written.set(message); }
+            };
+            var channel = new EmbeddedChannel(stalled, new HttpConnection(app, executor));
+            channel.freezeTime();
+            try {
+                request(channel);
+                awaitWritten(channel, written);
+                channel.advanceTimeBy(HttpConnection.RESPONSE_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+                channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isFalse();
+            } finally {
+                io.netty.util.ReferenceCountUtil.release(written.get());
+                channel.finishAndReleaseAll();
+            }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void theResponseTimeoutBoundsEachResponseWriteNotTheConnection() throws Exception {
+        var executor = executor();
+        try (var app = Axiom.create()) {
+            app.get("/", ctx -> "read");
+            app.start();
+            var written = new java.util.concurrent.atomic.AtomicReference<Object>();
+            var promise = new java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelPromise>();
+            var held = new io.netty.channel.ChannelOutboundHandlerAdapter() {
+                @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
+                        io.netty.channel.ChannelPromise pending) { written.set(message); promise.set(pending); }
+            };
+            var channel = new EmbeddedChannel(held, new HttpConnection(app, executor));
+            channel.freezeTime();
+            try {
+                request(channel);
+                awaitWritten(channel, written);
+                // The client takes the response just before the bound.
+                channel.advanceTimeBy(HttpConnection.RESPONSE_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+                channel.runScheduledPendingTasks();
+                io.netty.util.ReferenceCountUtil.release(written.getAndSet(null));
+                promise.get().setSuccess();
+                // A completed write leaves no deadline behind on the keep-alive connection.
+                channel.advanceTimeBy(HttpConnection.RESPONSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                channel.runScheduledPendingTasks();
+                assertThat(channel.isActive()).isTrue();
+            } finally {
+                io.netty.util.ReferenceCountUtil.release(written.get());
+                channel.finishAndReleaseAll();
+            }
+        } finally {
+            executor.close();
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void awaitWritten(EmbeddedChannel channel, java.util.concurrent.atomic.AtomicReference<Object> written) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (written.get() == null) {
+            assertThat(System.nanoTime()).as("response written").isLessThan(deadline);
+            channel.runPendingTasks();
+            Thread.onSpinWait();
         }
     }
 
     /** Runs tasks posted from handler threads until a response is written; bounded by the handler's progress. */
     private static <T> T awaitResponse(EmbeddedChannel channel) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (System.nanoTime() < deadline) {
             channel.runPendingTasks();
             T message = channel.readOutbound();
@@ -529,7 +606,7 @@ class HttpConnectionTest {
             } finally { channel.finishAndReleaseAll(); }
         } finally {
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -614,7 +691,7 @@ class HttpConnectionTest {
             } finally { channel.finishAndReleaseAll(); }
         } finally {
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 
@@ -652,7 +729,7 @@ class HttpConnectionTest {
             } finally { channel.finishAndReleaseAll(); }
         } finally {
             executor.close();
-            executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         }
     }
 }

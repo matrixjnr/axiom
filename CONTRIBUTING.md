@@ -5,6 +5,19 @@ opening a pull request. Keep changes focused and reference relevant architecture
 decisions. Add tests beside the module being changed. Keep implementation types
 out of public signatures and use `api` dependencies only when consumers need them.
 
+Tests that open a real socket or start a live listener are tagged `@Tag("integration")`
+and run in the module's `integrationTest` task (the module applies the
+`axiom.integration-test` convention); all other tests run in `test`. `./gradlew unitTest`
+and `./gradlew integrationTest` run either half for every module; `check` runs both. See
+`docs/build.md`.
+`./gradlew coverageReport` writes per-module and aggregated JaCoCo reports; coverage
+is reported, not yet enforced.
+
+CI splits the build into the jobs `build` (compile, Javadoc, architecture and
+publication checks), `unit` (each module's `test`), `integration` (`integrationTest`),
+`quality` (coverage report and the hello smoke run) and the aggregate `check`, which
+branch protection requires. See `docs/build.md` for what each job runs.
+
 Every commit of a pull request must pass `./gradlew check` on its own; CI builds each
 commit (see `docs/build.md`). Add the checksums in `gradle/verification-metadata.xml`
 in the same commit as the dependency or plugin change that needs them, never in a later

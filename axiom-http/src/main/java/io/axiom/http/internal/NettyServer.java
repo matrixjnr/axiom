@@ -25,13 +25,22 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 final class NettyServer implements Server {
     /** How long close() lets in-flight exchanges finish before interrupting them. */
     static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(5);
+    /**
+     * Network inactivity (no read and no write progress) after which a connection closes. It also
+     * catches a response write stalled by a client that stopped reading.
+     */
+    static final Duration IDLE_TIMEOUT = Duration.ofSeconds(30);
     /** Open connections per listener; further accepted connections close immediately. */
     static final int MAX_CONNECTIONS = 128;
+    /**
+     * Connections that only linger after their last response and no longer count against
+     * {@link #MAX_CONNECTIONS}. Beyond this many, a lingering connection keeps its regular slot.
+     */
+    static final int MAX_LINGERING = 32;
     /** Pending-accept queue length requested from the operating system. */
     static final int BACKLOG = 1024;
     /** Per-connection outbound buffering at which the channel reports itself unwritable. */
@@ -45,41 +54,41 @@ final class NettyServer implements Server {
     private final RequestDispatcher handlers;
     private final CompletableFuture<Void> stopped;
     private final AtomicBoolean closing = new AtomicBoolean();
-    private final AtomicInteger connections = new AtomicInteger();
-    private final Duration grace;
-    private final Duration linger;
+    private final ConnectionSlots slots = new ConnectionSlots(MAX_CONNECTIONS, MAX_LINGERING);
+    private final TransportSettings settings;
     Channel listener;
     private InetSocketAddress address;
 
-    private NettyServer(AdmissionPolicy policy, Duration grace, Duration linger) {
-        this.grace = grace;
-        this.linger = linger;
+    private NettyServer(AdmissionPolicy policy, TransportSettings settings) {
+        this.settings = settings;
         handlers = new RequestDispatcher(policy);
         stopped = CompletableFuture.allOf(handlers.termination().toCompletableFuture(),
                 completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
     }
 
     static NettyServer bind(Application application, InetSocketAddress address) throws IOException {
-        return bind(application, address, SHUTDOWN_GRACE);
+        return bind(application, address, TransportSettings.DEFAULTS);
     }
 
-    static NettyServer bind(Application application, InetSocketAddress address, Duration grace) throws IOException {
-        return bind(application, address, grace, HttpConnection.LINGER_TIMEOUT);
-    }
-
-    /** Binds with a non-default linger timeout; for tests that must tolerate a slow machine. */
-    static NettyServer bind(Application application, InetSocketAddress address, Duration grace, Duration linger)
+    /** Binds with non-default bounds; for tests that must tolerate a slow machine or observe one bound. */
+    static NettyServer bind(Application application, InetSocketAddress address, TransportSettings settings)
             throws IOException {
-        var server = new NettyServer(application.admissionPolicy(), grace, linger);
+        var server = new NettyServer(application.admissionPolicy(), settings);
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
                     .channel(NioServerSocketChannel.class)
                     .option(ChannelOption.SO_BACKLOG, BACKLOG)
                     .option(ChannelOption.SO_REUSEADDR, true)
-                    .childOption(ChannelOption.TCP_NODELAY, true)
-                    .childHandler(new ChannelInitializer<SocketChannel>() {
-                        @Override protected void initChannel(SocketChannel channel) { server.accept(channel, application); }
-                    });
+                    .childOption(ChannelOption.TCP_NODELAY, true);
+            if (settings.receiveBuffer() > 0) {
+                // Set on the listening socket too, so accepted sockets advertise the window from the start.
+                bootstrap.option(ChannelOption.SO_RCVBUF, settings.receiveBuffer())
+                        .childOption(ChannelOption.SO_RCVBUF, settings.receiveBuffer());
+            }
+            if (settings.sendBuffer() > 0) { bootstrap.childOption(ChannelOption.SO_SNDBUF, settings.sendBuffer()); }
+            bootstrap.childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override protected void initChannel(SocketChannel channel) { server.accept(channel, application); }
+            });
             var bound = bootstrap.bind(address).awaitUninterruptibly();
             if (!bound.isSuccess()) { throw new IOException("Could not bind HTTP listener to " + address, bound.cause()); }
             server.listener = bound.channel();
@@ -98,16 +107,17 @@ final class NettyServer implements Server {
         channels.add(channel);
         // close() sets the flag before draining the group, so a racing accept closes itself.
         if (closing.get()) { channel.close(); return; }
-        if (connections.incrementAndGet() > MAX_CONNECTIONS) {
-            connections.decrementAndGet();
+        var slot = slots.acquire();
+        if (slot == null) {
             channel.close();
             return;
         }
         // The slot is released exactly once, by this listener, whether or not setup succeeds.
-        channel.closeFuture().addListener(ignored -> connections.decrementAndGet());
-        channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new RequestDecoder(decoderConfig()),
-                new HttpResponseEncoder(),
-                new HttpConnection(application, handlers, HttpConnection.REQUEST_HEAD_TIMEOUT, linger));
+        channel.closeFuture().addListener(ignored -> slot.release());
+        channel.pipeline().addLast(
+                new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS),
+                new RequestDecoder(decoderConfig()), new HttpResponseEncoder(),
+                new HttpConnection(application, handlers, settings, slot, closing::get));
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */
@@ -119,6 +129,10 @@ final class NettyServer implements Server {
     }
 
     @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }
+    /** Connections holding a regular slot; for tests. */
+    int connections() { return slots.open(); }
+    /** Lingering connections that no longer hold a regular slot; for tests. */
+    int lingering() { return slots.lingering(); }
     @Override public InetSocketAddress localAddress() { return address; }
     @Override public boolean isOpen() { return !closing.get() && listener != null && listener.isOpen(); }
     @Override public CompletionStage<Void> termination() { return stopped.minimalCompletionStage(); }
@@ -131,18 +145,22 @@ final class NettyServer implements Server {
      */
     @Override public void close() {
         if (!closing.compareAndSet(false, true)) { return; }
-        // Requests waiting for admission are answered 503 rather than promoted during the drain.
+        // From here on every response is sent with Connection: close (connections read the flag),
+        // so the drain is in force before stopping admission answers waiting requests below. The
+        // per-connection drain also runs at once rather than after the listening socket has closed,
+        // which completes on the acceptor thread and may be delayed.
         handlers.stopAdmission();
         if (listener == null) { stop(); return; }
+        // Accepts racing with this see the flag and close themselves (see accept).
+        var drained = channels.newCloseFuture();
+        for (var channel : channels) {
+            channel.eventLoop().execute(() -> {
+                var connection = channel.pipeline().get(HttpConnection.class);
+                if (connection == null) { channel.close(); } else { connection.drain(); }
+            });
+        }
         listener.close().addListener(ignored -> {
-            var drained = channels.newCloseFuture();
-            for (var channel : channels) {
-                channel.eventLoop().execute(() -> {
-                    var connection = channel.pipeline().get(HttpConnection.class);
-                    if (connection == null) { channel.close(); } else { connection.drain(); }
-                });
-            }
-            var force = acceptors.next().schedule(() -> { channels.close(); }, grace.toNanos(), TimeUnit.NANOSECONDS);
+            var force = acceptors.next().schedule(() -> { channels.close(); }, settings.shutdownGrace().toNanos(), TimeUnit.NANOSECONDS);
             drained.addListener(done -> { force.cancel(false); stop(); });
         });
     }

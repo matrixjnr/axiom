@@ -91,7 +91,7 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 
 | Status | When | Where |
 | --- | --- | --- |
-| 400 | Malformed request line or headers, a method that is not a token, invalid Host, rejected path or query, an absolute-form target, `*` with a method other than OPTIONS, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked`, more than one Transfer-Encoding line | Listener |
+| 400 | Malformed request line or headers, a method that is not a token, invalid Host, rejected path or query, an absolute-form target, `*` with a method other than OPTIONS, malformed Content-Length, both Content-Length and Transfer-Encoding, Transfer-Encoding on HTTP/1.0, a coding list not ending in `chunked` or naming it twice, more than one Transfer-Encoding line (whatever the values, to avoid ambiguous framing) | Listener |
 | 400 | Empty body or codec failure in `ctx.body` | Runtime |
 | 400 | Path capture that `ctx.pathDecoded` cannot decode safely (malformed UTF-8, or a decoded separator, backslash, NUL or dot segment); code `invalid_path_encoding` | Runtime |
 | 404 | No route matches the path and the method is recognized (see [custom methods](routing.md#custom-methods)) | Runtime |
@@ -104,7 +104,7 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 | 417 | An `Expect` value other than `100-continue` | Listener |
 | 431 | Header section larger than 8 KiB | Listener |
 | 500 | Unexpected handler exception, unencodable or oversized response | Listener (in memory: exception propagates) |
-| 501 | CONNECT (also from `app.handle` and `TestClient`), Upgrade, or a transfer coding other than `chunked` before it | Listener |
+| 501 | CONNECT (also from `app.handle` and `TestClient`), Upgrade, or a single Transfer-Encoding line applying another coding before a final `chunked` (RFC 9112 section 6.1; see [wire behavior](http.md#wire-behavior)) | Listener |
 | 501 | No route matches the path and the method is not recognized | Runtime |
 | 503 | No execution capacity, queue wait expired, listener draining, more than eight outstanding pipelined requests or their bodies over the connection's share | Listener and `TestClient` |
 | 504 | Request deadline expired while queued or running | Listener and `TestClient` |

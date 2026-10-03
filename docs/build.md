@@ -57,12 +57,95 @@ fails the build and names the module and the file to update. To see it fire, rem
 a `api(project(...))` line from `axiom-bom/build.gradle.kts` or a module from the map
 and run `./gradlew checkPublicationCoverage`.
 
+## Unit and integration tests
+
+Tests are split into two Gradle tasks per module, both part of `check`:
+
+- `test` runs the fast tests: pure unit tests, Netty embedded channels and the in-memory
+  `TestClient`. It opens no real socket.
+- `integrationTest` runs the test classes tagged `@Tag("integration")`: every class that
+  opens a real socket or starts a live listener (`ServerSocket`, `Socket`, `NettyServer.bind`,
+  `app.listen`, `HttpClient`). It exists only in modules that apply the
+  `axiom.integration-test` convention: `axiom-http`, `integration-tests` and
+  `examples/rest-api`. It runs from the same test source set and classpath as `test`.
+
+The tag is set per class, so a class with both embedded-channel and live-listener cases
+(`HttpLingerTest`, `HttpPipelineErrorTest`, `NettyServerTest`) runs entirely in
+`integrationTest`. The `integration-tests` module is integration as a whole: its
+`integrationTest` runs every class there, including the `TestClient` half of the JSON
+contract, and its `test` task is disabled. A module whose tests carry the tag without
+applying `axiom.integration-test` fails `check` (`checkIntegrationTags`) instead of
+silently running those tests nowhere.
+
+The root project has two aggregates: `./gradlew unitTest` runs every module's `test`, and
+`./gradlew integrationTest` runs every module's `integrationTest`. A single module runs as
+`./gradlew :axiom-http:test` or `./gradlew :axiom-http:integrationTest`.
+
+Split when it was introduced (classes / tests):
+
+| Module | `test` | `integrationTest` |
+| --- | --- | --- |
+| axiom-core | 13 / 187 | - |
+| axiom-server | 16 / 213 | - |
+| axiom-http | 2 / 27 | 11 / 176 |
+| axiom-json | 2 / 66 | - |
+| axiom-test | 7 / 24 | - |
+| axiom-validation | 5 / 35 | - |
+| axiom-validation-jakarta | 3 / 16 | - |
+| integration-tests | disabled | 2 / 62 |
+| examples/rest-api | 0 / 0 | 1 / 3 |
+| total | 48 / 568 | 14 / 241 |
+
+## Coverage
+
+The `axiom.java-test` convention applies the Gradle `jacoco` plugin with the JaCoCo version
+pinned in the version catalog (`jacoco`). Every test task (`test` and `integrationTest`) runs
+with the JaCoCo agent and writes `build/jacoco/<task>.exec` in its module.
+
+- Per module: `./gradlew :axiom-http:jacocoTestReport` runs the module's test tasks and writes
+  `build/reports/jacoco/test/html/` and `build/reports/jacoco/test/jacocoTestReport.xml` from
+  the execution data of both. It covers the module's classes with the module's own tests only.
+- Aggregated: `./gradlew coverageReport` (root) runs the tests it needs, writes every
+  per-module report, and writes `build/reports/jacoco/coverageReport/html/` and
+  `build/reports/jacoco/coverageReport/coverageReport.xml`. The root applies Gradle's
+  `jacoco-report-aggregation` plugin over the eight library modules and `integration-tests`,
+  so a class is covered by any test of any of them (for example, codec classes exercised by
+  `integration-tests`). The `axiom.integration-test` convention publishes the
+  `integrationTest` execution data as a variant with the test suite name `integrationTest`;
+  the root merges the `test` and `integrationTest` aggregates (also available on their own
+  as `testCodeCoverageReport` and `integrationTestCodeCoverageReport`). The BOM has no code;
+  examples and benchmarks are not library code and are not aggregated.
+
+No class is excluded from coverage. Coverage is reported, not enforced: there is no
+minimum yet. Per-module floors will be introduced later, starting from the baseline below,
+and then raised.
+
+Baseline, measured on 2026-10-03 with JaCoCo 0.8.15 by `./gradlew coverageReport` on the
+commit that introduced coverage (parent `bf8e50b`), as covered lines and branches:
+
+| Module | Line, aggregated | Branch, aggregated | Line, own tests | Branch, own tests |
+| --- | --- | --- | --- | --- |
+| axiom-core | 92.8% (544/586) | 89.5% (418/467) | 87.4% (512/586) | 88.4% (413/467) |
+| axiom-server | 97.3% (695/714) | 89.4% (454/508) | 96.9% (692/714) | 88.4% (449/508) |
+| axiom-http | 98.2% (389/396) | 83.9% (292/348) | 98.2% (389/396) | 83.9% (292/348) |
+| axiom-json | 94.0% (142/151) | 81.2% (69/85) | 94.0% (142/151) | 81.2% (69/85) |
+| axiom-test | 93.8% (45/48) | 70.0% (14/20) | 93.8% (45/48) | 70.0% (14/20) |
+| axiom-validation | 97.6% (248/254) | 91.1% (224/246) | 97.6% (248/254) | 91.1% (224/246) |
+| axiom-validation-jakarta | 90.7% (78/86) | 73.9% (65/88) | 90.7% (78/86) | 73.9% (65/88) |
+| total | 95.8% (2141/2235) | 87.2% (1536/1762) | | |
+
+"Aggregated" is the module's share of `coverageReport` (all tests of all aggregated
+modules); "own tests" is the module's `jacocoTestReport`. `axiom-starter` has no classes.
+Of the total, `test` alone covers 90.7% of lines and 81.8% of branches, `integrationTest`
+alone 68.3% and 54.6%.
+
 ## Allocation-based tests
 
 The no-copy tests measure allocation per thread through `com.sun.management.ThreadMXBean`
 and are skipped (JUnit assumption) on a JVM that cannot measure it. Passing
 `-Daxiom.requireAllocationTests=true` to Gradle turns that skip into a failure; the Build
-workflow sets it, and the `axiom.java-test` convention forwards it to every test JVM.
+workflow sets it, and the `axiom.java-test` convention forwards it to every test JVM
+(`test` and `integrationTest` alike).
 Locally it is off by default so a different JDK does not break `check`. Currently only
 the `axiom-json` test (`decodesFromAReadOnlyViewWithoutCopyingIt`) honors the flag; the
 `axiom-server` `CodecViewTest` case still skips silently (tracked as a limitation).
@@ -148,9 +231,14 @@ artifact resolved by the main build and by `build-logic` (including Gradle plugi
 generated with:
 
 ```sh
-./gradlew --write-verification-metadata sha256 clean check publishAllPublicationsToCompatRepository \
-    --rerun-tasks --no-build-cache --no-configuration-cache
+./gradlew --write-verification-metadata sha256 clean check coverageReport \
+    publishAllPublicationsToCompatRepository --rerun-tasks --no-build-cache --no-configuration-cache
 ```
+
+Run it with an empty Gradle home (`GRADLE_USER_HOME` pointing at a new directory), so every
+artifact is downloaded and checksummed rather than taken from a cache. `coverageReport` is
+included because the JaCoCo agent, report and aggregation configurations are resolved only
+when coverage runs.
 
 The checksums were taken from the repositories as served at generation time and
 are trust-on-first-use; signature verification is off. A modified checksum makes the
@@ -187,6 +275,29 @@ versions or import the BOM), and checksums pin the contents. Locking would add l
 files to regenerate with every update without catching anything the checksums do not;
 revisit it if dynamic versions or version ranges are ever introduced.
 
+## Continuous integration
+
+The Build workflow (`.github/workflows/build.yml`, `contents: read`) runs on pushes to
+`main` and on pull requests. A new push to a pull request cancels the run for its previous
+head; runs on `main` are never cancelled. Jobs run in parallel, each on a fresh runner with
+the Gradle cache of `gradle/actions/setup-gradle`:
+
+| Job | Runs | Timeout |
+| --- | --- | --- |
+| `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
+| `unit` | `./gradlew :<module>:test -Daxiom.requireAllocationTests=true`, a matrix over the seven library modules with tests; uploads the module's test report on failure | 20 min |
+| `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure | 30 min |
+| `quality` | `./gradlew coverageReport`, uploads `build/reports/jacoco/coverageReport/` (XML and HTML) as the `coverage-report` artifact, then the hello smoke run `./gradlew :examples:hello:run --args=--smoke` | 30 min |
+| `check` | needs the four jobs above and fails unless each succeeded (it runs even when one failed or was cancelled) | 5 min |
+| `commits` | pull requests only: `./gradlew clean check` on each commit (below) | 90 min |
+
+Branch protection requires the status check named `check`; the aggregate job keeps that
+name, so the required check stays valid. `commits` is not part of `check`, as before. The
+`unit` matrix lists modules by name: a new module with tests must be added to it, while
+`integration` picks up every `integrationTest` task through the root aggregate. The
+workflow graph is only verifiable on GitHub. The scheduled Compatibility workflow and the
+tag-triggered release workflow are separate.
+
 ## Every commit builds
 
 Rule: checksums go in the same commit as the dependency. A commit that adds or changes
@@ -216,6 +327,6 @@ production sources, may declare only test-scope dependencies (`axiom-test` to co
 against, `axiom-http` and `axiom-json` at test runtime, so tests see only Axiom's API
 as an application would), and no other module may depend on it. Adding it therefore
 does not loosen any production rule: core, server and the test client still cannot
-depend on a codec or on Jackson. Its tests run in `check` and finish in a few
-seconds; `examples/rest-api` remains a usage example with its own tests. The module
+depend on a codec or on Jackson. Its tests run in its `integrationTest` task (part of
+`check`) and finish in a few seconds; `examples/rest-api` remains a usage example with its own tests. The module
 is not published and the BOM does not constrain it.

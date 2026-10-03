@@ -2,9 +2,11 @@ package io.axiom.http.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Malformed UTF-8 in a path capture is answered 400 over a socket, not 500. */
+@Tag("integration")
 class HttpPathDecodingTest {
     @Test void undecodableCapturesAnswer400AndKeepTheConnection() throws Exception {
         try (var fixture = new Fixture()) {
