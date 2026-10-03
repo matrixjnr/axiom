@@ -126,26 +126,19 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** First allocation for a body; doubled as needed up to its declared length or the body limit. */
     private static final int INITIAL_BODY_CAPACITY = 8192;
 
+    /** A connection outside any listener, with the production bounds; for tests. */
     HttpConnection(Application application, RequestDispatcher executor) {
-        this(application, executor, REQUEST_HEAD_TIMEOUT);
+        this(application, executor, TransportSettings.DEFAULTS, () -> false);
     }
 
-    HttpConnection(Application application, RequestDispatcher executor, Duration headTimeout) {
-        this(application, executor, headTimeout, LINGER_TIMEOUT);
-    }
-
-    /** Tests may shorten or lengthen the head and linger bounds; production uses the constants. */
-    HttpConnection(Application application, RequestDispatcher executor, Duration headTimeout, Duration lingerTimeout) {
-        this(application, executor, headTimeout, lingerTimeout, () -> false);
-    }
-
-    HttpConnection(Application application, RequestDispatcher executor, Duration headTimeout, Duration lingerTimeout,
+    /** Production uses {@link TransportSettings#DEFAULTS}; tests may vary single bounds. */
+    HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
             BooleanSupplier listenerClosing) {
         this.listenerClosing = listenerClosing;
         this.application = application;
         this.executor = executor;
-        this.headTimeoutNanos = headTimeout.toNanos();
-        this.lingerNanos = lingerTimeout.toNanos();
+        this.headTimeoutNanos = settings.headTimeout().toNanos();
+        this.lingerNanos = settings.linger().toNanos();
     }
 
     /**

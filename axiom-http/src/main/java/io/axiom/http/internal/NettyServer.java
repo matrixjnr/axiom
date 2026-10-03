@@ -30,6 +30,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class NettyServer implements Server {
     /** How long close() lets in-flight exchanges finish before interrupting them. */
     static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(5);
+    /**
+     * Network inactivity (no read and no write progress) after which a connection closes. It also
+     * catches a response write stalled by a client that stopped reading.
+     */
+    static final Duration IDLE_TIMEOUT = Duration.ofSeconds(30);
     /** Open connections per listener; further accepted connections close immediately. */
     static final int MAX_CONNECTIONS = 128;
     /** Pending-accept queue length requested from the operating system. */
@@ -46,31 +51,25 @@ final class NettyServer implements Server {
     private final CompletableFuture<Void> stopped;
     private final AtomicBoolean closing = new AtomicBoolean();
     private final AtomicInteger connections = new AtomicInteger();
-    private final Duration grace;
-    private final Duration linger;
+    private final TransportSettings settings;
     Channel listener;
     private InetSocketAddress address;
 
-    private NettyServer(AdmissionPolicy policy, Duration grace, Duration linger) {
-        this.grace = grace;
-        this.linger = linger;
+    private NettyServer(AdmissionPolicy policy, TransportSettings settings) {
+        this.settings = settings;
         handlers = new RequestDispatcher(policy);
         stopped = CompletableFuture.allOf(handlers.termination().toCompletableFuture(),
                 completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
     }
 
     static NettyServer bind(Application application, InetSocketAddress address) throws IOException {
-        return bind(application, address, SHUTDOWN_GRACE);
+        return bind(application, address, TransportSettings.DEFAULTS);
     }
 
-    static NettyServer bind(Application application, InetSocketAddress address, Duration grace) throws IOException {
-        return bind(application, address, grace, HttpConnection.LINGER_TIMEOUT);
-    }
-
-    /** Binds with a non-default linger timeout; for tests that must tolerate a slow machine. */
-    static NettyServer bind(Application application, InetSocketAddress address, Duration grace, Duration linger)
+    /** Binds with non-default bounds; for tests that must tolerate a slow machine or observe one bound. */
+    static NettyServer bind(Application application, InetSocketAddress address, TransportSettings settings)
             throws IOException {
-        var server = new NettyServer(application.admissionPolicy(), grace, linger);
+        var server = new NettyServer(application.admissionPolicy(), settings);
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
                     .channel(NioServerSocketChannel.class)
@@ -105,9 +104,10 @@ final class NettyServer implements Server {
         }
         // The slot is released exactly once, by this listener, whether or not setup succeeds.
         channel.closeFuture().addListener(ignored -> connections.decrementAndGet());
-        channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new RequestDecoder(decoderConfig()),
-                new HttpResponseEncoder(),
-                new HttpConnection(application, handlers, HttpConnection.REQUEST_HEAD_TIMEOUT, linger, closing::get));
+        channel.pipeline().addLast(
+                new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS),
+                new RequestDecoder(decoderConfig()), new HttpResponseEncoder(),
+                new HttpConnection(application, handlers, settings, closing::get));
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */
@@ -146,7 +146,7 @@ final class NettyServer implements Server {
             });
         }
         listener.close().addListener(ignored -> {
-            var force = acceptors.next().schedule(() -> { channels.close(); }, grace.toNanos(), TimeUnit.NANOSECONDS);
+            var force = acceptors.next().schedule(() -> { channels.close(); }, settings.shutdownGrace().toNanos(), TimeUnit.NANOSECONDS);
             drained.addListener(done -> { force.cancel(false); stop(); });
         });
     }

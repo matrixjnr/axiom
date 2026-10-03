@@ -198,7 +198,7 @@ class HttpLingerTest {
         app.start();
         // A long linger keeps the test independent of machine load.
         var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                NettyServer.SHUTDOWN_GRACE, java.time.Duration.ofSeconds(60));
+                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofSeconds(60)));
         var client = new java.net.Socket();
         Thread sender = null;
         try {

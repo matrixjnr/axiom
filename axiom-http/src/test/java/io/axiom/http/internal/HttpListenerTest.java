@@ -397,7 +397,7 @@ class HttpListenerTest {
             });
             app.start();
             var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                    java.time.Duration.ofMillis(100));
+                    TransportSettings.DEFAULTS.withShutdownGrace(java.time.Duration.ofMillis(100)));
             try (var wire = new Wire(server)) {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
