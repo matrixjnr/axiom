@@ -105,6 +105,35 @@ public final class Response {
     }
 
     /**
+     * Creates a server-sent event stream with the {@linkplain #DEFAULT_STREAM_LIMIT default byte cap}.
+     * See {@link #sse(long, EventStreamBody)}.
+     *
+     * @param body sends the events after the head has been sent
+     * @return a streamed {@code text/event-stream} response
+     */
+    public static Response sse(EventStreamBody body) { return sse(DEFAULT_STREAM_LIMIT, body); }
+
+    /**
+     * Creates a server-sent event stream: a streamed 200 response of type {@code text/event-stream}
+     * for browsers' {@code EventSource}. It carries {@code Cache-Control: no-store, no-transform}
+     * and {@code X-Accel-Buffering: no}, so caches do not keep it and intermediaries do not buffer
+     * or compress it; the server itself never compresses a response. Events are written with the
+     * semantics of {@link #stream(int, String, long, StreamBody)}, including the cap, the
+     * deadline and what happens when the client leaves. Use {@link EventSink#keepAlive()} while
+     * idle. Replace headers with {@link #withHeader}.
+     *
+     * @param maxBytes most bytes the stream may send; positive
+     * @param body sends the events after the head has been sent
+     * @return a streamed {@code text/event-stream} response
+     * @throws IllegalArgumentException if the cap is not positive
+     */
+    public static Response sse(long maxBytes, EventStreamBody body) {
+        Objects.requireNonNull(body, "body");
+        return stream(200, "text/event-stream", maxBytes, out -> body.run(EventSink.of(out)))
+                .withHeader("Cache-Control", "no-store, no-transform").withHeader("X-Accel-Buffering", "no");
+    }
+
+    /**
      * Creates a redirect without a body.
      *
      * @param status 301, 302, 303, 307 or 308

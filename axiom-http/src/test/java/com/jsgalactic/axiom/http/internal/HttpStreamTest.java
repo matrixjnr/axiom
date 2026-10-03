@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.http.ServerSentEvent;
 import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.http.StreamAbortedException.Reason;
 import java.io.IOException;
@@ -357,6 +358,29 @@ class HttpStreamTest {
                 var rest = text(wire.socket.getInputStream().readAllBytes());
                 assertThat(rest).doesNotEndWith("\r\n0\r\n\r\n");
             }
+        }
+    }
+
+    @Test void serverSentEventsGoOutAsOneChunkEachWithoutBufferingOrCachingHeaders() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/events", ctx -> Response.sse(events -> {
+                events.send(ServerSentEvent.named("tick", "1").withId("7"));
+                events.keepAlive();
+                // Line breaks in client-influenced text can start no field of their own.
+                events.send("x\r\nevent: forged\n\nid: 9");
+            }));
+            var wire = fixture.connect();
+            wire.write("GET /events HTTP/1.1\r\nHost: a\r\nAccept: text/event-stream\r\n\r\n");
+            var head = wire.head();
+            assertThat(head.status()).isEqualTo(200);
+            assertThat(head.headers()).containsEntry("Content-Type", "text/event-stream")
+                    .containsEntry("Cache-Control", "no-store, no-transform").containsEntry("X-Accel-Buffering", "no")
+                    .containsEntry("Transfer-Encoding", "chunked").doesNotContainKey("Content-Encoding")
+                    .doesNotContainKey("Content-Length");
+            assertThat(text(wire.chunk())).isEqualTo("event: tick\nid: 7\ndata: 1\n\n");
+            assertThat(text(wire.chunk())).isEqualTo(": keep-alive\n\n");
+            assertThat(text(wire.chunk())).isEqualTo("data: x\ndata: event: forged\ndata: \ndata: id: 9\n\n");
+            assertThat(wire.chunk()).isNull();
         }
     }
 
