@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Map exceptions to responses with `app.error(type, handler)`; the nearest registered superclass wins, problem responses stay the default for AxiomException, and a failing error handler produces the generic 500.
 - Add middleware (`app.use`, route-level arguments) and route groups with path prefixes and scoped middleware, composed once at startup; global middleware also wrap 404, 405, automatic OPTIONS and 501 answers.
 - Answer OPTIONS for routed paths and `OPTIONS *` automatically with 204 and Allow, refuse TRACE and CONNECT routes, answer CONNECT with 501 everywhere, answer unrecognized methods on unrouted paths with 501, and document every method in one table.
 - Send no body with listener errors for HEAD requests.

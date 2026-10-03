@@ -1,5 +1,6 @@
 package io.axiom.application;
 
+import io.axiom.context.ErrorHandler;
 import io.axiom.context.Handler;
 import io.axiom.context.Middleware;
 import io.axiom.execution.AdmissionPolicy;
@@ -105,6 +106,26 @@ public interface Application extends RouteGroup, AutoCloseable {
      */
     @Override
     Application group(String prefix, Consumer<RouteGroup> configure);
+
+    /**
+     * Maps exceptions of a class and its subclasses to responses before startup. When a handler
+     * or middleware throws, the registered class nearest to the exception's class in its
+     * superclass chain wins, after every middleware has unwound. {@link io.axiom.error.AxiomException}
+     * keeps its built-in problem response unless a handler is registered for
+     * {@code AxiomException} or one of its subclasses: the built-in mapping counts as registered
+     * for {@code AxiomException}, so a handler for {@code Exception} does not replace it.
+     * Exceptions without a handler behave as described for {@link #handle(Request)}. Requests
+     * rejected before routing (413, CONNECT) and listener errors are not offered to handlers.
+     * Only exceptions can be mapped; {@link Error}s are never handled.
+     *
+     * @param type exception class
+     * @param handler shared, thread-safe mapping
+     * @param <E> exception type
+     * @return this application
+     * @throws IllegalArgumentException if a handler is already registered for the class
+     * @throws IllegalStateException if configuration has ended
+     */
+    <E extends Exception> Application error(Class<E> type, ErrorHandler<? super E> handler);
 
     /**
      * Returns an immutable snapshot in registration order.
@@ -235,7 +256,9 @@ public interface Application extends RouteGroup, AutoCloseable {
      * {@code application/problem+json} responses with only status, code, request ID and
      * violations. Responses whose Content-Type has an installed codec are checked against the
      * request's Accept header (406 when nothing matches) and non-String, non-byte[] bodies are
-     * encoded by that codec. Other handler exceptions propagate unchanged; this method is not a
+     * encoded by that codec. Exceptions from handlers and middleware are first offered to the
+     * handlers registered with {@link #error}; a failing error handler produces the generic 500
+     * problem response. Other handler exceptions propagate unchanged; this method is not a
      * network error boundary.
      *
      * @param request request to execute

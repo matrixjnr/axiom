@@ -6,8 +6,9 @@ Error responses produced by Axiom contain only values that cannot carry client
 input or internal details: a status, a short code, the framework request ID and,
 when present, field violations. Exception messages, causes, stack traces, class
 names, parser output and request content never reach a response body, in
-production or in tests. Exceptions that are not `AxiomException` become a generic
-**500** over HTTP and are logged with the request ID.
+production or in tests. Exceptions that are not `AxiomException` and have no
+[error handler](#error-handlers) become a generic **500** over HTTP and are logged
+with the request ID.
 
 ## Problem responses
 
@@ -85,6 +86,44 @@ so CR/LF injection is rejected when the exception is created. Never build codes,
 fields or challenges from request data. A cause attached with `initCause` is kept
 for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 
+## Error handlers
+
+`app.error(type, handler)` maps exceptions thrown by handlers and
+[middleware](middleware.md) to responses:
+
+```java
+app.error(NoSuchElementException.class, (ctx, failure) -> { throw new NotFoundException("item_not_found"); });
+app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(new Quota(failure.limit())));
+```
+
+- The registered class nearest to the exception's class in its superclass chain
+  wins. One handler per class; registration ends at `start()`.
+- Handlers run after every middleware has unwound, with the request's context
+  (status reset to 200). Their responses are encoded by the codecs without an
+  Accept check, like problem responses.
+- `AxiomException`s keep the problem responses above unless a handler is
+  registered for `AxiomException` or a subclass: the built-in mapping counts as
+  the handler for `AxiomException`, so a handler for `Exception` does not
+  replace it.
+- Throwing an `AxiomException` from an error handler answers with its problem
+  response; it is not offered to error handlers again. Any other exception from
+  an error handler, or a `null` result, is logged with the request ID and
+  answered with the generic 500 problem body, in memory, in `TestClient` and over
+  HTTP. That 500 keeps a keep-alive connection open.
+- Router answers (404, 405, 501, automatic OPTIONS) are responses, not exceptions,
+  and are never offered; customize them with global middleware. Requests rejected
+  before routing (413, CONNECT) and listener errors are not offered either.
+- Only `Exception` subclasses can be mapped; `Error`s keep failing the request.
+- Exceptions without a handler behave as before: `AxiomException`s become problem
+  responses, others propagate from `app.handle` and `TestClient` and become the
+  generic 500 over HTTP.
+
+What an error handler returns reaches the client unchanged: never copy exception
+messages, class names or stack traces into it. Headers that middleware add after
+`next.run()` are not on error handler or problem responses, because the exception
+passed through the middleware; a middleware that must decorate them catches the
+exception itself.
+
 ## Framework statuses
 
 The [method table](routing.md#methods) shows which of these each HTTP method receives.
@@ -103,7 +142,8 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 | 415 | Missing, unsupported or non-UTF-8 Content-Type in `ctx.body` | Runtime |
 | 417 | An `Expect` value other than `100-continue` | Listener |
 | 431 | Header section larger than 8 KiB | Listener |
-| 500 | Unexpected handler exception, unencodable or oversized response | Listener (in memory: exception propagates) |
+| 500 | Unexpected handler or middleware exception without an error handler, unencodable or oversized response | Listener (in memory: exception propagates) |
+| 500 | Failing [error handler](#error-handlers) | Runtime |
 | 501 | CONNECT (also from `app.handle` and `TestClient`), Upgrade, or a transfer coding other than `chunked` before it | Listener |
 | 501 | No route matches the path and the method is not recognized | Runtime |
 | 503 | No execution capacity, queue wait expired, listener draining, more than eight outstanding pipelined requests or their bodies over the connection's share | Listener and `TestClient` |

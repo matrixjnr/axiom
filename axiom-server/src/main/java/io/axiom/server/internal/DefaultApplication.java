@@ -1,6 +1,7 @@
 package io.axiom.server.internal;
 
 import io.axiom.application.Application;
+import io.axiom.context.ErrorHandler;
 import io.axiom.context.Handler;
 import io.axiom.context.Middleware;
 import io.axiom.error.AxiomException;
@@ -34,12 +35,13 @@ final class DefaultApplication implements Application {
      * Immutable configuration published at startup. The request path reads it through one
      * volatile field and takes no lock; {@code router} is null once the application closes.
      */
-    private record Runtime(CompiledRouter router, Handler unmatched, List<Route> routes, Set<Route> routeSet,
-                           Map<Route, AdmissionPolicy> routePolicies, AdmissionPolicy defaultPolicy,
-                           Codecs codecs, int maxRequestBody) {
-        /** Drops every reference to application handlers and middleware. */
+    private record Runtime(CompiledRouter router, Handler unmatched, ErrorHandlers errors, List<Route> routes,
+                           Set<Route> routeSet, Map<Route, AdmissionPolicy> routePolicies,
+                           AdmissionPolicy defaultPolicy, Codecs codecs, int maxRequestBody) {
+        /** Drops every reference to application handlers, middleware and error handlers. */
         Runtime withoutRouter() {
-            return new Runtime(null, null, routes, routeSet, routePolicies, defaultPolicy, codecs, maxRequestBody);
+            return new Runtime(null, null, ErrorHandlers.NONE, routes, routeSet, routePolicies, defaultPolicy,
+                    codecs, maxRequestBody);
         }
     }
 
@@ -53,6 +55,7 @@ final class DefaultApplication implements Application {
     // Configuration state; guarded by this until startup publishes a runtime snapshot.
     private final Map<Route, Registration> registrations = new LinkedHashMap<>();
     private final Scope root = new Scope(null, "");
+    private final Map<Class<?>, ErrorHandler<?>> errorHandlers = new LinkedHashMap<>();
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
     private final List<Server> listeners = new ArrayList<>();
@@ -134,6 +137,17 @@ final class DefaultApplication implements Application {
         }
         registrations.put(route, new Registration(handler, scope, routeMiddleware));
         return route;
+    }
+
+    @Override
+    public synchronized <E extends Exception> Application error(Class<E> type, ErrorHandler<? super E> handler) {
+        requireState(State.CONFIGURING);
+        Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(handler, "handler");
+        if (errorHandlers.putIfAbsent(type, handler) != null) {
+            throw new IllegalArgumentException("An error handler is already registered for " + type.getName());
+        }
+        return this;
     }
 
     /**
@@ -249,16 +263,16 @@ final class DefaultApplication implements Application {
         var router = CompiledRouter.compile(chains);
         // Answers the router produces itself are wrapped by global middleware only.
         var unmatched = Pipeline.compose(global, context -> ((DefaultContext) context).frameworkAnswer());
-        runtime = snapshot(router, unmatched, codecs);
+        runtime = snapshot(router, unmatched, new ErrorHandlers(errorHandlers), codecs);
         registrations.clear();
         shapes.clear();
         state = State.RUNNING;
         return this;
     }
 
-    private Runtime snapshot(CompiledRouter router, Handler unmatched, Codecs codecs) {
+    private Runtime snapshot(CompiledRouter router, Handler unmatched, ErrorHandlers errors, Codecs codecs) {
         var routes = List.copyOf(registrations.keySet());
-        return new Runtime(router, unmatched, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
+        return new Runtime(router, unmatched, errors, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
                 codecs, maxRequestBody);
     }
 
@@ -391,8 +405,39 @@ final class DefaultApplication implements Application {
                     frameworkAnswer(published.router(), request, match, execution));
             chain = published.unmatched();
         }
-        // Composed chains always return a Response; encoding runs once, after every middleware.
-        return encode(published.codecs(), request, (Response) chain.handle(context));
+        try {
+            // Composed chains always return a Response; encoding runs once, after every middleware.
+            return encode(published.codecs(), request, (Response) chain.handle(context), true);
+        } catch (Exception failure) {
+            return handleError(published, context, failure);
+        }
+    }
+
+    /**
+     * Offers an exception from the chain to the registered error handlers. Without one it is
+     * rethrown: AxiomExceptions get their problem response, others propagate. An AxiomException
+     * thrown by the error handler is rethrown for its problem response and not handled again;
+     * any other failure of the error handler becomes the generic 500.
+     */
+    private static Response handleError(Runtime published, DefaultContext context, Exception failure) throws Exception {
+        var handler = published.errors().find(failure.getClass());
+        if (handler == null) { throw failure; }
+        context.resetStatus();
+        try {
+            var response = handler.handle(context, failure);
+            if (response == null) {
+                throw new IllegalStateException("Error handler for " + failure.getClass().getName() + " returned null");
+            }
+            // Error responses are sent whatever the client accepts, like problem responses.
+            return encode(published.codecs(), context.request(), response, false);
+        } catch (AxiomException translated) {
+            throw translated;
+        } catch (Exception broken) {
+            broken.addSuppressed(failure);
+            LOG.log(System.Logger.Level.ERROR, "Request " + context.execution().requestId()
+                    + " failed and its error handler failed too", broken);
+            return Problems.response(500, context.execution().requestId());
+        }
     }
 
     /** The router's own answer when no route serves the request method on its path. */
@@ -411,11 +456,11 @@ final class DefaultApplication implements Application {
      * Prepares a response whose Content-Type has an installed codec: checks the request's Accept
      * header (406 when nothing matches) and encodes values other than String and byte[].
      */
-    private static Response encode(Codecs codecs, Request request, Response response) {
+    private static Response encode(Codecs codecs, Request request, Response response, boolean negotiate) {
         var mediaType = Codecs.mediaType(response.headers().get("Content-Type"));
         var codec = mediaType == null ? null : codecs.forMediaType(mediaType);
         if (codec == null) { return response; }
-        if (!Codecs.acceptable(request.header("Accept").orElse(null), mediaType)) {
+        if (negotiate && !Codecs.acceptable(request.header("Accept").orElse(null), mediaType)) {
             throw new NotAcceptableException();
         }
         var body = response.body();
@@ -434,10 +479,11 @@ final class DefaultApplication implements Application {
     public void close() {
         List<Server> owned;
         synchronized (this) {
-            runtime = runtime == null ? snapshot(null, null, Codecs.of(List.of())) : runtime.withoutRouter();
+            runtime = runtime == null ? snapshot(null, null, ErrorHandlers.NONE, Codecs.of(List.of())) : runtime.withoutRouter();
             state = State.CLOSED;
             registrations.clear();
             root.middleware.clear();
+            errorHandlers.clear();
             shapes.clear();
             routePolicies.clear();
             owned = List.copyOf(listeners);

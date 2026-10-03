@@ -149,8 +149,9 @@ throws an `AxiomException` (for example `NotFoundException` or
 status, code, request ID and field violations, in memory and over HTTP; see
 [errors](errors.md). Other handler exceptions propagate unchanged to in-memory
 callers, and the HTTP transport maps them, and unencodable body objects, to a
-generic 500. Exceptions thrown by middleware are handled the same way. No general
-exception mappers exist.
+generic 500. Exceptions thrown by middleware are handled the same way.
+`app.error(type, handler)` maps exceptions to application responses first; see
+[error handlers](errors.md#error-handlers).
 
 ## Testing without ports
 

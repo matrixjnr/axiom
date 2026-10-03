@@ -77,6 +77,12 @@ final class DefaultContext implements Context {
         return value;
     }
 
+    /** Forgets the status the handler or middleware set, before an error handler runs. */
+    void resetStatus() {
+        status = 200;
+        explicitStatus = false;
+    }
+
     @Override
     public Context status(int status) {
         Response.validateStatus(status);
