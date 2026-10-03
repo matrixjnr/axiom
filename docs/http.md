@@ -18,7 +18,9 @@ idle keep-alive connections and connections still receiving a request. It also
 stops admission: requests waiting for execution capacity are answered 503 and
 their connections close without invoking the handler. A connection with a
 running handler keeps it running; its response is sent with `Connection: close`
-and queued pipelined requests on it are dropped unanswered. The connection then
+and queued pipelined requests on it are dropped unanswered. This holds for every
+response sent after `close()` is called, so it is already in force when a waiting
+request receives its 503. The connection then
 lingers briefly (see [wire behavior](#wire-behavior)) before it closes.
 After a fixed five-second grace period, remaining connections close and their
 handlers are interrupted; then execution and I/O threads stop. Await

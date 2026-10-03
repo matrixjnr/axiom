@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.BooleanSupplier;
 
 /** All mutable connection state belongs to the channel's event loop. */
 final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
@@ -79,6 +80,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final RequestDispatcher executor;
     private final long headTimeoutNanos;
     private final long lingerNanos;
+    /**
+     * True once the listener has started closing. Read on every response, from the moment the
+     * listener's close begins, so a response sent after that carries {@code Connection: close} even
+     * before {@link #drain} has run on this connection.
+     */
+    private final BooleanSupplier listenerClosing;
     private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
     private Exchange receiving;
     private boolean busy;
@@ -129,6 +136,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Tests may shorten or lengthen the head and linger bounds; production uses the constants. */
     HttpConnection(Application application, RequestDispatcher executor, Duration headTimeout, Duration lingerTimeout) {
+        this(application, executor, headTimeout, lingerTimeout, () -> false);
+    }
+
+    HttpConnection(Application application, RequestDispatcher executor, Duration headTimeout, Duration lingerTimeout,
+            BooleanSupplier listenerClosing) {
+        this.listenerClosing = listenerClosing;
         this.application = application;
         this.executor = executor;
         this.headTimeoutNanos = headTimeout.toNanos();
@@ -428,7 +441,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             }
             message.headers().set("X-Request-ID", exchange.execution().requestId());
             message.headers().set(HttpHeaderNames.DATE, httpDate());
-            boolean keepAlive = exchange.keepAlive() && !response.close() && !draining;
+            boolean ending = draining || listenerClosing.getAsBoolean();
+            boolean keepAlive = exchange.keepAlive() && !response.close() && !ending;
             HttpUtil.setKeepAlive(message, keepAlive);
             // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
             if (keepAlive && exchange.http10()) { message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive"); }
@@ -437,7 +451,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             ctx.writeAndFlush(message).addListener(future -> {
                 active = null;
                 if (!future.isSuccess()) { ctx.close(); return; }
-                if (!keepAlive || draining) { linger(ctx); return; }
+                if (!keepAlive || ending) { linger(ctx); return; }
                 busy = false;
                 dispatch(ctx);
                 sendContinue(ctx);

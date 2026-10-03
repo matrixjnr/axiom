@@ -107,7 +107,7 @@ final class NettyServer implements Server {
         channel.closeFuture().addListener(ignored -> connections.decrementAndGet());
         channel.pipeline().addLast(new IdleStateHandler(0, 0, 30), new RequestDecoder(decoderConfig()),
                 new HttpResponseEncoder(),
-                new HttpConnection(application, handlers, HttpConnection.REQUEST_HEAD_TIMEOUT, linger));
+                new HttpConnection(application, handlers, HttpConnection.REQUEST_HEAD_TIMEOUT, linger, closing::get));
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */
@@ -131,17 +131,21 @@ final class NettyServer implements Server {
      */
     @Override public void close() {
         if (!closing.compareAndSet(false, true)) { return; }
-        // Requests waiting for admission are answered 503 rather than promoted during the drain.
+        // From here on every response is sent with Connection: close (connections read the flag),
+        // so the drain is in force before stopping admission answers waiting requests below. The
+        // per-connection drain also runs at once rather than after the listening socket has closed,
+        // which completes on the acceptor thread and may be delayed.
         handlers.stopAdmission();
         if (listener == null) { stop(); return; }
+        // Accepts racing with this see the flag and close themselves (see accept).
+        var drained = channels.newCloseFuture();
+        for (var channel : channels) {
+            channel.eventLoop().execute(() -> {
+                var connection = channel.pipeline().get(HttpConnection.class);
+                if (connection == null) { channel.close(); } else { connection.drain(); }
+            });
+        }
         listener.close().addListener(ignored -> {
-            var drained = channels.newCloseFuture();
-            for (var channel : channels) {
-                channel.eventLoop().execute(() -> {
-                    var connection = channel.pipeline().get(HttpConnection.class);
-                    if (connection == null) { channel.close(); } else { connection.drain(); }
-                });
-            }
             var force = acceptors.next().schedule(() -> { channels.close(); }, grace.toNanos(), TimeUnit.NANOSECONDS);
             drained.addListener(done -> { force.cancel(false); stop(); });
         });

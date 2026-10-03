@@ -337,6 +337,54 @@ class HttpListenerTest {
         }
     }
 
+    @Test void closeEndsRunningConnectionsEvenBeforeTheListenerSocketHasClosed() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var acceptorBlocked = new CountDownLatch(1);
+        var unblockAcceptor = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.admissionPolicy(new io.axiom.execution.AdmissionPolicy(1, 1, java.time.Duration.ofSeconds(30)));
+            fixture.app.get("/", ctx -> {
+                entered.countDown();
+                assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
+                return "finished";
+            });
+            var server = (NettyServer) fixture.listen();
+            try (var running = new Wire(server); var waiting = new Wire(server)) {
+                running.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+                waiting.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                awaitQueued(server);
+                // Holds the acceptor thread, so closing the listening socket cannot complete yet:
+                // the drain must not depend on it.
+                server.listener.eventLoop().execute(() -> {
+                    acceptorBlocked.countDown();
+                    try { unblockAcceptor.await(); } catch (InterruptedException stop) { Thread.currentThread().interrupt(); }
+                });
+                assertThat(acceptorBlocked.await(30, TimeUnit.SECONDS)).isTrue();
+                server.close();
+                // The queued request is answered once admission stops; the running one must
+                // already be marked to close by then.
+                assertThat(waiting.read(false).status()).isEqualTo(503);
+                release.countDown();
+                var response = running.read(false);
+                assertThat(response.status()).isEqualTo(200);
+                assertThat(response.headers()).containsEntry("connection", "close");
+            } finally {
+                release.countDown();
+                unblockAcceptor.countDown();
+            }
+        }
+    }
+
+    private static void awaitQueued(Server server) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (server.admission().queued() == 0) {
+            assertThat(System.nanoTime()).as("request queued").isLessThan(deadline);
+            Thread.onSpinWait();
+        }
+    }
+
     @Test void closeInterruptsHandlersThatOutliveTheGracePeriod() throws Exception {
         var entered = new CountDownLatch(1);
         var interrupted = new CountDownLatch(1);
