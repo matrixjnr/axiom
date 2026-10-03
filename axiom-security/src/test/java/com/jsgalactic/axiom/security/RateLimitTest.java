@@ -253,6 +253,21 @@ class RateLimitTest {
     }
 
     @Test
+    void rejectionsAreDecoratedByOuterMiddlewareAndCarryRateLimitHeaders() throws Exception {
+        var app = Axiom.create();
+        app.use(SecurityHeaders.defaults());
+        app.use(bucket(1, Duration.ofSeconds(10)).headers(true).build());
+        app.get("/x", ctx -> "ok");
+        try (var client = TestClient.start(app)) {
+            client.execute(from("/x", "192.0.2.1"));
+            var limited = client.execute(from("/x", "192.0.2.1"));
+            assertThat(limited.status()).isEqualTo(429);
+            assertThat(limited.headers()).containsEntry("X-Content-Type-Options", "nosniff").containsEntry("Retry-After", "10")
+                    .containsEntry("RateLimit-Remaining", "0").containsEntry("Content-Type", "application/problem+json");
+        }
+    }
+
+    @Test
     void headersAreOffByDefaultAndSpoofedForwardingHeadersAreIgnored() throws Exception {
         var app = Axiom.create();
         app.use(bucket(1, Duration.ofMinutes(1)).build());

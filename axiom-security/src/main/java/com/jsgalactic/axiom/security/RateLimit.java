@@ -32,14 +32,16 @@ import java.util.regex.Pattern;
  * window length, which smooths the doubled burst a fixed window allows at its boundary. Both keep
  * constant state per key.
  *
- * <p><b>Rejection.</b> A request over its budget fails with {@link TooManyRequestsException}: 429
- * {@code application/problem+json}, code {@code rate_limited}, and {@code Retry-After} in whole
- * seconds (rounded up, so waiting that long is enough). The request does not reach the rest of the
- * chain. Allowed responses carry the {@code RateLimit-Limit}, {@code RateLimit-Remaining},
+ * <p><b>Rejection.</b> A request over its budget is answered with the problem response of a
+ * {@link TooManyRequestsException}: 429 {@code application/problem+json}, code {@code rate_limited},
+ * and {@code Retry-After} in whole seconds (rounded up, so waiting that long is enough). The request
+ * does not reach the rest of the chain. The response is returned, not thrown, so it passes back
+ * through the outer middleware like any response (security headers, CORS) and carries the
+ * {@code RateLimit-*} headers too; it is not seen by error handlers.
+ * Allowed and rejected responses carry the {@code RateLimit-Limit}, {@code RateLimit-Remaining},
  * {@code RateLimit-Reset} (seconds) and {@code RateLimit-Policy} headers of the IETF rate limit
  * headers draft when {@link Builder#headers(boolean)} is enabled; nested limiters keep the headers
- * of the most constraining one. Like every middleware, it cannot add headers to the response built
- * from the exception.
+ * of the most constraining one.
  *
  * <p><b>Bounded memory.</b> At most {@link Builder#maxKeys} keys are tracked (10,000 by default).
  * When a new key arrives at capacity, the least recently used key of its shard is forgotten, so a
@@ -396,7 +398,8 @@ public final class RateLimit implements Middleware {
         if (!decision.allowed()) {
             limitedCounter.increment();
             var wait = decision.retryAfter();
-            throw new TooManyRequestsException(wait.compareTo(Duration.ofDays(1)) > 0 ? Duration.ofDays(1) : wait, "rate_limited");
+            var problem = context.problem(new TooManyRequestsException(wait.compareTo(Duration.ofDays(1)) > 0 ? Duration.ofDays(1) : wait, "rate_limited"));
+            return headers ? decorate(problem, decision) : problem;
         }
         allowedCounter.increment();
         var response = next.run();

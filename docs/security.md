@@ -382,13 +382,15 @@ app.post("/login", loginHandler, logins);                // a tighter budget for
   identity, else the fallback; register the authenticating middleware first). Never key on a
   header the client chooses freely. A request without a key (in-memory requests have no peer) and
   a key longer than 512 characters share one `anonymous` budget.
-- **Rejection.** `TooManyRequestsException`: 429 `application/problem+json`, code `rate_limited`,
-  `Retry-After` in whole seconds rounded up (so waiting that long suffices; at most one day).
-  The request never reaches the rest of the chain.
+- **Rejection.** The problem response of a `TooManyRequestsException` (built with
+  `Context.problem`): 429 `application/problem+json`, code `rate_limited`, `Retry-After` in whole
+  seconds rounded up (so waiting that long suffices; at most one day). The request never reaches the
+  rest of the chain. The response is returned rather than thrown, so outer middleware such as
+  `SecurityHeaders` and `Cors` decorate it like any response; error handlers do not see it.
 - **Headers.** `headers(true)` adds `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`
-  (seconds) and `RateLimit-Policy` (`limit;w=seconds`) to successful responses, following the IETF
-  rate limit headers draft. Nested limiters keep the headers of the most constraining one. The
-  429 itself carries `Retry-After` only, as error responses may add no other header.
+  (seconds) and `RateLimit-Policy` (`limit;w=seconds`) to allowed responses and to the 429,
+  following the IETF rate limit headers draft. Nested limiters keep the headers of the most
+  constraining one.
 - **Bounded memory.** At most `maxKeys` (10,000 by default) keys are tracked, in 16 independently
   locked least-recently-used shards. A flood of distinct keys evicts the oldest and never grows the
   map. An evicted key starts with a fresh budget, so size `maxKeys` above the number of keys that
@@ -499,7 +501,8 @@ app.use(sessions); app.use(security.authenticate()); app.use(csrf);
 app.get("/csrf", ctx -> csrf.token(ctx));                   // the page sends it back as X-CSRF-Token
 ```
 
-Checks, in order; any failure is **403 `csrf_rejected`** (one code, so clients cannot probe which
+Rejections are ordinary `ForbiddenException`s, so error handlers can map them and
+`SecurityHeaders` and `Cors` decorate them through `Middleware.afterError`. Checks, in order; any failure is **403 `csrf_rejected`** (one code, so clients cannot probe which
 failed):
 
 1. `Sec-Fetch-Site`, when present: `same-origin` or `none` pass; `same-site` only with
@@ -560,8 +563,3 @@ failed):
   the existing `Authenticator` seam carries the identity to the policies.
 - Self-contained (stateless) sessions in the cookie: they cannot be revoked or rotated without
   server state, which is the point of server-side sessions.
-
-## Limitations
-
-- Security headers and other middleware headers are missing on problem responses
-  ([#96](https://github.com/matrixjnr/axiom/issues/96)).

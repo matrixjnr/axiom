@@ -104,6 +104,21 @@ class CsrfTest {
     }
 
     @Test
+    void rejectionsAreDecoratedByOuterMiddleware() throws Exception {
+        var csrf = synchronizer().build();
+        var app = Axiom.create();
+        app.use(SecurityHeaders.defaults());
+        app.use(sessions);
+        app.use(csrf);
+        app.post("/transfer", ctx -> "done");
+        try (var client = TestClient.start(app)) {
+            var rejected = client.execute(request("POST", "/transfer"));
+            assertThat(rejected.status()).isEqualTo(403);
+            assertThat(rejected.headers()).containsEntry("X-Content-Type-Options", "nosniff");
+        }
+    }
+
+    @Test
     void theSynchronizerTokenIsPerSessionAndAcceptedWithTheSessionOnly() throws Exception {
         try (var client = TestClient.start(synchronizerApp(synchronizer()))) {
             var page = client.execute(request("GET", "/form"));
