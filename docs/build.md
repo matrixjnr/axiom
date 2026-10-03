@@ -159,10 +159,11 @@ Javadoc omits its generation timestamp, so repeated builds produce identical jar
 `axiom-json` provides the JSON codec as a `BodyCodec` service; it has no public
 API package. Its tests exercise the codec directly.
 
-Deferred: pinning GitHub Actions to full commit SHAs (workflow actions use major
-version tags; an owner action, see docs/releasing.md). Dependabot
+GitHub Actions are pinned to full commit SHAs with the version in a trailing comment
+(`uses: actions/checkout@<sha> # v7`). The SHAs were read from the upstream repositories
+with `git ls-remote --tags` (for annotated tags, the commit the tag points at). Dependabot
 (`.github/dependabot.yml`) proposes weekly updates for Actions and Gradle dependencies,
-grouped by family (Netty, Jackson, validation, test tools).
+grouped by family (Netty, Jackson, validation, test tools), and keeps the pins current.
 
 ## Starter artifact
 
