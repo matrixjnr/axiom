@@ -1,6 +1,8 @@
 # Axiom
 
 [![Build](https://github.com/matrixjnr/axiom/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/matrixjnr/axiom/actions/workflows/build.yml)
+[![CodeQL](https://github.com/matrixjnr/axiom/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/matrixjnr/axiom/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/matrixjnr/axiom/badge)](https://scorecard.dev/viewer/?uri=github.com/matrixjnr/axiom)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
 
