@@ -242,6 +242,28 @@ class HttpMethodsTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"GET", "HEAD", "DELETE", "OPTIONS", "QUERY"})
+    void readsAndLimitsBodiesForEveryMethod(String method) throws Exception {
+        try (var app = Axiom.create()) {
+            app.maxRequestBody(4);
+            app.route(method, "/x", ctx -> ctx.status(200).text("got " + ctx.request().body().length()));
+            app.start();
+            var within = app.handle(new Request(method, "/x", Map.of(), Body.of("text/plain", new byte[4])));
+            assertThat(within.status()).isEqualTo(200);
+            if (method.equals("HEAD")) {
+                // HEAD never carries a response body, only the length the body would have.
+                assertThat(within.body()).isNull();
+                assertThat(within.headers()).containsEntry("Content-Length", "5");
+            } else {
+                assertThat(within.body()).isEqualTo("got 4");
+            }
+            var over = app.handle(new Request(method, "/x", Map.of(), Body.of("text/plain", new byte[5])));
+            assertThat(over.status()).isEqualTo(413);
+            if (method.equals("HEAD")) { assertThat(over.body()).isNull(); }
+        }
+    }
+
     @Test
     void doesNotFoldTheCaseOfMethods() throws Exception {
         try (var app = Axiom.create()) {

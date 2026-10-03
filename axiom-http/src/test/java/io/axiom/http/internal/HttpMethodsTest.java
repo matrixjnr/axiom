@@ -199,6 +199,46 @@ class HttpMethodsTest {
         }
     }
 
+    @Test void readsBodiesOfGetHeadDeleteAndOptionsAndNeverSendsAHeadBody() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.maxRequestBody(8);
+            fixture.app.get("/x", ctx -> "get " + new String(ctx.request().body().bytes(), java.nio.charset.StandardCharsets.UTF_8));
+            fixture.app.delete("/x", ctx -> "delete " + ctx.request().body().length());
+            fixture.app.options("/explicit", ctx -> ctx.status(200).text("options " + ctx.request().body().length()));
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("GET /x HTTP/1.1\r\nHost: a\r\nContent-Length: 4\r\n\r\nbody");
+                assertThat(wire.read(false).text()).isEqualTo("get body");
+                wire.write("DELETE /x HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n");
+                assertThat(wire.read(false).text()).isEqualTo("delete 3");
+                wire.write("OPTIONS /explicit HTTP/1.1\r\nHost: a\r\nContent-Length: 2\r\n\r\nab");
+                assertThat(wire.read(false).text()).isEqualTo("options 2");
+                // HEAD with a body: the body is consumed, no response body bytes follow.
+                wire.write("HEAD /x HTTP/1.1\r\nHost: a\r\nContent-Length: 4\r\n\r\nbody");
+                var head = wire.read(true);
+                assertThat(head.status()).isEqualTo(200);
+                assertThat(head.headers()).containsEntry("Content-Length", "8");
+                assertThat(wire.get("/x").text()).isEqualTo("get ");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"GET", "HEAD", "DELETE", "OPTIONS"})
+    void rejectsOversizedBodiesForEveryMethodWith413(String method) throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.maxRequestBody(4);
+            fixture.app.route(method, "/x", ctx -> "x");
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write(method + " /x HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello");
+                var reply = wire.read(method.equals("HEAD"));
+                assertThat(reply.status()).isEqualTo(413);
+                assertThat(reply.headers()).containsEntry("Connection", "close");
+                if (method.equals("HEAD")) { assertThat(reply.headers()).doesNotContainKey("Content-Length"); }
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            }
+        }
+    }
+
     @Test void matchesMethodTokensCaseSensitively() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.route("M-SEARCH", "/x", ctx -> ctx.method());

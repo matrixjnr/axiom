@@ -42,6 +42,16 @@ lists and other characters receive **400**. A request with neither Content-Lengt
 nor Transfer-Encoding has an empty body (RFC 9112 section 6.3), whatever its method;
 the listener never answers 411.
 
+Bodies are framed, read and limited the same way for every method. A GET, HEAD,
+DELETE or OPTIONS request may carry a body (RFC 9110 gives it no defined meaning for
+these methods, but does not forbid it): the listener reads it within
+`maxRequestBody`, answers 413 above it as for POST, and passes it to the handler as
+`ctx.request().body()`. An OPTIONS request answered automatically (see
+[automatic OPTIONS](routing.md#automatic-options)) has its body read within the limit
+and then discarded, so the connection stays usable for the next request. A HEAD
+response never carries body bytes, whether it comes from a handler, a routing error or
+a listener error such as 413.
+
 ### Memory per connection
 
 With `L` = `maxRequestBody`, the request body bytes the listener holds for one

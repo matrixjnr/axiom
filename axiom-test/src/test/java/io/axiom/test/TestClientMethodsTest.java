@@ -103,6 +103,25 @@ class TestClientMethodsTest {
     }
 
     @Test
+    void sendsBodiesWithAnyMethodAndNeverReturnsAHeadBody() throws Exception {
+        var app = Axiom.create();
+        app.maxRequestBody(4);
+        app.get("/x", ctx -> "got " + ctx.request().body().length());
+        try (var client = TestClient.start(app)) {
+            var body = io.axiom.http.Body.of("text/plain", new byte[3]);
+            assertThat(client.execute(Request.get("/x").withBody(body)).body()).isEqualTo("got 3");
+            var head = client.execute(new Request("HEAD", "/x").withBody(body));
+            assertThat(head.body()).isNull();
+            assertThat(head.headers()).containsEntry("Content-Length", "5");
+            var options = client.execute(new Request("OPTIONS", "/x").withBody(body));
+            assertThat(options.status()).isEqualTo(204);
+            var over = io.axiom.http.Body.of("text/plain", new byte[5]);
+            assertThat(client.execute(Request.get("/x").withBody(over)).status()).isEqualTo(413);
+            assertThat(client.execute(new Request("OPTIONS", "/x").withBody(over)).status()).isEqualTo(413);
+        }
+    }
+
+    @Test
     void admitsAutomaticOptionsUnderTheDefaultPolicy() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
