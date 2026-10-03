@@ -7,8 +7,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+@Tag("integration")
 class HttpBodyTest {
     private static Fixture echo(int limit) {
         var fixture = new Fixture();
@@ -53,11 +55,17 @@ class HttpBodyTest {
     @Test void clientStillSendingAnOversizedBodyReadsThe413AndIsNotReset() throws Exception {
         try (var fixture = echo(16)) {
             fixture.app.start();
-            // A long linger keeps the test independent of how fast a loaded machine moves the upload.
+            // A long linger and quiet period keep the test independent of how fast a loaded machine
+            // moves the upload. Small fixed buffers on both sides make it independent of kernel
+            // defaults: only a small part of the body fits in them, so the client is necessarily
+            // still sending when the 413 is written, and a server that closed instead of lingering
+            // would reset the connection.
             var server = NettyServer.bind(fixture.app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                    NettyServer.SHUTDOWN_GRACE, Duration.ofSeconds(60));
+                    TransportSettings.DEFAULTS.withLinger(Duration.ofSeconds(60)).withLingerQuiet(Duration.ofSeconds(60))
+                            .withSocketBuffers(64 * 1024, 64 * 1024));
             fixture.servers.add(server);
             var wire = new Wire(server);
+            wire.socket.setSendBufferSize(64 * 1024);
             // Below the discard cap, so the server never needs to cut the upload short.
             int length = 8 * 1024 * 1024;
             var piece = new byte[16 * 1024];
@@ -210,12 +218,10 @@ class HttpBodyTest {
                     expected[i] = (byte) ('a' + i % 26);
                     chunked.append("1\r\n").append((char) expected[i]).append("\r\n");
                 }
-                long started = System.nanoTime();
                 wire.write(chunked.append("0\r\n\r\n").toString());
                 var reply = wire.read(false);
-                // Only a coarse guard against pathological per-chunk cost; copy counts are checked
-                // deterministically by HttpConnectionTest.tinyChunksAreCopiedOnArrivalWithoutNettyAccumulation.
-                assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(100));
+                // No timing assertion: per-chunk copy counts are checked deterministically by
+                // HttpConnectionTest.tinyChunksAreCopiedOnArrivalWithoutNettyAccumulation.
                 assertThat(reply.text()).isEqualTo(limit + ":" + java.util.HexFormat.of().formatHex(
                         java.security.MessageDigest.getInstance("SHA-256").digest(expected)));
 

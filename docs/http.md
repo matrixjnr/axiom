@@ -18,8 +18,12 @@ idle keep-alive connections and connections still receiving a request. It also
 stops admission: requests waiting for execution capacity are answered 503 and
 their connections close without invoking the handler. A connection with a
 running handler keeps it running; its response is sent with `Connection: close`
-and queued pipelined requests on it are dropped unanswered. The connection then
-lingers briefly (see [wire behavior](#wire-behavior)) before it closes.
+and queued pipelined requests on it are dropped unanswered. This holds for every
+response sent after `close()` is called, so it is already in force when a waiting
+request receives its 503. The connection then
+lingers for at most 500 milliseconds (see [wire behavior](#wire-behavior)) before it
+closes; connections already lingering when the listener closes stop within the same
+bound, so they do not hold up shutdown.
 After a fixed five-second grace period, remaining connections close and their
 handlers are interrupted; then execution and I/O threads stop. Await
 `server.termination()` to join resource shutdown. Handlers must cooperate with
@@ -75,10 +79,22 @@ one active handler per connection and responses in request order.
 Every error response, whether produced by the listener or the application, is an
 `application/problem+json` body holding only status, code and request ID; see
 [errors](errors.md) for the full status table. CONNECT (see
-[CONNECT](routing.md#connect)), upgrades and unknown transfer codings return 501; an overlong request line 414; an oversized header
+[CONNECT](routing.md#connect)), upgrades and unsupported transfer codings return 501; an overlong request line 414; an oversized header
 section 431; an
 `Expect` other than `100-continue` 417; other HTTP versions 505; malformed requests
 400. These close the connection.
+
+`Transfer-Encoding` follows a fixed contract (details in [request bodies](bodies.md#limits)).
+Only `chunked` is supported. One field line whose last coding is `chunked` but that applies
+another coding first (`gzip, chunked`) is answered **501**: its framing is unambiguous and
+the coding is merely unsupported, which is the case RFC 9112 section 6.1 says a server
+should answer with 501. A list whose last coding is not `chunked` is **400**, as RFC 9112
+section 6.3 requires, because the body length cannot be determined. More than one
+Transfer-Encoding field line is **400** even when the combined list would be acceptable:
+the RFC allows combining the lines, but intermediaries disagree about how, which is a
+classic request-smuggling vector, so the listener refuses rather than picks a reading.
+Both answers close the connection and nothing sent after the rejected head is parsed or
+executed, whether the request arrives alone or pipelined behind others.
 
 Closing right after a response could destroy it: if the client is still sending
 (the rest of a rejected body, or further pipelined requests), unread input makes the
@@ -88,12 +104,23 @@ the listener ends a connection after a response, for any reason (a listener erro
 `Connection: close` from the client or the handler, HTTP/1.0 without keep-alive, or
 listener shutdown), it shuts down its output, so the client reads the whole response
 and end of stream, and keeps reading and discarding input without buffering it. The
-connection closes when the client closes its side, after two seconds, after 16 MiB of
-discarded input, or on inactivity, whichever comes first. The listener does not try
-to guess that a client has finished sending: a client that reads the response but
-keeps its socket open holds the connection for the full two seconds. A lingering
-connection still counts against the connection limit and can delay listener
-shutdown by up to those two seconds. Connections closed without a response (an idle
+connection closes when the client closes its side, once no input has arrived for 500
+milliseconds, after two seconds in total, after 16 MiB of discarded input, or on
+inactivity, whichever comes first. Each arriving byte restarts the 500-millisecond
+quiet period but never extends the two-second total.
+
+Lingering exists for a client that is still sending, so a client that has gone quiet
+is taken to have finished: one that reads the response and keeps its socket open is
+closed after the quiet period, and closing a connection with no unread input sends no
+reset. The quiet period is longer than a typical TCP retransmission timeout, so a
+single lost segment does not end it. The trade-off is a client that is still sending
+but pauses for longer (a very lossy link, or a client that stalls between writes): its
+next bytes arrive at a closed connection, the operating system answers with a reset,
+and response bytes the client has not read yet may be lost. Once the listener is
+closing, lingering lasts at most 500 milliseconds in total, so lingering connections
+barely delay shutdown. A lingering connection holds no request data and no longer
+counts against the connection limit (see [resource limits](#resource-limits)).
+Connections closed without a response (an idle
 connection at shutdown, a connection still receiving a request at shutdown,
 inactivity, a transport failure or a disconnect) close at once.
 
@@ -125,7 +152,8 @@ sent. If an earlier response itself closes the connection (a listener 5xx, a
 handler's `Connection: close`, or listener shutdown, which sends the running response
 with `Connection: close`), that response is the last one and the pending error is
 not sent. The 30-second inactivity timeout does not interrupt the running handler,
-but still closes the connection if a response write stalls.
+but still closes the connection if a response write stalls, and each response must
+be written within the response bound (see [resource limits](#resource-limits)).
 
 ## Resource limits
 
@@ -138,7 +166,11 @@ threads. Full execution capacity with no free queue slot, or an expired queue
 wait, produces 503 and closes that connection. So does any other failure to start
 a request, including a pipelined request reached after the application has
 closed. Connections are limited to 128; additional connections close immediately
-without consuming a slot. The listening socket requests a 1024-entry accept
+without consuming a slot. A connection that only lingers after its last response
+(see [wire behavior](#wire-behavior)) gives its slot back, because it holds no request
+data and its remaining life is bounded by the linger caps. At most 32 connections per
+listener linger this way; beyond that a lingering connection keeps its slot until it
+closes, so a listener never has more than 160 open sockets. The listening socket requests a 1024-entry accept
 backlog and sets SO_REUSEADDR so a restart can rebind while old connections
 linger in TIME_WAIT. Connections use TCP_NODELAY and a 32/128 KiB write-buffer
 water mark. A connection holds at most eight outstanding requests, including the
@@ -169,7 +201,13 @@ returning a response are outside these limits. Connections close after 30 second
 without network read/write activity, including idle keep-alive connections and a
 response write stalled by a client that stopped reading. A request waiting for
 admission or a running handler is not interrupted by inactivity; its queue wait
-and execution deadline bound it instead.
+and execution deadline bound it instead. Writing one response must also finish
+within 30 seconds of handing it to the socket: a client that keeps reading a few
+bytes at a time never looks inactive, so without this bound it could hold a
+connection indefinitely. When the bound passes, the connection closes and the
+client receives a truncated response; at the 1 MiB response limit this needs a
+client reading slower than about 35 KB/s. The bound covers final responses, not the
+interim `100 Continue`, which carries no body.
 A request head must arrive within ten seconds of its first byte; otherwise the
 listener answers 408 Request Timeout and closes (after any earlier pipelined
 responses). Trickling bytes does not extend the bound. The

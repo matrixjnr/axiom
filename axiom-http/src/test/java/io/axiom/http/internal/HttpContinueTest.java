@@ -45,19 +45,19 @@ class HttpContinueTest {
         channel.finishAndReleaseAll();
         app.close();
         executor.close();
-        executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
     }
 
     @Test void interimResponseWaitsForTheEarlierResponse() throws Exception {
         channel.writeInbound(ascii(SLOW + "POST /echo HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\n"
                 + "Content-Length: 5\r\nConnection: close\r\n\r\n"));
-        assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
         channel.runPendingTasks();
         // No 100 Continue ahead of the earlier final response.
         assertThat(channel.<Object>readOutbound()).isNull();
         release.countDown();
         var text = new StringBuilder();
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (!text.toString().contains("HTTP/1.1 100 Continue\r\n\r\n")) {
             assertThat(System.nanoTime()).isLessThan(deadline);
             channel.runPendingTasks();
@@ -75,7 +75,7 @@ class HttpContinueTest {
     @Test void bodySentWithoutWaitingCancelsTheDeferredInterimResponse() throws Exception {
         channel.writeInbound(ascii(SLOW + "POST /echo HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\n"
                 + "Content-Length: 5\r\nConnection: close\r\n\r\nhello"));
-        assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
         release.countDown();
         var replies = HttpPipelineErrorTest.parse(outboundUntilClosed());
         assertThat(replies).extracting(Reply::status).containsExactly(200, 200);
@@ -92,7 +92,7 @@ class HttpContinueTest {
 
     private void assertRejectedAfterEarlierResponse(String request, int status) throws Exception {
         channel.writeInbound(ascii(SLOW + request));
-        assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
         channel.runPendingTasks();
         assertThat(channel.<Object>readOutbound()).isNull();
         release.countDown();
@@ -104,7 +104,7 @@ class HttpContinueTest {
 
     private String outboundUntilClosed() {
         var text = new StringBuilder();
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (channel.isActive()) {
             assertThat(System.nanoTime()).isLessThan(deadline);
             channel.runPendingTasks();

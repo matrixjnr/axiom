@@ -11,8 +11,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+@Tag("integration")
 class NotesApiTest {
     private static String text(Response response) {
         return new String((byte[]) response.body(), StandardCharsets.UTF_8);

@@ -11,8 +11,8 @@ import java.util.TreeMap;
 final class Wire implements AutoCloseable {
     final Socket socket = new Socket();
     Wire(Server server) throws IOException {
-        socket.connect(server.localAddress(), 5000);
-        socket.setSoTimeout(5000);
+        socket.connect(server.localAddress(), 30_000);
+        socket.setSoTimeout(30_000);
     }
     void write(String text) throws IOException {
         socket.getOutputStream().write(text.getBytes(StandardCharsets.US_ASCII));

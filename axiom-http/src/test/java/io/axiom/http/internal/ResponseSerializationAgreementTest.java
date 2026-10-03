@@ -7,6 +7,7 @@ import io.axiom.http.Response;
 import io.axiom.server.internal.ResponseSerialization;
 import java.util.LinkedHashMap;
 import java.util.function.Supplier;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
  * for exactly the boundary responses they refuse, as the test client does, so wiring the
  * transport to anything other than those rules fails here.
  */
+@Tag("integration")
 class ResponseSerializationAgreementTest {
     private static final int MIB = 1024 * 1024;
 

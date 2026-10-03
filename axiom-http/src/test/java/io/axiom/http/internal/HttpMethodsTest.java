@@ -3,11 +3,13 @@ package io.axiom.http.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** Request methods over a real socket. */
+@Tag("integration")
 class HttpMethodsTest {
     @ParameterizedTest
     @ValueSource(strings = {"G(T", "G\"T", "G,T", "G/T", "G:T", "G@T", "G[T", "G\\T", "G{T", "G\u0001T", "G\u007fT"})

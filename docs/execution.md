@@ -59,8 +59,9 @@ ten seconds of its first byte, or the listener answers 408 and closes; trickling
 bytes does not extend that bound. Receiving the request body counts against the
 execution budget, which starts when the head is parsed: a body still incomplete at
 the deadline is answered 408 and the handler never runs (see
-[request bodies](bodies.md)). Slow response delivery has no absolute deadline; only
-the inactivity timeout applies to it. See [HTTP listeners](http.md) for the limits.
+[request bodies](bodies.md)). Response delivery has its own bound instead of this
+budget: writing one response must finish within 30 seconds, however slowly the client
+reads, or the connection closes. See [HTTP listeners](http.md#resource-limits) for the limits.
 
 ## Capacity and cancellation
 

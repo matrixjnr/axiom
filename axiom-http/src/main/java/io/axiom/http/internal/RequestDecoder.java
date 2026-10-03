@@ -18,6 +18,8 @@ import java.util.List;
 final class RequestDecoder extends HttpRequestDecoder {
     /** User event fired after the bytes of one read have been decoded. */
     static final Object DECODED = new Object();
+    /** User event fired after the bytes of one read have been discarded unread. */
+    static final Object DISCARDED = new Object();
     /** User event fired once when discarded input exceeds the limit given to {@link #discard}. */
     static final Object DISCARD_LIMIT = new Object();
     /** Bytes that may still be discarded before {@link #DISCARD_LIMIT} fires. */
@@ -55,6 +57,7 @@ final class RequestDecoder extends HttpRequestDecoder {
             int bytes = buffer.readableBytes();
             buffer.release();
             discarded(ctx, bytes);
+            if (bytes > 0) { ctx.fireUserEventTriggered(DISCARDED); }
             return;
         }
         boolean bytes = message instanceof ByteBuf buffer && buffer.isReadable();
