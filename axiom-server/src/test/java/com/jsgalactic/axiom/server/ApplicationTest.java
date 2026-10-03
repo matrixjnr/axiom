@@ -82,7 +82,7 @@ class ApplicationTest {
             assertThat(app.handle(Request.get("/unknown")).status()).isEqualTo(404);
             var mismatch = app.handle(new Request("DELETE", "/users"));
             assertThat(mismatch.status()).isEqualTo(405);
-            assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD, POST");
+            assertThat(mismatch.headers()).containsEntry("allow", "GET, HEAD, OPTIONS, POST");
             assertThat(app.handle(new Request("get", "/users")).status()).isEqualTo(405);
         }
     }
@@ -159,7 +159,7 @@ class ApplicationTest {
             assertThat(response.headers()).containsEntry("content-length", "8");
             var mismatch = app.handle(new Request("HEAD", "/post-only"));
             assertThat(mismatch.status()).isEqualTo(405);
-            assertThat(mismatch.headers()).containsEntry("allow", "POST");
+            assertThat(mismatch.headers()).containsEntry("allow", "OPTIONS, POST");
             assertThat(mismatch.body()).isNull();
             assertThat(app.handle(new Request("HEAD", "/missing")).body()).isNull();
         }

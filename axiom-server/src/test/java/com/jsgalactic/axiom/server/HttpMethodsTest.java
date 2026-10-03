@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.Body;
@@ -75,6 +76,33 @@ class HttpMethodsTest {
     }
 
     @Test
+    void methodNotAllowedListsOptionsAndMatchesTheOptionsAnswer() throws Exception {
+        try (var app = Axiom.create()) {
+            app.post("/submit", ctx -> "submit");
+            app.get("/items/:id", ctx -> "item");
+            app.delete("/items/*rest", ctx -> "delete");
+            app.options("/with-options", ctx -> "explicit");
+            app.get("/with-options", ctx -> "get");
+            app.start();
+            for (var path : java.util.List.of("/submit", "/items/7", "/items/7/x", "/with-options")) {
+                var mismatch = app.handle(new Request("PUT", path));
+                assertThat(mismatch.status()).as(path).isEqualTo(405);
+                assertThat(mismatch.headers().get("Allow")).as(path).contains("OPTIONS");
+                // OPTIONS itself is served, by a route or automatically, so 405 never contradicts it.
+                var options = app.handle(new Request("OPTIONS", path));
+                assertThat(options.status()).as(path).isIn(200, 204);
+            }
+            assertThat(app.handle(new Request("PUT", "/submit")).headers()).containsEntry("Allow", "OPTIONS, POST");
+            assertThat(app.handle(new Request("PUT", "/with-options")).headers())
+                    .containsEntry("Allow", "GET, HEAD, OPTIONS");
+            assertThat(app.handle(new Request("PUT", "/items/7")).headers())
+                    .containsEntry("Allow", "DELETE, GET, HEAD, OPTIONS");
+            assertThat(app.handle(new Request("OPTIONS", "/items/7")).headers())
+                    .containsEntry("Allow", app.handle(new Request("PUT", "/items/7")).headers().get("Allow"));
+        }
+    }
+
+    @Test
     void anExplicitOptionsRouteWinsAndAnUnknownPathStays404() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/users/me", ctx -> "me");
@@ -92,6 +120,90 @@ class HttpMethodsTest {
             var missing = app.handle(new Request("OPTIONS", "/missing"));
             assertThat(missing.status()).isEqualTo(404);
             assertThat(missing.headers()).doesNotContainKey("Allow");
+        }
+    }
+
+    @Test
+    void aWildcardOptionsRouteCanDeferToTheAutomaticAllowAnswer() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/users", ctx -> "list");
+            app.post("/users", ctx -> "create");
+            app.delete("/users/:id", ctx -> "delete");
+            app.options("/*any", ctx -> ctx.header("Access-Control-Request-Method").isPresent()
+                    ? ctx.status(200).text("preflight " + ctx.path("any")) : ctx.automaticOptions());
+            app.start();
+            // The wildcard's own OPTIONS is part of the list, and so are the other templates' methods.
+            var users = app.handle(new Request("OPTIONS", "/users"));
+            assertThat(users.status()).isEqualTo(204);
+            assertThat(users.body()).isNull();
+            assertThat(users.headers()).containsExactly(Map.entry("Allow", "GET, HEAD, OPTIONS, POST"));
+            assertThat(app.handle(new Request("OPTIONS", "/users/7")).headers())
+                    .containsEntry("Allow", "DELETE, OPTIONS");
+            // A path only the wildcard matches lists just OPTIONS.
+            var other = app.handle(new Request("OPTIONS", "/anything/at/all"));
+            assertThat(other.status()).isEqualTo(204);
+            assertThat(other.headers()).containsEntry("Allow", "OPTIONS");
+            // The route still serves the requests it handles itself.
+            var preflight = app.handle(new Request("OPTIONS", "/users",
+                    Map.of("Access-Control-Request-Method", "POST"), Body.empty()));
+            assertThat(preflight.status()).isEqualTo(200);
+            assertThat(preflight.body()).isEqualTo("preflight users");
+            // The 405 lists are unchanged by the wildcard.
+            assertThat(app.handle(new Request("PUT", "/users")).headers())
+                    .containsEntry("Allow", "GET, HEAD, OPTIONS, POST");
+        }
+    }
+
+    @Test
+    void optionsAsteriskIsNeverRoutedToAWildcardOptionsRoute() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/a", ctx -> "a");
+            app.options("/*any", ctx -> ctx.automaticOptions());
+            app.start();
+            assertThat(app.handle(new Request("OPTIONS", "*")).headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
+        }
+    }
+
+    @Test
+    void declaredMethodsAreRecognizedAndAnswer404InsteadOf501OnUnroutedPaths() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/dav", ctx -> "dav");
+            app.recognizeMethods("PROPFIND", "get").recognizeMethods("MKCOL", "GET");
+            app.start();
+            for (var method : java.util.List.of("PROPFIND", "get", "MKCOL", "GET")) {
+                assertThat(app.handle(new Request(method, "/missing")).status()).as(method).isEqualTo(404);
+            }
+            // Declaring changes nothing else: an undeclared method is still 501 when unrouted.
+            assertThat(app.handle(new Request("FOO", "/missing")).status()).isEqualTo(501);
+            assertThat(app.handle(new Request("Propfind", "/missing")).status()).isEqualTo(501);
+            // A routed path is 405 for any method without a matching template, declared or not,
+            // and a declared method is not advertised in Allow.
+            var mismatch = app.handle(new Request("PROPFIND", "/dav"));
+            assertThat(mismatch.status()).isEqualTo(405);
+            assertThat(mismatch.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
+            assertThat(app.handle(new Request("OPTIONS", "*")).headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
+        }
+    }
+
+    @Test
+    void declaringMethodsValidatesTokensAndEndsWithConfiguration() throws Exception {
+        try (var app = Axiom.create()) {
+            assertThatIllegalArgumentException().isThrownBy(() -> app.recognizeMethods("G T"))
+                    .withMessageStartingWith("Invalid HTTP method");
+            assertThatIllegalArgumentException().isThrownBy(() -> app.recognizeMethods(""));
+            assertThatIllegalArgumentException().isThrownBy(() -> app.recognizeMethods("CONNECT"));
+            assertThatIllegalArgumentException().isThrownBy(() -> app.recognizeMethods("FOO", "G T"));
+            assertThatThrownBy(() -> app.recognizeMethods((String[]) null)).isInstanceOf(NullPointerException.class);
+            assertThatThrownBy(() -> app.recognizeMethods((String) null)).isInstanceOf(NullPointerException.class);
+            // A rejected call declares nothing, not even the valid methods before the bad one.
+            app.start();
+            assertThat(app.handle(new Request("FOO", "/missing")).status()).isEqualTo(501);
+            assertThatThrownBy(() -> app.recognizeMethods("FOO")).isInstanceOf(IllegalStateException.class);
+        }
+        try (var app = Axiom.create()) {
+            app.recognizeMethods();
+            app.start();
+            assertThat(app.handle(new Request("FOO", "/missing")).status()).isEqualTo(501);
         }
     }
 
@@ -158,7 +270,7 @@ class HttpMethodsTest {
                     Body.of("text/plain", "body-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
             var trace = app.handle(request);
             assertThat(trace.status()).isEqualTo(405);
-            assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD");
+            assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
             assertThat(new String((byte[]) trace.body(), java.nio.charset.StandardCharsets.UTF_8))
                     .doesNotContain("secret").doesNotContain("Cookie").doesNotContain("TRACE");
             assertThat(app.handle(new Request("TRACE", "/missing")).status()).isEqualTo(404);
@@ -197,7 +309,7 @@ class HttpMethodsTest {
             for (var method : new String[] {"FOO", "PROPPATCH", "QUERY", "get", "DELETE"}) {
                 var mismatch = app.handle(new Request(method, "/dav/7"));
                 assertThat(mismatch.status()).as(method).isEqualTo(405);
-                assertThat(mismatch.headers()).as(method).containsEntry("Allow", "GET, HEAD, PROPFIND, REPORT");
+                assertThat(mismatch.headers()).as(method).containsEntry("Allow", "GET, HEAD, OPTIONS, PROPFIND, REPORT");
             }
             // An unrouted path: 404 for standard methods and methods registered anywhere, 501 otherwise.
             for (var method : new String[] {"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE",
@@ -231,7 +343,7 @@ class HttpMethodsTest {
                     .isEqualTo("get GET");
             var mismatch = app.handle(new Request("POST", "/only-delete", Map.of(header, "DELETE"), Body.empty()));
             assertThat(mismatch.status()).isEqualTo(405);
-            assertThat(mismatch.headers()).containsEntry("Allow", "DELETE");
+            assertThat(mismatch.headers()).containsEntry("Allow", "DELETE, OPTIONS");
             // Not even for OPTIONS, TRACE or CONNECT, and not to escape 501.
             assertThat(app.handle(new Request("OPTIONS", "/x", Map.of(header, "DELETE"), Body.empty())).status())
                     .isEqualTo(204);

@@ -79,6 +79,8 @@ class RouterReferenceTest {
                 var allowed = new TreeSet<String>();
                 complete.forEach(match -> allowed.add(match.template().method()));
                 if (allowed.contains("GET")) { allowed.add("HEAD"); }
+                // Every routed path answers OPTIONS, with a route or automatically, so 405 lists it.
+                allowed.add("OPTIONS");
                 for (var method : METHODS) {
                     combinations++;
                     // No HEAD routes are registered, so HEAD selects the best GET match.
