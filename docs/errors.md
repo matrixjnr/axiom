@@ -148,6 +148,9 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
 - Exceptions without a handler behave as before: `AxiomException`s become problem
   responses, others propagate from `app.handle` and `TestClient` and become the
   generic 500 over HTTP (unless [development errors](#development-errors) are on).
+  `TestClient.start(app)` keeps the propagating behavior, which helps debugging;
+  `TestClient.startMappingFailures(app)` answers them like the listener (see
+  [testing](#testing-failures)).
 
 What an error handler returns reaches the client unchanged: never copy exception
 messages, class names or stack traces into it. Headers that middleware add after
@@ -193,6 +196,17 @@ All exceptions of a request, including those of global middleware, use the scope
 matched. A request no route serves has no group, so only the application's handlers apply to
 exceptions of the custom `notFound`, `methodNotAllowed` and `notImplemented` handlers and global
 middleware. Like group routes, a group's handlers are removed if its configuration callback throws.
+
+### Testing failures
+
+`TestClient.start(app)` lets an exception that nothing maps propagate to the test, and fails
+a call whose response the transport could not send with `IllegalStateException`. A test can
+therefore pass where a client would get a 500. `TestClient.startMappingFailures(app)` answers
+exactly as the listener does: the generic 500 problem response (status, code and request ID,
+`Connection: close`) for such an exception or response, logged at ERROR with its request ID, in
+`execute`, `submit` and `stream` (before the head). Interruption, cancellation and a stream
+aborted after its head still fail the call, because the listener sends no response for them.
+`AxiomException`s, error handlers, middleware and admission behave identically in both modes.
 
 ### Development errors
 
@@ -259,7 +273,7 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 | 415 | Missing, unsupported or non-UTF-8 Content-Type in `ctx.body` | Runtime |
 | 417 | An `Expect` value other than `100-continue` | Listener |
 | 431 | Header section larger than 8 KiB (`maxHeaderBytes`) | Listener |
-| 500 | Unexpected handler or middleware exception without an error handler, unencodable or oversized response | Listener (in memory: exception propagates) |
+| 500 | Unexpected handler or middleware exception without an error handler, unencodable or oversized response | Listener (in memory: the exception propagates, except from `TestClient.startMappingFailures`) |
 | 500 | Failing [error handler](#error-handlers) | Runtime |
 | 501 | CONNECT (also from `app.handle` and `TestClient`), Upgrade, or a single Transfer-Encoding line applying another coding before a final `chunked` (RFC 9112 section 6.1; see [wire behavior](http.md#wire-behavior)) | Listener |
 | 501 | No route matches the path and the method is not recognized | Runtime |

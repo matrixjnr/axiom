@@ -38,6 +38,46 @@ class TestClientErrorHandlerTest {
         }
     }
 
+    @Test
+    void mappingClientsAnswerUnmappedFailuresLikeTheListener() throws Exception {
+        var app = Axiom.create();
+        app.get("/unmapped", ctx -> { throw new UnsupportedOperationException(POISON); });
+        app.get("/checked", ctx -> { throw new java.io.IOException(POISON); });
+        app.get("/missing", ctx -> { throw new NotFoundException("item_not_found"); });
+        app.get("/unsendable", ctx -> Response.of(200, new Object()));
+        app.get("/stream", ctx -> { throw new IllegalStateException(POISON); });
+        try (var client = TestClient.startMappingFailures(app)) {
+            for (var path : new String[] {"/unmapped", "/checked", "/unsendable"}) {
+                var response = client.get(path);
+                assertThat(response.status()).as(path).isEqualTo(500);
+                assertThat(response.headers()).as(path).containsEntry("Content-Type", "application/problem+json")
+                        .containsEntry("Connection", "close");
+                assertThat(text(response)).as(path).matches(
+                        "\\{\"status\":500,\"code\":\"internal_server_error\",\"requestId\":\"[A-Za-z0-9_-]+-[0-9a-f]+\"}");
+                assertThat(text(response) + response.headers()).as(path).doesNotContain("POISON", "script", "Exception");
+            }
+            // Failures that already had a response keep it.
+            assertThat(client.get("/missing").status()).isEqualTo(404);
+            // The streaming entry point answers a failure before the head the same way.
+            try (var stream = client.stream(com.jsgalactic.axiom.http.Request.get("/stream"))) {
+                assertThat(stream.status()).isEqualTo(500);
+            }
+            // The future completes normally, not exceptionally.
+            assertThat(client.submit(com.jsgalactic.axiom.http.Request.get("/unmapped")).get().status()).isEqualTo(500);
+        }
+    }
+
+    @Test
+    void defaultClientsStillPropagateUnmappedFailuresAndUnsendableResponses() throws Exception {
+        var app = Axiom.create();
+        app.get("/unsendable", ctx -> Response.of(200, new Object()));
+        app.get("/unmapped", ctx -> { throw new UnsupportedOperationException(POISON); });
+        try (var client = TestClient.start(app)) {
+            assertThatThrownBy(() -> client.get("/unmapped")).isInstanceOf(UnsupportedOperationException.class);
+            assertThatThrownBy(() -> client.get("/unsendable")).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
     private static String text(Response response) {
         return new String((byte[]) response.body(), StandardCharsets.UTF_8);
     }

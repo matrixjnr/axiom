@@ -136,4 +136,39 @@ class ErrorHandlerListenerTest {
             app = null;
         }
     }
+
+    /** The mapping test client and the listener give the same answer for failures nothing maps. */
+    @Test
+    void theMappingTestClientAnswersLikeTheListener() throws Exception {
+        for (var path : List.of("/unmapped", "/null")) {
+            app = Axiom.create();
+            app.get("/unmapped", ctx -> { throw new ArithmeticException(POISON); });
+            app.get("/null", ctx -> { throw new IllegalStateException(POISON); });
+            app.error(IllegalStateException.class, (ctx, failure) -> null);
+            server = app.listen(0);
+            Exchange.Reply wire;
+            try (var socket = new Socket()) {
+                socket.connect(server.localAddress(), 5000);
+                socket.setSoTimeout(10_000);
+                socket.getOutputStream().write(("GET " + path + " HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                        .getBytes(StandardCharsets.ISO_8859_1));
+                wire = MiddlewareListenerTest.read(socket.getInputStream(), false);
+            }
+            var memoryApp = Axiom.create();
+            memoryApp.get("/unmapped", ctx -> { throw new ArithmeticException(POISON); });
+            memoryApp.get("/null", ctx -> { throw new IllegalStateException(POISON); });
+            memoryApp.error(IllegalStateException.class, (ctx, failure) -> null);
+            try (var client = com.jsgalactic.axiom.test.TestClient.startMappingFailures(memoryApp)) {
+                var memory = client.get(path);
+                assertThat(memory.status()).as(path).isEqualTo(wire.status());
+                assertThat(memory.headers().get("Content-Type")).as(path).isEqualTo(wire.contentType());
+                assertThat(memory.headers().get("Connection")).as(path).isEqualToIgnoringCase(wire.headers().get("Connection"));
+                var id = "\"requestId\":\"[^\"]+\"";
+                assertThat(new String((byte[]) memory.body(), StandardCharsets.UTF_8).replaceAll(id, "ID"))
+                        .as(path).isEqualTo(wire.body().replaceAll(id, "ID"));
+            }
+            close();
+            app = null;
+        }
+    }
 }
