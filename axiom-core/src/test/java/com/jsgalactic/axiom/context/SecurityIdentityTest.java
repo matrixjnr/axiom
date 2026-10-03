@@ -91,6 +91,11 @@ class SecurityIdentityTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
+    @Test
+    void contextsWithoutRouterSupportRefuseTheAutomaticOptionsAnswer() {
+        assertThatThrownBy(() -> new Double().automaticOptions()).isInstanceOf(UnsupportedOperationException.class);
+    }
+
     /** An application test double that does not override the identity methods. */
     private record Double() implements Context {
         @Override public Request request() { return Request.get("/"); }

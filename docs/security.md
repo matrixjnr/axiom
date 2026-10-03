@@ -338,7 +338,9 @@ app.use(Cors.builder()
   (at most 64). Anything else keeps the plain answer without CORS headers, so the browser
   fails the preflight. An unrouted path stays 404. `Access-Control-Allow-Methods` lists the
   configured methods the route allows; `Access-Control-Allow-Headers` echoes the requested,
-  validated headers.
+  validated headers. An application's own `OPTIONS` route (for example a wildcard route
+  returning `ctx.automaticOptions()` for what it does not handle) is decorated the same way
+  when its answer is a 2xx.
 - A request from another origin is **not rejected**: CORS is enforced by the browser and is
   not authentication. It is answered without CORS headers. Keep authenticating every request.
 - Register it with `app.use` globally: group middleware never see router answers, so a

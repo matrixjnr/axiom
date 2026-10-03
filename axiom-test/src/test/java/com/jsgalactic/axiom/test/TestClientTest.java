@@ -107,7 +107,7 @@ class TestClientTest {
             assertProblem(client.get("/missing"), 404, "not_found");
             var mismatch = client.execute(new Request("DELETE", "/decode"));
             assertProblem(mismatch, 405, "method_not_allowed");
-            assertThat(mismatch.headers()).containsEntry("Allow", "POST");
+            assertThat(mismatch.headers()).containsEntry("Allow", "OPTIONS, POST");
             assertProblem(client.get("/conflict"), 409, "conflict");
             var limited = client.get("/limited");
             assertProblem(limited, 429, "too_many_requests");

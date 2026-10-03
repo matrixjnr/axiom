@@ -20,6 +20,7 @@ final class DefaultContext implements Context {
     private final ExecutionContext execution;
     private final CompiledRouter.Match match;
     private final Response frameworkAnswer;
+    private final CompiledRouter router;
     private int status = 200;
     private boolean explicitStatus;
     private SecurityIdentity identity;
@@ -28,7 +29,8 @@ final class DefaultContext implements Context {
     private final Codecs codecs;
 
     DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution, Codecs codecs,
-                   Response frameworkAnswer) {
+                   Response frameworkAnswer, CompiledRouter router) {
+        this.router = router;
         this.request = request;
         this.codecs = codecs;
         this.execution = execution;
@@ -38,6 +40,11 @@ final class DefaultContext implements Context {
 
     /** The router's answer (404, 405, automatic OPTIONS, 501) for a request no route serves. */
     Response frameworkAnswer() { return frameworkAnswer; }
+
+    @Override
+    public Response automaticOptions() {
+        return Response.of(204, null).withHeader("Allow", router.allowFor(request));
+    }
 
     @Override
     public Route route() {

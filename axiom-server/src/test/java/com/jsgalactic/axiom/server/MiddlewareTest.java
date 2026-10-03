@@ -248,7 +248,7 @@ class MiddlewareTest {
             assertThat(missing.status()).isEqualTo(404);
             var wrongMethod = app.handle(new Request("DELETE", "/api/items/1"));
             assertThat(wrongMethod.status()).isEqualTo(405);
-            assertThat(wrongMethod.headers()).containsEntry("Allow", "GET, HEAD");
+            assertThat(wrongMethod.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
             var options = app.handle(new Request("OPTIONS", "/api/items/1"));
             assertThat(options.status()).isEqualTo(204);
             assertThat(options.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");

@@ -24,7 +24,7 @@ class TestClientMethodsTest {
             assertThat(client.execute(new Request("PROPFIND", "/x")).body()).isEqualTo("PROPFIND");
             var lower = client.execute(new Request("propfind", "/x"));
             assertThat(lower.status()).isEqualTo(405);
-            assertThat(lower.headers()).containsEntry("Allow", "GET, HEAD, PROPFIND");
+            assertThat(lower.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS, PROPFIND");
         }
     }
 
@@ -61,7 +61,7 @@ class TestClientMethodsTest {
         try (var client = TestClient.start(app)) {
             var trace = client.execute(new Request("TRACE", "/x"));
             assertThat(trace.status()).isEqualTo(405);
-            assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD");
+            assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
         }
     }
 

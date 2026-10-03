@@ -9,7 +9,7 @@ listener / TestClient: parse, admit, start deadline
   -> app.handle: body limit (413), CONNECT (501)       no middleware yet
   -> router match
        matched:   global -> group (outer..inner) -> route -> handler
-       unmatched: global -> router answer (404, 405, OPTIONS 204, 501)
+       unmatched: global -> router answer or its custom handler (404, 405, OPTIONS 204, 501)
   <- exception?  error handler (nearest class) or built-in problem mapping
   <- codec encoding and Accept check (406), HEAD body removal
   <- listener: serialization, X-Request-ID, write
@@ -137,7 +137,10 @@ added by global middleware (for example security headers) apply to them.
 Group and route middleware run only for the route that matched. In global
 middleware for such a request `ctx.matchedRoute()` is empty, `ctx.route()`
 throws `IllegalStateException` (so global middleware should use `matchedRoute()`)
-and `ctx.pathParameters()` is empty.
+and `ctx.pathParameters()` is empty. To change the answers themselves rather than
+decorate them, use `app.notFound`, `app.methodNotAllowed` and `app.notImplemented`
+([customising router answers](routing.md#customising-router-answers)); their handlers
+run inside the global middleware.
 
 Requests rejected before routing do not run middleware: a body over the limit
 (413), CONNECT (501), and every error the listener produces itself (400, 408,

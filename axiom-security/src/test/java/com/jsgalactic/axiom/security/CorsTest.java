@@ -123,6 +123,23 @@ class CorsTest {
     }
 
     @Test
+    void worksWithAWildcardOptionsRouteThatDefersToTheAutomaticAnswer() throws Exception {
+        var app = Axiom.create();
+        app.use(strict().build());
+        app.get("/notes", ctx -> "notes");
+        app.options("/*any", ctx -> ctx.automaticOptions());
+        try (var client = TestClient.start(app)) {
+            var response = client.execute(preflight("/notes", APP, "GET", null));
+            assertThat(response.status()).isEqualTo(204);
+            assertThat(response.headers()).containsEntry("Access-Control-Allow-Origin", APP)
+                    .containsEntry("Access-Control-Allow-Methods", "GET");
+            assertNoCorsHeaders(client.execute(preflight("/notes", "https://evil.test", "GET", null)));
+            // A method the path does not serve is not granted, even though the wildcard route answers.
+            assertNoCorsHeaders(client.execute(preflight("/notes", APP, "POST", null)));
+        }
+    }
+
+    @Test
     void decoratesActualRequestsFromAllowedOriginsOnly() throws Exception {
         try (var client = client(strict().build())) {
             var allowed = client.execute(request("GET", "/notes", "Origin", APP));

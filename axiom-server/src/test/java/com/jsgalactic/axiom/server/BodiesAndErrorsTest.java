@@ -155,7 +155,7 @@ class BodiesAndErrorsTest {
             assertProblem(missing, 404, "not_found");
             var mismatch = app.handle(new Request("DELETE", "/users"));
             assertProblem(mismatch, 405, "method_not_allowed");
-            assertThat(mismatch.headers()).containsEntry("Allow", "GET, HEAD, POST");
+            assertThat(mismatch.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS, POST");
             var head = app.handle(new Request("HEAD", "/missing"));
             assertThat(head.status()).isEqualTo(404);
             assertThat(head.body()).isNull();
