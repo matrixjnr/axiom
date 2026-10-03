@@ -77,10 +77,22 @@ one active handler per connection and responses in request order.
 Every error response, whether produced by the listener or the application, is an
 `application/problem+json` body holding only status, code and request ID; see
 [errors](errors.md) for the full status table. CONNECT (see
-[CONNECT](routing.md#connect)), upgrades and unknown transfer codings return 501; an overlong request line 414; an oversized header
+[CONNECT](routing.md#connect)), upgrades and unsupported transfer codings return 501; an overlong request line 414; an oversized header
 section 431; an
 `Expect` other than `100-continue` 417; other HTTP versions 505; malformed requests
 400. These close the connection.
+
+`Transfer-Encoding` follows a fixed contract (details in [request bodies](bodies.md#limits)).
+Only `chunked` is supported. One field line whose last coding is `chunked` but that applies
+another coding first (`gzip, chunked`) is answered **501**: its framing is unambiguous and
+the coding is merely unsupported, which is the case RFC 9112 section 6.1 says a server
+should answer with 501. A list whose last coding is not `chunked` is **400**, as RFC 9112
+section 6.3 requires, because the body length cannot be determined. More than one
+Transfer-Encoding field line is **400** even when the combined list would be acceptable:
+the RFC allows combining the lines, but intermediaries disagree about how, which is a
+classic request-smuggling vector, so the listener refuses rather than picks a reading.
+Both answers close the connection and nothing sent after the rejected head is parsed or
+executed, whether the request arrives alone or pipelined behind others.
 
 Closing right after a response could destroy it: if the client is still sending
 (the rest of a rejected body, or further pipelined requests), unread input makes the

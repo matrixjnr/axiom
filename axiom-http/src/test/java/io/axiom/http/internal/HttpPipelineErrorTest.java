@@ -129,6 +129,46 @@ class HttpPipelineErrorTest {
         } finally { channel.finishAndReleaseAll(); }
     }
 
+    /**
+     * One Transfer-Encoding line whose final coding is chunked but which applies another coding
+     * first: the framing is unambiguous, the coding is not supported, so RFC 9112 section 6.1 asks
+     * for 501. Nothing after it is read as a request.
+     */
+    @ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Transfer-Encoding: gzip, chunked",
+            "Transfer-Encoding: identity, chunked",
+            "Transfer-Encoding: x-custom ,chunked",
+            "Transfer-Encoding: deflate, gzip, chunked"})
+    void unsupportedCodingBeforeChunkedIsNotImplementedAndNothingAfterItRuns(String field) throws Exception {
+        var channel = wireChannel();
+        try {
+            channel.writeInbound(ascii("POST /after HTTP/1.1\r\nHost: a\r\n" + field + "\r\n\r\n"
+                    + "3\r\nabc\r\n0\r\n\r\n" + AFTER));
+            var replies = repliesUntilClosed(channel);
+            assertThat(replies).extracting(Reply::status).containsExactly(501);
+            HttpStatusMappingTest.assertProblem(replies.getFirst(), 501, "not_implemented");
+            assertThat(replies.getFirst().headers()).containsEntry("connection", "close");
+            assertThat(after).isFalse();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Transfer-Encoding: gzip, chunked",
+            "Transfer-Encoding: identity, chunked"})
+    void unsupportedCodingBehindARunningRequestIsAnsweredAfterIt(String field) throws Exception {
+        var channel = wireChannel();
+        try {
+            channel.writeInbound(ascii(SLOW + "POST /after HTTP/1.1\r\nHost: a\r\n" + field + "\r\n\r\n"
+                    + "3\r\nabc\r\n0\r\n\r\n" + AFTER));
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+            release.countDown();
+            assertThat(repliesUntilClosed(channel)).extracting(Reply::status).containsExactly(200, 501);
+            assertThat(after).isFalse();
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
     @ParameterizedTest(name = "{0}")
     @org.junit.jupiter.params.provider.ValueSource(strings = {
             "Transfer-Encoding: chunked\r\nTransfer-Encoding: gzip",

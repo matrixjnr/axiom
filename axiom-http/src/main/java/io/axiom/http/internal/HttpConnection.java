@@ -224,7 +224,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var codings = headers.getAll(HttpHeaderNames.TRANSFER_ENCODING);
             // Repeated field lines are rejected outright rather than combined, so no intermediary
             // can read the framing differently (the decoder already rejects lists that do not end in
-            // chunked or repeat it). A single list with another coding before chunked is 501.
+            // chunked or repeat it). A single list with another coding before chunked has
+            // unambiguous framing and an unsupported coding, so RFC 9112 6.1 suggests 501.
             if (codings.size() > 1) { fail(ctx, 400); return false; }
             if (chunked && !codings.getFirst().trim().equalsIgnoreCase(HttpHeaderValues.CHUNKED.toString())) {
                 fail(ctx, 501); return false;
