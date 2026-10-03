@@ -6,6 +6,7 @@ import com.jsgalactic.axiom.execution.AdmissionSnapshot;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.lifecycle.TlsConfigurationException;
+import com.jsgalactic.axiom.lifecycle.TransportKind;
 import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
@@ -15,9 +16,7 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.MultiThreadIoEventLoopGroup;
 import io.netty.channel.WriteBufferWaterMark;
 import io.netty.channel.group.DefaultChannelGroup;
-import io.netty.channel.nio.NioIoHandler;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpResponseEncoder;
 import io.netty.handler.ssl.SslHandler;
@@ -51,8 +50,7 @@ final class NettyServer implements Server {
     static final int BACKLOG = 1024;
     /** Per-connection outbound buffering at which the channel reports itself unwritable. */
     static final WriteBufferWaterMark WATER_MARK = new WriteBufferWaterMark(32 * 1024, 128 * 1024);
-    private final MultiThreadIoEventLoopGroup acceptors = new MultiThreadIoEventLoopGroup(
-            1, Thread.ofPlatform().name("axiom-http-accept-", 0).factory(), NioIoHandler.newFactory());
+    private final MultiThreadIoEventLoopGroup acceptors;
     final MultiThreadIoEventLoopGroup io;
     private final DefaultChannelGroup channels;
     private final RequestDispatcher handlers;
@@ -72,8 +70,13 @@ final class NettyServer implements Server {
     Channel listener;
     private InetSocketAddress address;
 
-    private NettyServer(AdmissionPolicy policy, Metrics metrics, TransportSettings settings, TlsMaterial tls) {
+    private final Transport transport;
+
+    private NettyServer(AdmissionPolicy policy, Metrics metrics, TransportSettings settings, TlsMaterial tls, Transport transport) {
         this.settings = settings;
+        this.transport = transport;
+        acceptors = new MultiThreadIoEventLoopGroup(
+                1, Thread.ofPlatform().name("axiom-http-accept-", 0).factory(), transport.handlers().get());
         this.tls = tls;
         this.tlsMetrics = new TlsMetrics(metrics);
         var options = settings.options();
@@ -81,7 +84,7 @@ final class NettyServer implements Server {
         decoderConfig = decoderConfig(options);
         bodyBudget = new BodyBudget(options.maxInFlightBodyBytes());
         io = new MultiThreadIoEventLoopGroup(options.ioThreads(),
-                Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());
+                Thread.ofPlatform().name("axiom-http-io-", 0).factory(), transport.handlers().get());
         channels = new DefaultChannelGroup(io.next(), true);
         handlers = new RequestDispatcher(policy, metrics);
         stopped = CompletableFuture.allOf(handlers.termination().toCompletableFuture(),
@@ -103,10 +106,12 @@ final class NettyServer implements Server {
         // Invalid key material stops startup before any thread or socket exists.
         var tlsOptions = settings.options().tls();
         var material = tlsOptions.isPresent() ? TlsMaterial.load(tlsOptions.get()) : null;
-        var server = new NettyServer(application.admissionPolicy(), application.metrics(), settings, material);
+        // An unusable explicitly requested transport also fails before any thread or socket exists.
+        var transport = Transport.resolve(settings.options().transport());
+        var server = new NettyServer(application.admissionPolicy(), application.metrics(), settings, material, transport);
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
-                    .channel(NioServerSocketChannel.class)
+                    .channel(transport.serverChannel())
                     .option(ChannelOption.SO_BACKLOG, BACKLOG)
                     .option(ChannelOption.SO_REUSEADDR, true)
                     .childOption(ChannelOption.TCP_NODELAY, true);
@@ -223,6 +228,8 @@ final class NettyServer implements Server {
     @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }
     /** The bounds this listener applies; for tests. */
     TransportSettings settings() { return settings; }
+    /** The I/O mechanism this listener runs on, never AUTO; for tests. */
+    TransportKind transport() { return transport.kind(); }
     /** Connections holding a regular slot; for tests. */
     int connections() { return slots.open(); }
     /** Request body bytes currently reserved against this listener's budget; for tests. */
