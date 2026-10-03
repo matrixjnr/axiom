@@ -102,7 +102,7 @@ for logs only. 5xx `AxiomException`s are logged at WARNING with the request ID.
 | 417 | An `Expect` value other than `100-continue` | Listener |
 | 431 | Header section larger than 8 KiB | Listener |
 | 500 | Unexpected handler exception, unencodable or oversized response | Listener (in memory: exception propagates) |
-| 501 | CONNECT, Upgrade, or a transfer coding other than `chunked` before it | Listener |
+| 501 | CONNECT (also from `app.handle` and `TestClient`), Upgrade, or a transfer coding other than `chunked` before it | Listener |
 | 503 | No execution capacity, queue wait expired, listener draining, more than eight outstanding pipelined requests or their bodies over the connection's share | Listener and `TestClient` |
 | 504 | Request deadline expired while queued or running | Listener and `TestClient` |
 | 505 | HTTP version other than 1.0 or 1.1 | Listener |

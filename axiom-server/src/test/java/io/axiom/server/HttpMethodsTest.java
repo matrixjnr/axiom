@@ -166,6 +166,22 @@ class HttpMethodsTest {
     }
 
     @Test
+    void refusesConnectRoutesAndAnswersConnectWith501() throws Exception {
+        try (var app = Axiom.create()) {
+            assertThatIllegalArgumentException().isThrownBy(() -> app.route("CONNECT", "/x", ctx -> "x"))
+                    .withMessageContaining("CONNECT");
+            app.get("/x", ctx -> "x");
+            app.start();
+            for (var path : new String[] {"/x", "/missing"}) {
+                var connect = app.handle(new Request("CONNECT", path));
+                assertThat(connect.status()).as(path).isEqualTo(501);
+                assertThat(connect.headers()).as(path).doesNotContainKey("Allow");
+            }
+            assertThat(app.resolve(new Request("CONNECT", "/x"))).isEmpty();
+        }
+    }
+
+    @Test
     void doesNotFoldTheCaseOfMethods() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/x", ctx -> "upper");

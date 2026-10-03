@@ -70,8 +70,8 @@ one active handler per connection and responses in request order.
 
 Every error response, whether produced by the listener or the application, is an
 `application/problem+json` body holding only status, code and request ID; see
-[errors](errors.md) for the full status table. CONNECT, upgrades and unknown
-transfer codings return 501; an overlong request line 414; an oversized header
+[errors](errors.md) for the full status table. CONNECT (see
+[CONNECT](routing.md#connect)), upgrades and unknown transfer codings return 501; an overlong request line 414; an oversized header
 section 431; an
 `Expect` other than `100-continue` 417; other HTTP versions 505; malformed requests
 400. These close the connection.

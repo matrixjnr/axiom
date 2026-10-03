@@ -66,6 +66,16 @@ class TestClientMethodsTest {
     }
 
     @Test
+    void refusesConnectRoutesAndAnswersConnectWith501() throws Exception {
+        var app = Axiom.create();
+        app.get("/x", ctx -> "x");
+        assertThatIllegalArgumentException().isThrownBy(() -> app.route("CONNECT", "/x", ctx -> "x"));
+        try (var client = TestClient.start(app)) {
+            assertThat(client.execute(new Request("CONNECT", "/x")).status()).isEqualTo(501);
+        }
+    }
+
+    @Test
     void admitsAutomaticOptionsUnderTheDefaultPolicy() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);

@@ -123,6 +123,19 @@ routes and 404 otherwise, each with the usual problem body that contains no requ
 data. `Allow` never lists TRACE. Methods are case-sensitive, so `trace` is an
 ordinary extension method and may be registered.
 
+### CONNECT
+
+CONNECT asks the server to open a tunnel to another host (RFC 9110 section 9.3.6),
+which Axiom does not support for any target. CONNECT routes cannot be registered
+(`IllegalArgumentException`), and every CONNECT request is answered **501 Not
+Implemented** without routing, whatever its target. 501 rather than 405 because 405
+states that the method is known but not allowed for this resource and requires an
+`Allow` list for it, while a CONNECT target is usually an authority (`host:443`), not
+a resource of the application. The listener rejects CONNECT as soon as its head
+arrives and closes the connection after the response: bytes after a CONNECT head may
+already be tunnel data, so they are discarded rather than parsed as further
+requests. `app.handle` and `TestClient` also answer 501.
+
 ## Conflicts and startup
 
 Identical method/template pairs fail at registration. So do distinct templates

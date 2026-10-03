@@ -43,6 +43,7 @@ public interface Application extends AutoCloseable {
      * @return the registered route identity
      * @throws IllegalArgumentException for a method that is not a token, for {@code TRACE} (whose
      *         echo of the request would expose credentials; TRACE requests are answered 405 or 404),
+     *         for {@code CONNECT} (tunnels are not supported; CONNECT requests are answered 501),
      *         for an invalid template, or for a duplicate or same-shape route for one method
      * @throws IllegalStateException if configuration has ended
      */
@@ -249,6 +250,7 @@ public interface Application extends AutoCloseable {
      * An OPTIONS request that no matching template registered is answered 204 without invoking
      * a handler, with that Allow list plus OPTIONS. {@code OPTIONS *} is answered 204 without route
      * lookup, with an Allow list of every registered method (HEAD if GET is registered) plus OPTIONS.
+     * CONNECT is answered 501 without routing.
      * Bodies over {@link #maxRequestBody()} receive 413. Unknown paths, method mismatches and
      * {@link io.axiom.error.AxiomException}s thrown by handlers or {@code Context.body} become
      * {@code application/problem+json} responses with only status, code, request ID and

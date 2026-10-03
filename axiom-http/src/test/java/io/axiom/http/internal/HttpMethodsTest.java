@@ -128,6 +128,25 @@ class HttpMethodsTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"CONNECT a:443", "CONNECT /x", "CONNECT /missing", "CONNECT *"})
+    void answersConnectWith501AndClosesWithoutReadingTunnelBytes(String requestLine) throws Exception {
+        var calls = new AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/x", ctx -> { calls.incrementAndGet(); return "x"; });
+            try (var wire = new Wire(fixture.listen())) {
+                // Bytes after a CONNECT head belong to a tunnel; they must not be parsed as requests.
+                wire.write(requestLine + " HTTP/1.1\r\nHost: a:443\r\n\r\n"
+                        + "GET /x HTTP/1.1\r\nHost: a\r\n\r\n\u0016\u0003\u0001");
+                var reply = wire.read(false);
+                assertThat(reply.status()).isEqualTo(501);
+                assertThat(reply.headers()).containsEntry("Connection", "close").doesNotContainKey("Allow");
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
+            }
+            assertThat(calls).hasValue(0);
+        }
+    }
+
     @Test void matchesMethodTokensCaseSensitively() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.route("M-SEARCH", "/x", ctx -> ctx.method());

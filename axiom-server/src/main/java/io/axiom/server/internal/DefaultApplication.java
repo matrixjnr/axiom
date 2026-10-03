@@ -88,6 +88,10 @@ final class DefaultApplication implements Application {
             // A TRACE response reflects the request, including credentials (cross-site tracing).
             throw new IllegalArgumentException("TRACE routes are not supported: echoing requests can expose credentials");
         }
+        if (method.equals("CONNECT")) {
+            // CONNECT turns the connection into a tunnel; no transport supports that.
+            throw new IllegalArgumentException("CONNECT routes are not supported: CONNECT is answered 501");
+        }
         if (registrations.containsKey(route)) {
             throw new IllegalArgumentException("Duplicate route: " + method + " " + path);
         }
@@ -255,6 +259,8 @@ final class DefaultApplication implements Application {
 
     private static Response dispatch(Runtime published, Request request, ExecutionContext execution) throws Exception {
         if (request.body().length() > published.maxRequestBody()) { throw new PayloadTooLargeException(); }
+        // CONNECT requests a tunnel, which is not supported for any target (RFC 9110 15.6.2).
+        if (request.method().equals("CONNECT")) { return Problems.response(501, execution.requestId()); }
         var match = published.router().match(request);
         if (match == null) { return Problems.response(404, execution.requestId()); }
         if (!match.methodAllowed()) {
