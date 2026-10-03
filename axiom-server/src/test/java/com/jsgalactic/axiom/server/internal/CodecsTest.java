@@ -105,4 +105,54 @@ class CodecsTest {
         assertThat(overlapped).hasValue(callers);
         assertThat(results).hasSize(callers).containsOnly("shared");
     }
+
+    @Test void meteredCodecsTimeAndCountPerDeclaredMediaTypeAndRethrowFailures() {
+        var metrics = new MeteringProbe();
+        var codec = new Named("csv", "text/csv", "application/csv") {
+            @Override public <T> T decode(byte[] content, Class<T> type) {
+                if (content.length == 0) { throw new IllegalArgumentException("empty"); }
+                return super.decode(content, type);
+            }
+            @Override public byte[] encode(Object value) { return new byte[] {1}; }
+        };
+        var codecs = Codecs.of(List.of(codec), metrics);
+        var csv = codecs.forMediaType("text/csv");
+        assertThat(csv.decode(new byte[] {1}, String.class)).isEqualTo("csv");
+        assertThat(csv.decode(java.nio.ByteBuffer.wrap(new byte[] {1}), String.class)).isEqualTo("csv");
+        assertThat(csv.encode("x")).containsExactly(1);
+        org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+                .isThrownBy(() -> csv.decode(new byte[0], String.class));
+        codecs.forMediaType("application/csv").encode("y");
+        assertThat(csv.mediaTypes()).containsExactlyInAnyOrder("text/csv", "application/csv");
+        assertThat(csv.supports("text/csv")).isTrue();
+
+        assertThat(metrics.observations("axiom.codec.duration", "operation", "decode", "media_type", "text/csv")).hasSize(3);
+        assertThat(metrics.observations("axiom.codec.duration", "operation", "encode", "media_type", "text/csv")).hasSize(1);
+        assertThat(metrics.observations("axiom.codec.duration", "operation", "encode", "media_type", "application/csv")).hasSize(1);
+        assertThat(metrics.count("axiom.codec.failures", "operation", "decode", "media_type", "text/csv")).isEqualTo(1);
+        assertThat(metrics.count("axiom.codec.failures", "operation", "encode", "media_type", "text/csv")).isZero();
+    }
+
+    @Test void withoutMetricsTheCodecIsNotWrappedAndAFailingMetricsImplementationIsIgnored() {
+        var plain = new Named("json", "application/json");
+        assertThat(Codecs.of(List.of(plain), com.jsgalactic.axiom.observability.Metrics.NOOP)
+                .forMediaType("application/json")).isSameAs(plain);
+        var failing = new com.jsgalactic.axiom.observability.Metrics() {
+            @Override public Counter counter(String name, String... tags) { throw new IllegalStateException(); }
+            @Override public Gauge gauge(String name, String... tags) { throw new IllegalStateException(); }
+            @Override public Timer timer(String name, String... tags) { throw new IllegalStateException(); }
+        };
+        assertThat(Codecs.of(List.of(plain), failing).forMediaType("application/json")).isSameAs(plain);
+        var late = new com.jsgalactic.axiom.observability.Metrics() {
+            @Override public Counter counter(String name, String... tags) { return new Counter() {
+                @Override public void increment() { throw new IllegalStateException(); }
+                @Override public void add(long amount) { throw new IllegalStateException(); }
+            }; }
+            @Override public Gauge gauge(String name, String... tags) { return delta -> { }; }
+            @Override public Timer timer(String name, String... tags) { return nanos -> { throw new IllegalStateException(); }; }
+        };
+        var codec = Codecs.of(List.of(plain), late).forMediaType("application/json");
+        assertThat(codec.decode(new byte[0], String.class)).isEqualTo("json");
+        assertThat(codec.encode("x")).isEmpty();
+    }
 }

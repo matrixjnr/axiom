@@ -161,6 +161,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private ChannelBodyWriter stream;
     private boolean streamKeepAlive;
     private final StreamMetrics streamMetrics;
+    private final ListenerMetrics listenerMetrics;
     private ScheduledFuture<?> headTimer;
     // Body of the request being received, copied out of each Netty buffer as it arrives. The array
     // grows by doubling as bytes arrive, capped at the declared Content-Length or, for chunked
@@ -195,14 +196,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** Production uses {@link TransportSettings#DEFAULTS}; tests may vary single bounds. */
     HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
             ConnectionSlots.Slot slot, BooleanSupplier listenerClosing, BodyBudget budget) {
-        this(application, executor, settings, slot, listenerClosing, budget, new StreamMetrics(application.metrics()));
+        this(application, executor, settings, slot, listenerClosing, budget, new StreamMetrics(application.metrics()),
+                ListenerMetrics.DISABLED);
     }
 
     /** Production: stream measurements are shared by all connections of the listener. */
     HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
             ConnectionSlots.Slot slot, BooleanSupplier listenerClosing, BodyBudget budget,
-            StreamMetrics streamMetrics) {
+            StreamMetrics streamMetrics, ListenerMetrics listenerMetrics) {
         this.budget = budget;
+        this.listenerMetrics = listenerMetrics;
         this.slot = slot;
         this.listenerClosing = listenerClosing;
         this.application = application;
@@ -798,6 +801,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Sends a listener error; for a HEAD request the problem body is omitted as for any HEAD response. */
     private void sendError(ChannelHandlerContext ctx, int status, boolean head) {
+        listenerMetrics.answered(status);
         var exchange = new Exchange(new Request(head ? "HEAD" : "GET", "/"), false, false,
                 ExecutionContext.create(application.requestTimeout()));
         send(ctx, exchange, error(status, exchange));

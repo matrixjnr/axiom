@@ -402,7 +402,7 @@ final class DefaultApplication implements Application {
             // A route of an open group could be compiled without the middleware its callback adds later.
             throw new IllegalStateException("Cannot start while a route group is being configured");
         }
-        var codecs = Codecs.discover();
+        var codecs = Codecs.discover(metrics);
         var global = List.copyOf(root.middleware);
         var chains = new LinkedHashMap<Route, Handler>();
         registrations.forEach((route, registration) -> {

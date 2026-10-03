@@ -62,6 +62,7 @@ final class NettyServer implements Server {
     private final ConnectionSlots slots;
     private final BodyBudget bodyBudget;
     private final StreamMetrics streamMetrics;
+    private final ListenerMetrics listenerMetrics;
     private final TransportSettings settings;
     private final HttpDecoderConfig decoderConfig;
     private static final System.Logger LOG = System.getLogger(NettyServer.class.getName());
@@ -79,7 +80,8 @@ final class NettyServer implements Server {
         this.tls = tls;
         this.tlsMetrics = new TlsMetrics(metrics);
         var options = settings.options();
-        slots = new ConnectionSlots(options.maxConnections(), options.maxLingeringConnections(), metrics);
+        listenerMetrics = metrics == Metrics.NOOP ? ListenerMetrics.DISABLED : new ListenerMetrics(metrics, options.name());
+        slots = new ConnectionSlots(options.maxConnections(), options.maxLingeringConnections(), metrics, options.name());
         decoderConfig = decoderConfig(options);
         bodyBudget = new BodyBudget(options.maxInFlightBodyBytes());
         io = new MultiThreadIoEventLoopGroup(options.ioThreads(),
@@ -140,12 +142,16 @@ final class NettyServer implements Server {
         channel.config().setWriteBufferWaterMark(WATER_MARK);
         channels.add(channel);
         // close() sets the flag before draining the group, so a racing accept closes itself.
-        if (closing.get()) { channel.close(); return; }
+        if (closing.get()) { listenerMetrics.refused(ListenerMetrics.Refusal.SHUTDOWN); channel.close(); return; }
         var slot = slots.acquire();
         if (slot == null) {
+            listenerMetrics.refused(ListenerMetrics.Refusal.LIMIT);
             channel.close();
             return;
         }
+        listenerMetrics.accepted();
+        // First in the pipeline, so it counts what crosses the socket, encrypted on a TLS listener.
+        if (listenerMetrics.enabled()) { channel.pipeline().addLast(new ByteCounter(listenerMetrics)); }
         // The slot is released exactly once, by this listener, whether or not setup succeeds.
         channel.closeFuture().addListener(ignored -> slot.release());
         var material = tls;
@@ -163,7 +169,8 @@ final class NettyServer implements Server {
         channel.pipeline().addLast(
                 new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS),
                 new RequestDecoder(decoderConfig), new HttpResponseEncoder(),
-                new HttpConnection(application, handlers, settings, slot, closing::get, bodyBudget, streamMetrics));
+                new HttpConnection(application, handlers, settings, slot, closing::get, bodyBudget, streamMetrics,
+                        listenerMetrics));
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */

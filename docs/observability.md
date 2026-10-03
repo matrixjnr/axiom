@@ -58,17 +58,38 @@ TLS adds two more:
 | `axiom.http.tls.handshakes` | counter | `outcome` | TLS handshakes: `completed`, `failed`, `timeout`, `plaintext` or `closed` |
 | `axiom.http.tls.reloads` | counter | `outcome` | Key material reloads: `completed` or `failed` |
 
-The listener also reports its connections, so operators can compare open sockets with the
-descriptor limit (see [HTTP listeners](http.md#resource-limits)):
+### Listeners, bytes and codecs
+
+The listener reports what happens before and outside admission. Every series carries `listener`,
+the name given with `ListenerOptions.builder().name("api")` (lowercase letters, digits and
+underscores, at most 32 characters; `default` unless set). Name each listener of an application
+that serves a different audience, such as a public and an admin port, to tell them apart; listeners
+with the same name are summed. The name is chosen by the operator, never by a client.
 
 | Name | Kind | Tags | Meaning |
 | --- | --- | --- | --- |
-| `axiom.http.connections` | gauge | `state` | Connections holding a regular slot (`open`) or the separate pool for connections that only linger after their last response (`lingering`). The sum over all listeners is the number of open client sockets, at most `maxConnections + maxLingeringConnections` per listener |
+| `axiom.http.connections` | gauge | `listener`, `state` | Connections holding a regular slot (`open`) or the separate pool for connections that only linger after their last response (`lingering`). The sum over all listeners is the number of open client sockets, at most `maxConnections + maxLingeringConnections` per listener (see [HTTP listeners](http.md#resource-limits)) |
+| `axiom.http.connections.accepted` | counter | `listener` | Connections that got a slot |
+| `axiom.http.connections.rejected` | counter | `listener`, `reason` | Connections closed at once: `limit` (all slots taken) or `shutdown` (the listener was closing) |
+| `axiom.http.listener.bytes` | counter | `listener`, `direction` | Bytes read from (`in`) and written to (`out`) client sockets, including heads, framing and, on a TLS listener, the encrypted bytes |
+| `axiom.http.listener.answers` | counter | `listener`, `status` | Responses the listener gave itself without admission, such as 400, 408, 413, 414 and 431; `status` is the code, from the fixed set the transport can produce |
+| `axiom.codec.duration` | timer | `operation`, `media_type` | Time a codec spent decoding (`decode`) or encoding (`encode`) a body |
+| `axiom.codec.failures` | counter | `operation`, `media_type` | Decodings or encodings that threw |
 
-These cover requests that pass admission: HTTP listeners and `TestClient`. (The stream series are
-recorded by both.) Direct
-`app.handle(...)` calls bypass admission and are not recorded. Timeouts count as `5xx` (504) and
-queue timeouts and capacity refusals as `5xx` (503), matching the responses clients see.
+`media_type` is the type the installed codec declared (for example `application/json`), so its values
+are bounded by the installed codecs and never come from a request's `Content-Type`. Codec series exist
+only while metrics are installed, and are recorded by listeners and `TestClient` alike, for decoding
+through `ctx.body` and for encoding of response bodies.
+
+These decisions bound the cost of measuring: bytes are counted per listener, not per route, because a
+route tag would multiply every series and stream bytes are already counted per route; a request that
+dies before it is complete (a timeout while reading, a reset) shows in the connection and answer
+series rather than as a request; and direct `app.handle(...)` calls bypass admission and are not
+recorded.
+
+The request series above cover requests that pass admission: HTTP listeners and `TestClient`. (The
+stream series are recorded by both.) Timeouts count as `5xx` (504) and queue timeouts and capacity
+refusals as `5xx` (503), matching the responses clients see.
 
 ### The registry
 
@@ -156,8 +177,7 @@ as a metric tag. The framework request ID (`ctx.execution().requestId()`, sent a
 - No OpenTelemetry integration: Axiom neither creates spans nor exports traces.
 - `tracestate` is not parsed or propagated, and incoming `traceparent` is not copied into
   responses or log records automatically.
-- The registry has no per-listener view; there is no JMX, StatsD or OTLP exporter.
-- Metrics cover admitted requests, streams and connection counts, not bytes, body decoding or codec work.
+- There is no JMX, StatsD or OTLP exporter.
 - Health checks have no result caching, and there is no startup probe.
 
 These are tracked in the limitations index, [#13](https://github.com/matrixjnr/axiom/issues/13).
