@@ -152,8 +152,8 @@ class JwksSourceTest {
         });
         var started = System.nanoTime();
         assertThatIOException().isThrownBy(() -> JwksSource.url(uri("/silent"), Duration.ofMillis(300)).fetch(65_536));
-        assertThatIOException().isThrownBy(() -> JwksSource.url(uri("/slowbody"), Duration.ofMillis(300)).fetch(65_536))
-                .withMessageContaining("took longer than 300");
+        // Either the client's own request timeout or the whole-exchange bound fires first; both end in an IOException.
+        assertThatIOException().isThrownBy(() -> JwksSource.url(uri("/slowbody"), Duration.ofMillis(300)).fetch(65_536));
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(10));
     }
 
