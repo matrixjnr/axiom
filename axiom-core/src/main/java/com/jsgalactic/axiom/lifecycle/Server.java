@@ -1,6 +1,7 @@
 package com.jsgalactic.axiom.lifecycle;
 
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.concurrent.CompletionStage;
 
@@ -29,6 +30,20 @@ public interface Server extends AutoCloseable {
      * @return completion after all listener resources and handlers have stopped
      */
     CompletionStage<Void> termination();
+
+    /**
+     * Re-reads the TLS key material and swaps it in atomically for connections accepted from now
+     * on; connections that are open keep the material they negotiated with. Call it after a
+     * certificate was renewed. If the new material is invalid, expired or does not match, the
+     * exception is thrown and the previous material stays in use.
+     *
+     * @throws TlsConfigurationException if the new material cannot be used
+     * @throws IOException if reloading failed for another reason
+     * @throws IllegalStateException if this listener does not serve TLS
+     */
+    default void reloadTls() throws IOException {
+        throw new IllegalStateException("This listener does not serve TLS");
+    }
 
     /**
      * Starts a graceful drain and returns without waiting; idempotent and nonblocking, including

@@ -38,6 +38,19 @@ class TrustedProxiesTest {
     }
 
     @Test
+    void usesTheConnectionSchemeOfATlsListenerUnlessATrustedProxySaysOtherwise() throws Exception {
+        var untrusted = from("198.51.100.20", "10.0.0.5", "http").withTls(true);
+        assertThat(PROXIES.resolve(untrusted).orElseThrow().scheme()).isEqualTo("https");
+        assertThat(PROXIES.resolve(from("198.51.100.20", null, null)).orElseThrow().scheme()).isEqualTo("http");
+        var trusted = from("10.0.0.1", "203.0.113.7", null).withTls(true);
+        assertThat(PROXIES.resolve(trusted).orElseThrow().scheme()).isEqualTo("https");
+        assertThat(PROXIES.resolve(from("10.0.0.1", "203.0.113.7", "http").withTls(true)).orElseThrow().scheme())
+                .isEqualTo("http");
+        assertThat(PROXIES.resolve(from("10.0.0.1", "203.0.113.7", "ftp").withTls(true)).orElseThrow().secure())
+                .isTrue();
+    }
+
+    @Test
     void takesTheRightmostUntrustedHopFromATrustedPeer() throws Exception {
         // The client prepended a fake address; proxies appended the real one.
         var request = from("10.0.0.1", "1.2.3.4, 203.0.113.7, 10.0.0.9", "https");

@@ -25,8 +25,8 @@ import java.util.OptionalInt;
  * <p><b>Rules.</b> Forwarding headers are client input and anyone can send them, so:
  * <ul>
  * <li>When the transport peer ({@link Request#remoteAddress()}) is not a trusted proxy, the client
- * is the peer and the scheme is {@code http} (the listener has no TLS); forwarding headers are
- * ignored entirely.</li>
+ * is the peer and the scheme is that of the connection ({@link Request#scheme()}: {@code https} on
+ * a TLS listener, otherwise {@code http}); forwarding headers are ignored entirely.</li>
  * <li>When the peer is trusted, {@code X-Forwarded-For} is read from right to left, the order in
  * which proxies appended to it. Entries that are trusted proxies are skipped; the first untrusted
  * entry is the client. If every entry is trusted, the leftmost one is the client. The walk stops at
@@ -35,7 +35,7 @@ import java.util.OptionalInt;
  * proxy. Addresses are never resolved through DNS. Entries may carry a port
  * ({@code 192.0.2.1:4711}, {@code [2001:db8::1]:4711}), which is ignored.</li>
  * <li>When the peer is trusted, {@code X-Forwarded-Proto} supplies the scheme if it is exactly one
- * value, {@code http} or {@code https} (any case); otherwise the scheme is {@code http}.</li>
+ * value, {@code http} or {@code https} (any case); otherwise the scheme is that of the connection ({@link Request#scheme()}).</li>
  * <li>{@code X-Forwarded-Host} supplies the host (and its port, if any) when it is exactly one
  * value that is a DNS name, an IPv4 literal or a bracketed IPv6 literal; {@code X-Forwarded-Port}
  * supplies the port, 1 to 65535, when the host carries none. Lists, names that are not valid host
@@ -130,7 +130,7 @@ public final class TrustedProxies {
         var peer = Objects.requireNonNull(request, "request").remoteAddress();
         if (peer == null) { return Optional.empty(); }
         var client = peer.getAddress();
-        if (!isTrusted(client)) { return Optional.of(new ClientOrigin(client, "http", false)); }
+        if (!isTrusted(client)) { return Optional.of(new ClientOrigin(client, request.scheme(), false)); }
         return Optional.of(family == ForwardedHeaders.FORWARDED ? fromForwarded(request, client)
                 : fromXForwarded(request, client));
     }
@@ -150,7 +150,7 @@ public final class TrustedProxies {
             end = comma < 0 ? 0 : comma;
         }
         var proto = request.header("X-Forwarded-Proto").orElse(null);
-        var scheme = scheme(proto);
+        var scheme = scheme(proto, request.scheme());
         forwarded |= proto != null && proto.trim().equalsIgnoreCase(scheme);
         // One value only: a list means several proxies appended and nothing says which one to believe.
         var hostHeader = request.header("X-Forwarded-Host").orElse(null);
@@ -178,10 +178,10 @@ public final class TrustedProxies {
                 if (!isTrusted(hop)) { break; }
             }
         }
-        if (vouching == null) { return new ClientOrigin(client, "http", false); }
+        if (vouching == null) { return new ClientOrigin(client, request.scheme(), false); }
         // Proto and host come from the element of the proxy that saw the client: the one vouching for it.
         var authority = Forwarded.authority(vouching.get("host"));
-        return origin(client, scheme(vouching.get("proto")), true, authority, authority == null ? 0 : authority.port());
+        return origin(client, scheme(vouching.get("proto"), request.scheme()), true, authority, authority == null ? 0 : authority.port());
     }
 
     private static ClientOrigin origin(InetAddress client, String scheme, boolean forwarded, Forwarded.Authority authority,
@@ -192,9 +192,9 @@ public final class TrustedProxies {
                 port == 0 ? OptionalInt.empty() : OptionalInt.of(port));
     }
 
-    private static String scheme(String value) {
+    private static String scheme(String value, String connection) {
         var proto = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-        return proto.equals("http") || proto.equals("https") ? proto : "http";
+        return proto.equals("http") || proto.equals("https") ? proto : connection;
     }
 
     private static boolean single(String value) {

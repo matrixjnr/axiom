@@ -49,6 +49,8 @@ most 1024 distinct endpoints and pools later ones under `other`.
 | `axiom.http.stream.bytes` | counter | none | Body bytes written by streams |
 | `axiom.http.streams.active` | gauge | none | Streams whose head was sent and whose body is still running |
 | `axiom.http.stream.backpressure` | counter | none | Stream writes that had to wait for a slow client |
+| `axiom.http.tls.handshakes` | counter | `outcome` | TLS handshakes: `completed`, `failed`, `timeout`, `plaintext` or `closed` |
+| `axiom.http.tls.reloads` | counter | `outcome` | Key material reloads: `completed` or `failed` |
 
 The listener also reports its connections, so operators can compare open sockets with the
 descriptor limit (see [HTTP listeners](http.md#resource-limits)):

@@ -276,7 +276,8 @@ The default execution deadline is ten seconds, configurable before startup throu
 `app.requestTimeout(Duration)`. Responses include a generated `X-Request-ID`.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
-TLS, HTTP/2, streaming request bodies, WebSocket and observability integrations remain future work.
+A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2, streaming request bodies,
+WebSocket and observability integrations remain future work.
 
 ## Listener options
 
@@ -305,6 +306,8 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `lingerTimeout` | 2 s | 1 ms to 1 day | Total linger after the last response |
 | `lingerQuietTimeout` | 500 ms | 1 ms to 1 day | Silence that ends lingering |
 | `shutdownLingerTimeout` | 500 ms | 1 ms to 1 day | Total linger once the listener is closing (the smaller of this and `lingerTimeout` applies) |
+| `handshakeTimeout` | 10 s | 1 ms to 1 day | Time a new connection may take to finish its TLS handshake; applies only with `tls` |
+| `tls` | none (plain HTTP) | a `TlsOptions` | Serves HTTPS with the given certificate, protocols and client-authentication settings; validated at startup, see [TLS](tls.md) |
 | `maxDiscardedInput` | 16 MiB | 0 to 1 GiB | Bytes discarded unread after an error or last response before the connection closes |
 | `maxConnections` | 128 | 1 to 1,000,000 | Open connections per listener |
 | `maxLingeringConnections` | 32 | 0 to 1,000,000 | Lingering connections that stop counting against `maxConnections`; zero keeps them on their regular slots |
@@ -342,6 +345,8 @@ Choosing values:
 - `responseTimeout` is also the stall bound of streamed responses. The byte cap of a stream is not a
   listener option: each response sets its own (`Response.DEFAULT_STREAM_LIMIT` by default); see
   [streaming](streaming.md).
+- On a TLS listener, `handshakeTimeout` bounds the handshake and a connection holds its slot while it
+  handshakes; see [handshake limits](tls.md#handshake-limits).
 - `headTimeout` and `idleTimeout` are the main defense against slow clients; raising them or the
   connection cap widens the exposure to slowloris-style clients.
 

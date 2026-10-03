@@ -29,9 +29,9 @@ import java.util.TreeMap;
  * <tr><td>{@code Cross-Origin-Resource-Policy}</td><td>{@code same-origin}</td><td>other origins cannot embed responses</td></tr>
  * </tbody>
  * </table>
- * {@code Strict-Transport-Security} is not a default: the listener has no TLS, and HSTS is only
- * meaningful, and safe to enable, where the deployment serves HTTPS for the whole host. Add it with
- * {@link #with(String, String)} behind a TLS-terminating proxy.
+ * {@code Strict-Transport-Security} is not a default: HSTS is only meaningful, and safe to enable,
+ * where the deployment serves HTTPS for the whole host and keeps doing so. Add it with
+ * {@link #with(String, String)} on a TLS listener or behind a TLS-terminating proxy.
  *
  * <p>A header the response already carries is left unchanged, so a handler can deliberately loosen
  * one (for example a CSP for an HTML page). Registered globally, the middleware also decorates the
