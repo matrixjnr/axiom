@@ -63,7 +63,9 @@ echoed: it is answered 405 or 404 (see [TRACE](routing.md#trace)). A successful
 HEAD response (2xx other than 204 and 205) carries the Content-Length the GET
 representation would have, its encoded body length, replacing any value the
 application set; a representation the transport could not send is a 500 for HEAD as
-for GET. Error responses to HEAD keep their own framing: no body and no Content-Length.
+for GET. Error responses to HEAD keep their own framing: no body and no Content-Length,
+including errors the listener produces before routing (400, 413, 417, 501 and the
+others below).
 Statuses 204 and 304 omit Content-Length; 205 uses zero, because RFC 9112 section 6.3 does not treat it as
 bodiless and the client needs explicit framing to read the next response. The
 interim `100 Continue` carries no header fields. Keep-alive and pipelining are supported, with

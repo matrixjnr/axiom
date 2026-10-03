@@ -89,6 +89,13 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * no further input is decoded or executed.
      */
     private int deferredStatus;
+    /** The deferred error answers a HEAD request, so it must be sent without a body. */
+    private boolean deferredHead;
+    /**
+     * The request whose head was accepted last and that is not yet complete is HEAD. A listener
+     * error for it is sent without body bytes, like any response to HEAD.
+     */
+    private boolean receivingHead;
     /** Output is shut down after an error response; input is discarded until the connection closes. */
     private boolean lingering;
     private ScheduledFuture<?> lingerTimer;
@@ -185,6 +192,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Validates a request head and starts receiving it; false when a response or close has been issued. */
     private boolean accept(ChannelHandlerContext ctx, HttpRequest request) {
+        receivingHead = request.method().name().equals("HEAD");
         // The request beyond the bound is refused before its body is read; earlier ones still complete.
         if (pending.size() + (busy ? 1 : 0) >= MAX_PIPELINED) { fail(ctx, 503); return false; }
         boolean http10 = request.protocolVersion().equals(HttpVersion.HTTP_1_0);
@@ -289,6 +297,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         releaseBody();
         pending.addLast(exchange);
         receiving = null;
+        receivingHead = false;
         dispatch(ctx);
     }
 
@@ -321,7 +330,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (busy || closing) { return; }
         if (pending.isEmpty()) {
             // Every earlier response has been written; a deferred error is the last response.
-            if (deferredStatus != 0) { sendError(ctx, deferredStatus); }
+            if (deferredStatus != 0) { sendError(ctx, deferredStatus, deferredHead); }
             return;
         }
         // Reads stay enabled so a client disconnect cancels the running handler; the
@@ -479,13 +488,15 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     private void fail(ChannelHandlerContext ctx, int status) {
         if (closing || deferredStatus != 0) { return; }
+        boolean head = receivingHead;
+        receivingHead = false;
         headComplete();
         releaseBody();
         receiving = null;
         var decoder = ctx.pipeline().get(RequestDecoder.class);
         if (decoder != null) { decoder.discard(MAX_DISCARDED_INPUT); }
-        if (busy || !pending.isEmpty()) { deferredStatus = status; return; }
-        sendError(ctx, status);
+        if (busy || !pending.isEmpty()) { deferredStatus = status; deferredHead = head; return; }
+        sendError(ctx, status, head);
     }
 
     /**
@@ -508,8 +519,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
     }
 
-    private void sendError(ChannelHandlerContext ctx, int status) {
-        var exchange = new Exchange(Request.get("/"), false, false, ExecutionContext.create(application.requestTimeout()));
+    /** Sends a listener error; for a HEAD request the problem body is omitted as for any HEAD response. */
+    private void sendError(ChannelHandlerContext ctx, int status, boolean head) {
+        var exchange = new Exchange(new Request(head ? "HEAD" : "GET", "/"), false, false,
+                ExecutionContext.create(application.requestTimeout()));
         send(ctx, exchange, error(status, exchange));
     }
 
