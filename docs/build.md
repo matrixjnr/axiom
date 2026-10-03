@@ -14,9 +14,9 @@ type appears in an Axiom API, and applications add `axiom-json` with `runtimeOnl
 The 2.x line was chosen because its package names and exceptions are stable across
 the ecosystem; moving to Jackson 3 would only change `axiom-json` internals.
 Telemetry dependencies will be selected when their implementations land.
-JPMS and stress suites are later work. The BOM constrains all ten published libraries
-(core, server, http, json, test, the starter, validation, validation-jakarta, security and
-security-jwt).
+JPMS and stress suites are later work. The BOM constrains all eleven published libraries
+(core, server, http, json, test, the starter, validation, validation-jakarta, security,
+security-jwt and metrics).
 
 Validation uses Hibernate Validator 9.1 (the Jakarta Validation 3.1 reference
 implementation, actively maintained, Java 17+, with container-element constraints and
@@ -47,6 +47,9 @@ only, for end-to-end tests; a signature test keeps provider types out of their p
 may declare an external production dependency, so JWT parsing and signature verification
 use the JDK. Both may use `axiom-test` in test configurations only. They are published and
 constrained by the BOM but not part of the starter.
+`axiom-metrics` depends on core only, declares no external dependency (the registry and the
+Prometheus text renderer use the JDK) and may use `axiom-test` in test configurations only.
+The Metrics SPI itself lives in core.
 
 Core discovers the default runtime through a JDK service provider. HTTP and test
 client consumers receive core through `api`. HTTP uses server through

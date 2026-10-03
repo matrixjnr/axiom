@@ -5,6 +5,7 @@ import com.jsgalactic.axiom.error.ValidationException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.internal.PercentDecoding;
 import java.util.List;
@@ -61,6 +62,19 @@ public interface Context {
     default Context identity(SecurityIdentity identity) {
         Objects.requireNonNull(identity, "identity");
         throw new UnsupportedOperationException("This context cannot hold a security identity");
+    }
+
+    /**
+     * Returns the W3C trace context the caller sent in a {@code traceparent} header, if it is
+     * valid. Parsing is strict (see {@link TraceContext}); an absent, malformed or unsupported
+     * header yields empty and never fails the request. The value is caller-chosen: use it to
+     * correlate logs and downstream calls, never for authorization, and do not use it as a
+     * metric tag. {@code ctx.execution().requestId()} remains the framework's own identity.
+     *
+     * @return the caller's trace context, if any
+     */
+    default Optional<TraceContext> traceContext() {
+        return TraceContext.parse(request().header(TraceContext.HEADER).orElse(null));
     }
 
     /**

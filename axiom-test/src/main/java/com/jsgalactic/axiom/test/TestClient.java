@@ -43,7 +43,7 @@ public final class TestClient implements AutoCloseable {
 
     private TestClient(Application application) {
         this.application = Objects.requireNonNull(application, "application").start();
-        this.dispatcher = new RequestDispatcher(application.admissionPolicy());
+        this.dispatcher = new RequestDispatcher(application.admissionPolicy(), application.metrics());
     }
 
     /**
@@ -189,7 +189,7 @@ public final class TestClient implements AutoCloseable {
                 var response = application.handle(request, context);
                 checkSerializable(response);
                 return response;
-            });
+            }, Response::status);
         } catch (RejectedExecutionException overloaded) {
             return CompletableFuture.completedFuture(Problems.response(503, context.requestId()));
         }

@@ -15,5 +15,6 @@ dependencies {
         api(project(":axiom-validation-jakarta"))
         api(project(":axiom-security"))
         api(project(":axiom-security-jwt"))
+        api(project(":axiom-metrics"))
     }
 }

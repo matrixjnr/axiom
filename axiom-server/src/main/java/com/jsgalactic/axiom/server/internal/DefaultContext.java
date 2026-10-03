@@ -7,6 +7,7 @@ import com.jsgalactic.axiom.error.UnsupportedMediaTypeException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.routing.Route;
 import java.util.Map;
 
@@ -22,6 +23,7 @@ final class DefaultContext implements Context {
     private int status = 200;
     private boolean explicitStatus;
     private SecurityIdentity identity;
+    private java.util.Optional<TraceContext> traceContext;
 
     private final Codecs codecs;
 
@@ -66,6 +68,13 @@ final class DefaultContext implements Context {
     public Request request() { return request; }
 
     @Override public ExecutionContext execution() { return execution; }
+
+    /** Parsed on first use; the context is thread-confined, so no synchronization is needed. */
+    @Override
+    public java.util.Optional<TraceContext> traceContext() {
+        if (traceContext == null) { traceContext = Context.super.traceContext(); }
+        return traceContext;
+    }
 
     @Override
     public java.util.Optional<SecurityIdentity> identity() { return java.util.Optional.ofNullable(identity); }

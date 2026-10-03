@@ -14,6 +14,7 @@ val descriptions = mapOf(
     "axiom-validation-jakarta" to "Axiom adapter running Jakarta Validation constraints through Hibernate Validator.",
     "axiom-security" to "Axiom authentication middleware, role and permission policies, trusted proxies, header redaction and security headers.",
     "axiom-security-jwt" to "Axiom strict JWT bearer-token authenticator using only the JDK (HMAC, RSA and ECDSA).",
+    "axiom-metrics" to "Axiom in-memory metrics registry and Prometheus text exposition, using only the JDK.",
     "axiom-bom" to "Axiom bill of materials aligning the versions of all Axiom modules."
 )
 val repositoryUrl = "https://github.com/matrixjnr/axiom"
