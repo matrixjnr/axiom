@@ -115,8 +115,8 @@ ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 te
 | axiom-security-jwt | 2 / 27 | - |
 | axiom-metrics | 2 / 11 | - |
 | integration-tests | disabled | 5 / 66 |
-| examples/rest-api | 0 / 0 | 1 / 4 |
-| total | 75 / 831 | 18 / 214 |
+| examples/rest-api | 1 / 3 | 1 / 1 |
+| total | 76 / 834 | 18 / 211 |
 
 `build-logic` has its own `test` task (2 / 20) that the root `check` runs through the included build.
 
@@ -146,6 +146,11 @@ the agent even when the same tests passed without it.
   the root merges the `test` and `integrationTest` aggregates (also available on their own
   as `testCodeCoverageReport` and `integrationTestCodeCoverageReport`). The BOM has no code;
   examples and benchmarks are not library code and are not aggregated.
+
+Examples are deliberately not in the coverage report: they are usage samples, not shipped
+code, and including them would dilute the numbers of the libraries without testing more of
+them. Their own tests (`TestClient` cases in `test`, live-listener cases in `integrationTest`)
+still run in `check`.
 
 No class is excluded from coverage. Coverage is reported, not enforced: there is no
 minimum yet. Per-module floors will be introduced later, starting from the baseline below,
