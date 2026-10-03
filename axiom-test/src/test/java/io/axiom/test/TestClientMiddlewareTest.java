@@ -67,6 +67,32 @@ class TestClientMiddlewareTest {
     }
 
     @Test
+    void concurrentRequestsShareOneChainWithoutSharingContinuations() throws Exception {
+        int requests = 8;
+        var entered = new CountDownLatch(requests);
+        var release = new CountDownLatch(1);
+        var app = Axiom.create();
+        app.use((ctx, next) -> {
+            entered.countDown();
+            release.await();
+            return next.run().withHeader("X-Item", ctx.path("id"));
+        });
+        app.get("/items/:id", ctx -> "item " + ctx.path("id"));
+        try (var client = TestClient.start(app)) {
+            var responses = new java.util.ArrayList<java.util.concurrent.CompletableFuture<io.axiom.http.Response>>();
+            for (int i = 0; i < requests; i++) { responses.add(client.submit(Request.get("/items/" + i))); }
+            // Every request is inside the same middleware instance before any continues.
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+            release.countDown();
+            for (int i = 0; i < requests; i++) {
+                var response = responses.get(i).get(10, TimeUnit.SECONDS);
+                assertThat(response.body()).isEqualTo("item " + i);
+                assertThat(response.headers()).containsEntry("X-Item", Integer.toString(i));
+            }
+        }
+    }
+
+    @Test
     void globalMiddlewareDecoratesRouterAnswersThroughTheDispatcher() throws Exception {
         var app = Axiom.create();
         app.use((ctx, next) -> next.run().withHeader("X-Content-Type-Options", "nosniff"));
