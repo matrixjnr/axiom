@@ -72,6 +72,18 @@ class ValidatedBodyTest {
     }
 
     @Test
+    void leavesTheFieldOutForViolationsOfTheWholeValue() throws Exception {
+        BodyValidator<Item> whole = item -> java.util.List.of(new Violation("", "out_of_stock"),
+                new Violation("quantity", "min"));
+        try (var app = app(whole)) {
+            var response = app.handle(post("application/json", "name=pen;quantity=0"));
+            assertThat(response.status()).isEqualTo(422);
+            assertThat(text(response)).matches("\\{\"status\":422,\"code\":\"validation_failed\",\"requestId\":\"[^\"]+\","
+                    + "\"violations\":\\[\\{\"code\":\"out_of_stock\"},\\{\"field\":\"quantity\",\"code\":\"min\"}]}");
+        }
+    }
+
+    @Test
     void decodingFailuresComeFirstAndSkipTheValidator() throws Exception {
         try (var app = app(rules)) {
             assertThat(app.handle(post("text/plain", "name=pen;quantity=2")).status()).isEqualTo(415);

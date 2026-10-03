@@ -17,10 +17,11 @@ class FieldPathTest {
     }
 
     @Test
-    void namesTheRootSoObjectLevelViolationsStayValid() {
+    void reportsTheRootAsAnEmptyFieldSoObjectLevelViolationsStayValid() {
         assertThat(FieldPath.root().isRoot()).isTrue();
-        assertThat(FieldPath.root().toField()).isEqualTo(FieldPath.ROOT).isEqualTo("_root");
-        assertThat(FieldPath.root().index(3).toField()).isEqualTo("_root");
+        assertThat(FieldPath.root().toField()).isEqualTo(FieldPath.ROOT).isEmpty();
+        assertThat(new Violation(FieldPath.root().toField(), "ordered_range").field()).isEmpty();
+        assertThat(FieldPath.root().index(3).toField()).isEmpty();
         assertThat(FieldPath.root().index(3).isTruncated()).isTrue();
     }
 

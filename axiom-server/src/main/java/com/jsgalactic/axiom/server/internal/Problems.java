@@ -9,7 +9,8 @@ import java.util.List;
 
 /**
  * Builds RFC 9457 style {@code application/problem+json} error responses. The body contains
- * only {@code status}, {@code code}, {@code requestId} and, when present, {@code violations};
+ * only {@code status}, {@code code}, {@code requestId} and, when present, {@code violations} (each with a {@code code} and, unless it concerns the whole
+ * value, a {@code field});
  * every value is a validated code, field path or framework identity, so no client input,
  * exception message or class name can reach it. Shared by the in-memory runtime, the HTTP
  * transport and the test client so all three answer identically. Not application API.
@@ -68,9 +69,10 @@ public final class Problems {
             json.append(",\"violations\":[");
             for (int i = 0; i < violations.size(); i++) {
                 if (i > 0) { json.append(','); }
-                json.append("{\"field\":");
-                string(json, violations.get(i).field()).append(",\"code\":");
-                string(json, violations.get(i).code()).append('}');
+                var violation = violations.get(i);
+                json.append('{');
+                if (!violation.field().isEmpty()) { string(json.append("\"field\":"), violation.field()).append(','); }
+                string(json.append("\"code\":"), violation.code()).append('}');
             }
             json.append(']');
         }

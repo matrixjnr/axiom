@@ -95,8 +95,8 @@ class RulesTest {
     @Test
     void reportsObjectLevelChecksAndNullValuesOnTheRoot() {
         var blocked = new Order("blocked", "ada@example.org", 1, valid().address(), valid().items(), List.of(), 0, 0);
-        assertThat(ORDER.validate(blocked)).containsExactly(new Violation("_root", "customer_blocked"));
-        assertThat(ORDER.validate(null)).containsExactly(new Violation("_root", "not_null"));
+        assertThat(ORDER.validate(blocked)).containsExactly(new Violation("", "customer_blocked"));
+        assertThat(ORDER.validate(null)).containsExactly(new Violation("", "not_null"));
     }
 
     @Test

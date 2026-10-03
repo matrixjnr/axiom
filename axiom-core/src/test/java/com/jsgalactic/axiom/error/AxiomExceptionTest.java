@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.error;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -26,10 +27,14 @@ class AxiomExceptionTest {
         for (var code : new String[] {"", "Upper", "has space", "<script>", "x".repeat(65), "1digit", "a\nb"}) {
             assertThatIllegalArgumentException().as(code).isThrownBy(() -> new DecodeException(code));
         }
-        for (var field : new String[] {"", "a b", "a..b", "a[x]", "\"quoted\"", "x".repeat(257), "a/b"}) {
+        for (var field : new String[] {"a b", "a..b", "a[x]", "\"quoted\"", "x".repeat(257), "a/b", "_root "}) {
             assertThatIllegalArgumentException().as(field).isThrownBy(() -> new Violation(field, "invalid"));
             assertThatIllegalArgumentException().as(field).isThrownBy(() -> new DecodeException("invalid", field));
         }
+        // An empty field is a violation of the whole value; a decode failure either has a property or none.
+        assertThat(new Violation("", "invalid").field()).isEmpty();
+        assertThatIllegalArgumentException().isThrownBy(() -> new DecodeException("invalid", ""));
+        assertThatNullPointerException().isThrownBy(() -> new Violation(null, "invalid"));
         assertThatIllegalArgumentException().isThrownBy(() -> new ValidationException(
                 java.util.Collections.nCopies(101, new Violation("a", "b"))));
     }
