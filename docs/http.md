@@ -74,8 +74,10 @@ multiple transport providers fail before startup. Closed applications cannot bin
 The listener accepts HTTP/1.1 origin-form requests with exactly one valid Host,
 and HTTP/1.0 requests, whose Host is optional but validated when present. The
 asterisk-form target is accepted only as `OPTIONS *` (see
-[OPTIONS *](routing.md#options-)); `*` with any other method and absolute-form
-targets such as `http://host/path` receive 400.
+[OPTIONS *](routing.md#options-)); `*` with any other method receives 400. An
+absolute-form target such as `http://host/path` is accepted when its scheme is `http` or
+`https` and its authority equals the `Host` header; see
+[absolute-form targets](routing.md#absolute-form-targets).
 Responses always use HTTP/1.1. An HTTP/1.0 connection closes after each response
 unless the request sends `Connection: keep-alive`, which the response echoes.
 A method that is not an RFC 9110 token receives 400; methods are case-sensitive, and

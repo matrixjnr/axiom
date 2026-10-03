@@ -38,7 +38,6 @@ import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCounted;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -328,7 +327,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             // The peer is resolved by the socket; embedded test channels have no IP peer.
             var peer = ctx.channel().remoteAddress() instanceof InetSocketAddress address && !address.isUnresolved()
                     ? address : null;
-            receiving = new Exchange(Request.fromTarget(request.method().name(), request.uri()).withHeaders(fields)
+            // An absolute-form target is reduced to its path and query first; Host must agree with it.
+            var target = RequestTargets.originForm(request.uri(), headers.get(HttpHeaderNames.HOST));
+            receiving = new Exchange(Request.fromTarget(request.method().name(), target).withHeaders(fields)
                     .withRemoteAddress(peer).withTls(ctx.pipeline().get(SslHandler.class) != null),
                     HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
         } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
@@ -438,13 +439,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         var hosts = request.headers().getAll(HttpHeaderNames.HOST);
         if (http10 && hosts.isEmpty()) { return true; }
         if (hosts.size() != 1 || hosts.getFirst().isEmpty()) { return false; }
-        try {
-            var host = URI.create("http://" + hosts.getFirst());
-            return host.getHost() != null && host.getRawUserInfo() == null
-                    && host.getRawPath().isEmpty() && host.getRawQuery() == null
-                    && host.getRawFragment() == null && host.getPort() <= 65535
-                    && !hosts.getFirst().endsWith(":");
-        } catch (IllegalArgumentException invalid) { return false; }
+        return RequestTargets.validAuthority(hosts.getFirst());
     }
 
     private void dispatch(ChannelHandlerContext ctx) {

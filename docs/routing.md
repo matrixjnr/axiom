@@ -157,11 +157,28 @@ for automatic OPTIONS. `*` is not a path and cannot be a route template.
 is then `"*"`. Any other method with `*`, `*?query`, `**` or `*/a` throws
 `InvalidRequestPathException`, which a listener answers with 400.
 
-Absolute-form targets (`GET http://host/path`) are rejected with 400 for every
-method, `OPTIONS` included. They are meant for proxies; an origin server must accept
-them (RFC 9112 section 3.2.2), but normalizing one would mean choosing between the
-target's authority and `Host`, so Axiom does not and treats them as an unsupported
-target.
+### Absolute-form targets
+
+The listener accepts absolute-form targets (`GET http://host/path?q=1`), as an origin
+server must (RFC 9112 section 3.2.2), for every method. The scheme and authority are
+checked and dropped; routing, `ctx.path()` and `ctx.query` see only the path and query,
+which pass the same [path rules](#raw-paths-and-ownership) as an origin-form target. The
+checks are strict, so a request cannot be routed on one host and described by another:
+
+- the scheme is `http` or `https`, in any case, and is otherwise ignored (it does not
+  have to match the listener's TLS setting);
+- the authority is a valid host with an optional port up to 65535 and no user information
+  (`http://user@host/` is 400);
+- the `Host` header, which HTTP/1.1 requires exactly once, must equal the authority,
+  ignoring case and without normalizing default ports (`http://a:80/` with `Host: a` is
+  400); an HTTP/1.0 request without `Host` is accepted on the authority alone;
+- an empty path becomes `/`, so `OPTIONS http://host` asks about the root and is not
+  the asterisk form;
+- a fragment, another scheme, or an unsafe path (dot segments, `//`, encoded separators)
+  is 400, and the connection closes as for any rejected target.
+
+`Request.fromTarget` still rejects absolute-form targets; the listener reduces them
+before calling it, and the test client takes paths, not targets.
 
 ### TRACE
 
