@@ -327,6 +327,7 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `maxRequestLine` | 4096 | 256 to 65,536 | Longest request line in bytes (414 beyond) |
 | `maxHeaderBytes` | 8192 | 256 to 1 MiB | Largest header section in bytes (431 beyond) |
 | `ioThreads` | processors, at least 2 | 1 to 1024 | I/O threads of the listener; handlers never run on them |
+| `transport` | `AUTO` | `AUTO`, `NIO`, `EPOLL`, `KQUEUE` | I/O mechanism; `AUTO` uses epoll or kqueue when its native library is on the class path and usable, NIO otherwise; see [native transports](#native-transports) |
 | `rejectionObserver` | none | a `RejectionObserver` | Called with status, problem code and request ID for each error response the listener generates itself; see [observing rejections](errors.md#observing-listener-rejections) |
 | `name` | `default` | lowercase letters, digits, `_`; at most 32 | The `listener` tag of the listener's [metrics](observability.md#listeners-bytes-and-codecs) |
 
@@ -363,3 +364,84 @@ Choosing values:
 - `headTimeout` and `idleTimeout` are the main defense against slow clients; raising them or the
   connection cap widens the exposure to slowloris-style clients.
 
+## Native transports
+
+A listener runs on the JDK's NIO selector by default. Linux (epoll) and macOS or BSD (kqueue)
+have native Netty transports that `axiom-http` can use instead. They change how the event
+loops wait for sockets and nothing else: request handling, limits, timeouts, lingering,
+draining on `close()` and write backpressure are the same code on every transport, and the
+HTTP and TLS tests run on both (see below).
+
+```java
+var options = ListenerOptions.builder().transport(TransportKind.AUTO).build();   // the default
+```
+
+| `TransportKind` | Meaning |
+| --- | --- |
+| `AUTO` (default) | epoll if usable, else kqueue if usable, else NIO. Never fails for lack of a native library |
+| `NIO` | The JDK selector. Always available; never replaced by a native transport |
+| `EPOLL` | Linux epoll. Startup fails with `IllegalStateException` if the library is missing or does not load |
+| `KQUEUE` | kqueue. Same rule |
+
+An explicit native kind fails before any socket or thread exists, naming the artifact to add and
+carrying Netty's reason (for example a platform without epoll) as the cause. `AUTO` falls back
+silently, so the same build runs on a developer's laptop and in a container.
+
+### Adding a native transport
+
+The native libraries are optional runtime dependencies. `axiom-http` compiles against Netty's
+epoll and kqueue classes but does not depend on them, they are not in its POM, and an application
+that adds nothing runs on NIO exactly as before. To opt in, add the artifact with the
+classifier of the platform the application runs on, at the same Netty version as `axiom-http`
+(the Netty BOM `io.netty:netty-bom` keeps them aligned):
+
+```kotlin
+dependencies {
+    runtimeOnly("io.netty:netty-transport-native-epoll::linux-x86_64")      // or linux-aarch_64
+    // runtimeOnly("io.netty:netty-transport-native-kqueue::osx-aarch_64")  // or osx-x86_64
+}
+```
+
+```xml
+<dependency>
+  <groupId>io.netty</groupId>
+  <artifactId>netty-transport-native-epoll</artifactId>
+  <classifier>linux-x86_64</classifier>
+  <scope>runtime</scope>
+</dependency>
+```
+
+Add the classifier that matches the production host, not the build host, or use several
+(the extra jars are inert where they do not load). Netty loads the library from the jar at
+startup, which needs a writable temporary directory that is not mounted `noexec`. Applications that
+check dependency checksums need the new artifacts and POMs in their verification metadata; this
+repository's own `gradle/verification-metadata.xml` carries them for linux-x86_64, linux-aarch_64,
+osx-x86_64 and osx-aarch_64.
+
+### How it is tested
+
+`./gradlew check` runs the integration tests of `axiom-http` twice. `integrationTest` has no
+native library on its class path, so `AUTO` is NIO. `integrationTestNative` adds the native library
+of the build platform (epoll on Linux x86_64 and aarch64, kqueue on macOS), so `AUTO` must select
+it, and every real-socket test (plain HTTP, TLS, lingering, shutdown and connection draining,
+write backpressure, body budgets) runs on it unchanged. `TransportSelectionTest` additionally
+names each transport explicitly and checks selection, HTTP, HTTPS and shutdown on it. On a platform
+without a Netty native library, or where the library cannot load, the native cases skip cleanly.
+`-Daxiom.requireNativeTransport=true` turns that skip into a failure for the native task, for CI
+jobs that must prove the native transport ran.
+
+### Decision: default and io_uring
+
+The default is `AUTO` because applications choose the native transport by adding its artifact: with
+the artifact present they get it, without it nothing changes. No measurement is published and none
+is claimed; the choice rests on epoll and kqueue being Netty's mature, widely deployed transports
+with the same semantics as NIO for the features Axiom uses, and on the whole HTTP suite passing on
+both. Anyone who wants numbers can compare the transports with the
+[benchmarks](benchmarks.md) on their own hardware.
+
+Netty's io_uring transport (`netty-transport-native-io_uring`) is not supported and has no
+`TransportKind`. It is Linux-only, depends on a recent kernel and on io_uring being permitted
+(container runtimes and seccomp profiles commonly block it), is the least mature of Netty's
+transports (this project treats it as incubating), and would add a third native artifact family to
+keep verified for no behavior epoll does not already provide. The transport boundary is
+`ListenerOptions.transport`, so a kind can be added later without changing how listeners are used.

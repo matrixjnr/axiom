@@ -24,6 +24,16 @@ controlled conditions.
 | `NegotiationBenchmark` | no Accept header, exact match, a browser-style header, a ranked header with parameters, an unacceptable header (406) | `Application.handle` of a route returning `ctx.json(...)`, including encoding |
 | `AdmissionBenchmark` | uncontended submission waiting for the result; submission rejected because the active and queue slots are held | the shared `RequestDispatcher` used by listeners and `TestClient` |
 | `ProblemBenchmark` | status-only problem; problem with a field violation | `Problems.response`, used for every error response |
+| `RequestPathBenchmark` | `handle` (creates the execution context) and `handleSharedExecution` (reuses one), driven by one JMH thread per available processor | `Application.handle` of a running application: the lock-free read of the immutable runtime snapshot, routing, context, handler, response |
+| `RequestIdBenchmark` | creating an execution context, reading its request ID, and `UUID.randomUUID()` as a reference; one JMH thread per available processor | the process-wide counter behind request IDs |
+| `MiddlewareChainBenchmark` | 0, 1, 5 or 20 pass-through middleware, registered globally or on the route; one thread | `Application.handle` of a trivial handler behind a chain composed once at startup |
+
+The multi-thread benchmarks default to `@Threads(Threads.MAX)`; pass `-t 1`, `-t 4` and so on
+to compare thread counts on the same machine. For `MiddlewareChainBenchmark` the
+`depth=0` case is the baseline: the cost of a chain is the difference to it, and
+`-prof gc` reports `gc.alloc.rate.norm`, the bytes allocated per request, for each
+depth and scope. `uuid` in `RequestIdBenchmark` is only a reference point for the
+call the counter replaced; it is not part of the request path.
 
 Negotiation is not isolated from routing and encoding: compare the `none` case with
 the others to see what the Accept header adds. The admission and problem
@@ -47,6 +57,14 @@ only proves the harness executes:
 ./gradlew :benchmarks:http:jmh --args="-wi 0 -i 1 -r 100ms -f 1 -foe true -p routeCount=100"
 ```
 
+```sh
+./gradlew :benchmarks:http:jmh --args="RequestPathBenchmark -t 1"          # one thread
+./gradlew :benchmarks:http:jmh --args="RequestPathBenchmark -t 8"          # eight threads contending
+./gradlew :benchmarks:http:jmh --args="RequestIdBenchmark"
+./gradlew :benchmarks:http:jmh --args="MiddlewareChainBenchmark -prof gc"
+./gradlew :benchmarks:http:jmh --args="MiddlewareChainBenchmark -p depth=0,20 -p scope=global"
+```
+
 Smoke-run numbers are meaningless and must not be quoted.
 
 ## Methodology
@@ -58,4 +76,19 @@ Smoke-run numbers are meaningless and must not be quoted.
   and forks that the reported error is small relative to the difference.
 - Inputs are built once in `@Setup`; results are returned to JMH so the work is
   not eliminated. Network I/O, startup and request construction are excluded.
-- Do not commit results to the repository.
+- JVM flags: the `jmh` task forks JMH, which forks the measured JVMs with the Java 21
+  toolchain's defaults (the platform's default collector and heap sizing). Pass
+  `-jvmArgs "-Xms2g -Xmx2g -XX:+UseParallelGC"` (any flags) after the class pattern to fix
+  them, and record whatever you used. `-prof gc` adds allocation per operation
+  (`gc.alloc.rate.norm`, bytes per operation); it counts what the JVM allocated and does not
+  say where.
+- Thread counts matter for contention results: report the `-t` value, and the number of
+  hardware threads, with them. Results taken with more benchmark threads than cores
+  measure scheduling as much as the code.
+- **Numbers from shared hardware are not performance claims.** CI runners, containers and
+  virtual machines share cores, caches and memory bandwidth with other work and change speed
+  from run to run. Results from them, and from any single run, show at most that a harness
+  works. No benchmark here is a target, a guarantee or a gate, and the repository states no
+  figure.
+- Do not commit results to the repository. A pull request may quote raw output to show a
+  comparison, labeled as non-authoritative, with the machine and command beside it.

@@ -501,6 +501,9 @@ class TlsListenerTest {
                     socket.getOutputStream().flush();
                     closedByServer(socket);
                 }
+                // The client sees the close before the listener releases the only slot; the next
+                // connection would otherwise be turned away at the cap and never handshake.
+                probe.await(value -> value == 0, ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open");
             }
             probe.await(value -> value == 3, TlsMetrics.HANDSHAKES, "outcome", "failed");
             assertThat(awaitRequest(listener, client)).endsWith("https true");

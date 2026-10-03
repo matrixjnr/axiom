@@ -49,6 +49,7 @@ public final class ListenerOptions {
     private final int maxRequestLine;
     private final int maxHeaderBytes;
     private final int ioThreads;
+    private final TransportKind transport;
     private final RejectionObserver rejectionObserver;
 
     private ListenerOptions(Builder b) {
@@ -71,6 +72,7 @@ public final class ListenerOptions {
         maxRequestLine = b.maxRequestLine;
         maxHeaderBytes = b.maxHeaderBytes;
         ioThreads = b.ioThreads;
+        transport = b.transport;
     }
 
     /**
@@ -109,6 +111,7 @@ public final class ListenerOptions {
         b.maxRequestLine = maxRequestLine;
         b.maxHeaderBytes = maxHeaderBytes;
         b.ioThreads = ioThreads;
+        b.transport = transport;
         b.rejectionObserver = rejectionObserver;
         return b;
     }
@@ -147,6 +150,8 @@ public final class ListenerOptions {
     public int maxHeaderBytes() { return maxHeaderBytes; }
     /** @return number of I/O threads per listener */
     public int ioThreads() { return ioThreads; }
+    /** @return the requested I/O mechanism; {@link TransportKind#AUTO} unless set */
+    public TransportKind transport() { return transport; }
 
     /** @return the observer of the listener's own error responses, if one was set */
     public Optional<RejectionObserver> rejectionObserver() { return Optional.ofNullable(rejectionObserver); }
@@ -164,7 +169,8 @@ public final class ListenerOptions {
                 + ", maxConnections=" + maxConnections + ", maxLingeringConnections=" + maxLingeringConnections
                 + ", maxPipelinedRequests=" + maxPipelinedRequests + ", maxInFlightBodyBytes=" + maxInFlightBodyBytes
                 + ", maxRequestLine=" + maxRequestLine
-                + ", maxHeaderBytes=" + maxHeaderBytes + ", ioThreads=" + ioThreads + "]";
+                + ", maxHeaderBytes=" + maxHeaderBytes + ", ioThreads=" + ioThreads
+                + ", transport=" + transport + "]";
     }
 
     /**
@@ -191,6 +197,7 @@ public final class ListenerOptions {
         private int maxRequestLine = 4096;
         private int maxHeaderBytes = 8192;
         private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
+        private TransportKind transport = TransportKind.AUTO;
         private RejectionObserver rejectionObserver;
 
         private Builder() { }
@@ -438,6 +445,20 @@ public final class ListenerOptions {
          */
         public Builder ioThreads(int threads) {
             ioThreads = range("ioThreads", threads, 1, 1024);
+            return this;
+        }
+
+        /**
+         * Sets the I/O mechanism of the listener. Behavior, limits and timeouts do not depend on
+         * it. {@link TransportKind#AUTO} uses a native transport when its library is on the class
+         * path and usable, and the JDK's NIO otherwise; naming a native kind that is not usable
+         * makes the listener fail to start with an {@link IllegalStateException}.
+         * @param kind the requested transport; the default is {@link TransportKind#AUTO}
+         * @return this builder
+         * @throws NullPointerException if null
+         */
+        public Builder transport(TransportKind kind) {
+            transport = Objects.requireNonNull(kind, "transport");
             return this;
         }
 
