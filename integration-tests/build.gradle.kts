@@ -1,5 +1,5 @@
 plugins {
-    id("axiom.java-test")
+    id("axiom.integration-test")
     id("axiom.module-boundaries")
 }
 
@@ -11,7 +11,11 @@ dependencies {
     testRuntimeOnly(project(":axiom-json"))
 }
 
-tasks.test {
+// The module exists to run the assembled stack, so all of it is integration: `integrationTest`
+// runs every class here (TestClient and live listener alike) and `test` runs nothing.
+tasks.test { enabled = false }
+tasks.named<Test>("integrationTest") {
+    useJUnitPlatform { includeTags = mutableSetOf() }
     // Keeps the large-body cases from competing for CPU with the listener's own timing-sensitive tests.
-    mustRunAfter(":axiom-http:test")
+    mustRunAfter(":axiom-http:integrationTest")
 }
