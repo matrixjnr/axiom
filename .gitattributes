@@ -3,3 +3,6 @@
 gradlew text eol=lf
 *.bat text eol=crlf
 *.jar binary
+
+# Every change adds a bullet under "Unreleased"; keep both sides when branches merge.
+CHANGELOG.md merge=union
