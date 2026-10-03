@@ -46,14 +46,29 @@ class HeadersTest {
     }
 
     @Test
-    void doesNotDecorateResponsesMappedFromExceptions() throws Exception {
+    void decoratesResponsesMappedFromExceptions() throws Exception {
         var app = Axiom.create();
         app.use(SecurityHeaders.defaults());
         app.get("/denied", ctx -> { throw new ForbiddenException(); });
+        app.get("/broken", ctx -> { throw new IllegalStateException(); });
+        app.get("/mapped", ctx -> { throw new UnsupportedOperationException(); });
+        app.error(IllegalStateException.class, (ctx, failure) -> ctx.status(503).text("later")
+                .withHeader("X-Frame-Options", "SAMEORIGIN"));
+        app.error(UnsupportedOperationException.class, (ctx, failure) -> { throw new IllegalArgumentException(); });
         try (var client = TestClient.start(app)) {
             var denied = client.get("/denied");
             assertThat(denied.status()).isEqualTo(403);
-            assertThat(denied.headers()).doesNotContainKey("X-Content-Type-Options"); // documented limitation
+            assertThat(denied.headers()).containsEntry("X-Content-Type-Options", "nosniff")
+                    .containsEntry("X-Frame-Options", "DENY").containsEntry("Content-Type", "application/problem+json");
+            // An error handler's own header is kept, like a handler's.
+            var mapped = client.get("/broken");
+            assertThat(mapped.status()).isEqualTo(503);
+            assertThat(mapped.headers()).containsEntry("X-Frame-Options", "SAMEORIGIN")
+                    .containsEntry("X-Content-Type-Options", "nosniff");
+            // The generic 500 of a failing error handler.
+            var generic = client.get("/mapped");
+            assertThat(generic.status()).isEqualTo(500);
+            assertThat(generic.headers()).containsEntry("X-Content-Type-Options", "nosniff");
         }
     }
 

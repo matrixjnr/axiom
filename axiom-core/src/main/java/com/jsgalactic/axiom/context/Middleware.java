@@ -14,13 +14,19 @@ import com.jsgalactic.axiom.http.Response;
  * that returns without calling it short-circuits: the handler does not run and the returned
  * response is used.
  *
- * <p><b>Error responses are not decorated.</b> When the handler or an inner middleware throws,
- * the exception passes through every middleware and is mapped to a response only afterwards, so
- * headers a middleware adds after {@code next.run()} are <em>missing</em> on problem responses
- * and error handler responses. Security-header middleware must not rely on running for error
- * responses: also register a global {@link ErrorHandler} (for {@code Exception}, and for
- * {@code AxiomException} if those responses need the headers too, which replaces their built-in
- * problem body) that adds the headers, or catch the exception in the middleware.
+ * <p><b>Error responses.</b> When the handler or an inner middleware throws, the exception passes
+ * through every middleware that is on the stack, so each can still observe or translate it, and
+ * is mapped to a response only afterwards (problem response, error handler response, or 406).
+ * That response does not come back through {@code next.run()}; instead each middleware that was
+ * entered gets to decorate it through {@link #afterError}, innermost first. A security-header
+ * middleware therefore implements both methods:
+ *
+ * <pre>{@code
+ * Middleware headers = new Middleware() {
+ *     public Response handle(Context ctx, Next next) throws Exception { return secure(next.run()); }
+ *     public Response afterError(Context ctx, Response response) { return secure(response); }
+ * };
+ * }</pre>
  *
  * <p><b>Lifecycle and ownership.</b> Middleware are registered before startup with
  * {@code use} or as route-level arguments, and the application holds the instance until it
@@ -45,6 +51,34 @@ public interface Middleware {
      * @throws Exception to fail the request as a handler exception would
      */
     Response handle(Context context, Next next) throws Exception;
+
+    /**
+     * Decorates a response that was produced from an exception: a problem response for an
+     * {@link com.jsgalactic.axiom.error.AxiomException}, the response of an error handler, the
+     * generic 500, or the 406 for an unacceptable response type. The default returns the response
+     * unchanged.
+     *
+     * <p>It is called once per such response for each middleware that was entered when the
+     * failure happened (a middleware an outer one short-circuited before was never entered),
+     * innermost first, after error mapping and before the response leaves {@code app.handle}.
+     * It is not called for responses that come back through {@link Next#run()}, including
+     * responses a middleware or handler builds itself, nor for the router's 404, 405 and 501
+     * answers (those flow through global middleware as ordinary responses), nor for
+     * failures before routing (413, CONNECT) and listener errors. An exception that nothing
+     * maps, and a request that was cancelled or timed out, never reach it.
+     *
+     * <p>Like {@link #handle}, it runs on the request's thread under the request deadline and
+     * must be thread-safe. It must not throw: an exception from it is not mapped again. An
+     * {@link com.jsgalactic.axiom.error.AxiomException} answers with its own undecorated problem
+     * response and anything else fails the request as an unexpected exception.
+     *
+     * @param context the failed request's context
+     * @param response the response produced from the exception, never null
+     * @return the response to pass outwards; never null
+     */
+    default Response afterError(Context context, Response response) {
+        return response;
+    }
 
     /**
      * The rest of a middleware chain for one request. Valid only during the middleware call that

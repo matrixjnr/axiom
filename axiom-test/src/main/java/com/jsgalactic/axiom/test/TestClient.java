@@ -30,10 +30,11 @@ import java.util.concurrent.RejectedExecutionException;
  * unrecognized method), CONNECT 501, method mismatches 405 with {@code Allow}, OPTIONS without an
  * OPTIONS route 204 with {@code Allow}, and {@link com.jsgalactic.axiom.error.AxiomException}s thrown by
  * handlers (including body decoding failures) their own status. Other exceptions thrown by a handler
- * propagate to the test instead of becoming a 500 response. After codec encoding, response bodies
+ * propagate to the test by default, which helps debugging; {@link #startMappingFailures} answers them
+ * like the listener does, with the generic 500 problem response. After codec encoding, response bodies
  * must be {@code null}, {@code String} or {@code byte[]} and within the transport size limits;
  * anything else fails the call with {@link IllegalStateException}, where the listener would answer
- * 500; streamed responses (see {@code Response.stream}) are collected into bytes by {@link #execute} and
+ * 500 (also answered 500 by {@link #startMappingFailures}); streamed responses (see {@code Response.stream}) are collected into bytes by {@link #execute} and
  * {@link #submit}, with the listener's byte cap and deadline, and read incrementally with
  * {@link #stream}; HEAD follows the same rules and returns the {@code Content-Length} a listener sends. Bodies are sent as raw bytes; this module installs no codec, so decoding uses whatever codec
  * the test's runtime classpath provides. Request targets may carry a query and are split and
@@ -44,11 +45,14 @@ import java.util.concurrent.RejectedExecutionException;
 public final class TestClient implements AutoCloseable {
     private static final Object UNMATCHED = new Object();
     private final Application application;
+    private static final System.Logger LOG = System.getLogger(TestClient.class.getName());
     private final RequestDispatcher dispatcher;
+    private final boolean mapFailures;
     private final StreamMetrics streamMetrics;
     private final StreamBuffering buffering;
 
-    private TestClient(Application application, StreamBuffering buffering) {
+    private TestClient(Application application, StreamBuffering buffering, boolean mapFailures) {
+        this.mapFailures = mapFailures;
         this.buffering = Objects.requireNonNull(buffering, "buffering");
         this.application = Objects.requireNonNull(application, "application").start();
         this.dispatcher = new RequestDispatcher(application.admissionPolicy(), application.metrics());
@@ -61,7 +65,24 @@ public final class TestClient implements AutoCloseable {
      * @return a client to use with try-with-resources
      */
     public static TestClient start(Application application) {
-        return new TestClient(application, StreamBuffering.HAND_OFF);
+        return new TestClient(application, StreamBuffering.HAND_OFF, false);
+    }
+
+    /**
+     * Like {@link #start}, but answers a handler failure the way the HTTP listener does, so a test
+     * sees what a client would. An exception that is not an {@link com.jsgalactic.axiom.error.AxiomException}
+     * and that no error handler maps becomes the generic 500 {@code application/problem+json}
+     * response (status, code and request ID only, with {@code Connection: close}), and a response
+     * the transport could not send is a 500 too, instead of failing the call. Each such failure is
+     * logged at ERROR with its request ID, as the listener does. Interruption, cancellation and a
+     * stream aborted after its head was sent still fail the call, because the listener sends no
+     * response for them.
+     *
+     * @param application configured application
+     * @return a client to use with try-with-resources
+     */
+    public static TestClient startMappingFailures(Application application) {
+        return new TestClient(application, StreamBuffering.HAND_OFF, true);
     }
 
     /**
@@ -74,7 +95,7 @@ public final class TestClient implements AutoCloseable {
      * @return a client to use with try-with-resources
      */
     public static TestClient start(Application application, StreamBuffering buffering) {
-        return new TestClient(application, buffering);
+        return new TestClient(application, buffering, false);
     }
 
     /**
@@ -178,8 +199,9 @@ public final class TestClient implements AutoCloseable {
      *
      * @param request request to execute
      * @return the response, or a 503 or 504 problem response for admission and deadline failures
-     * @throws Exception if the handler fails
+     * @throws Exception if the handler fails, unless this client maps failures
      * @throws IllegalStateException if the response body or headers cannot be sent by the transport
+     *         (a 500 response when this client maps failures)
      */
     public Response execute(Request request) throws Exception {
         try {
@@ -195,7 +217,8 @@ public final class TestClient implements AutoCloseable {
     /**
      * Starts a request without waiting, so tests can hold capacity and observe queueing.
      * The future completes with a 503 or 504 response for admission and deadline failures, and
-     * exceptionally for handler failures. A streamed response completes the future once its body
+     * exceptionally for handler failures (with a 500 response when started with
+     * {@link #startMappingFailures}). A streamed response completes the future once its body
      * has ended, with the whole body as bytes; use {@link #stream} to read it while it is written.
      *
      * @param request request to execute
@@ -309,14 +332,24 @@ public final class TestClient implements AutoCloseable {
         return failure;
     }
 
-    /** The response a client sees for an admission or deadline failure, or null for any other failure. */
-    private static Response problem(Throwable failure, ExecutionContext context) {
+    /**
+     * The response a client sees for an admission or deadline failure, for a handler failure the
+     * listener would answer 500 when this client maps failures, or null for any other failure.
+     */
+    private Response problem(Throwable failure, ExecutionContext context) {
         if (failure instanceof RequestDispatcher.DeadlineExceededException) {
             return Problems.response(504, context.requestId());
         }
         if (failure instanceof RequestDispatcher.QueueTimeoutException
                 || failure instanceof RequestDispatcher.DispatchRejectedException) {
             return Problems.response(503, context.requestId());
+        }
+        boolean answered = failure instanceof Exception && !(failure instanceof InterruptedException)
+                && !(failure instanceof java.util.concurrent.CancellationException)
+                && !(failure instanceof StreamAbortedException);
+        if (mapFailures && answered) {
+            LOG.log(System.Logger.Level.ERROR, "Request " + context.requestId() + " failed", failure);
+            return Problems.response(500, context.requestId()).withHeader("Connection", "close");
         }
         return null;
     }
