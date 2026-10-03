@@ -12,10 +12,12 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+@Tag("integration")
 class HttpListenerTest {
     @Test void routesRawPathsAndWritesUtf8AndBytes() throws Exception {
         try (var fixture = new Fixture()) {

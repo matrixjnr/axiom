@@ -1,6 +1,6 @@
 plugins {
     application
-    id("axiom.java-test")
+    id("axiom.integration-test")
 }
 
 dependencies {

@@ -57,12 +57,52 @@ fails the build and names the module and the file to update. To see it fire, rem
 a `api(project(...))` line from `axiom-bom/build.gradle.kts` or a module from the map
 and run `./gradlew checkPublicationCoverage`.
 
+## Unit and integration tests
+
+Tests are split into two Gradle tasks per module, both part of `check`:
+
+- `test` runs the fast tests: pure unit tests, Netty embedded channels and the in-memory
+  `TestClient`. It opens no real socket.
+- `integrationTest` runs the test classes tagged `@Tag("integration")`: every class that
+  opens a real socket or starts a live listener (`ServerSocket`, `Socket`, `NettyServer.bind`,
+  `app.listen`, `HttpClient`). It exists only in modules that apply the
+  `axiom.integration-test` convention: `axiom-http`, `integration-tests` and
+  `examples/rest-api`. It runs from the same test source set and classpath as `test`.
+
+The tag is set per class, so a class with both embedded-channel and live-listener cases
+(`HttpLingerTest`, `HttpPipelineErrorTest`, `NettyServerTest`) runs entirely in
+`integrationTest`. The `integration-tests` module is integration as a whole: its
+`integrationTest` runs every class there, including the `TestClient` half of the JSON
+contract, and its `test` task is disabled. A module whose tests carry the tag without
+applying `axiom.integration-test` fails `check` (`checkIntegrationTags`) instead of
+silently running those tests nowhere.
+
+The root project has two aggregates: `./gradlew unitTest` runs every module's `test`, and
+`./gradlew integrationTest` runs every module's `integrationTest`. A single module runs as
+`./gradlew :axiom-http:test` or `./gradlew :axiom-http:integrationTest`.
+
+Split when it was introduced (classes / tests):
+
+| Module | `test` | `integrationTest` |
+| --- | --- | --- |
+| axiom-core | 13 / 187 | - |
+| axiom-server | 16 / 213 | - |
+| axiom-http | 2 / 27 | 11 / 176 |
+| axiom-json | 2 / 66 | - |
+| axiom-test | 7 / 24 | - |
+| axiom-validation | 5 / 35 | - |
+| axiom-validation-jakarta | 3 / 16 | - |
+| integration-tests | disabled | 2 / 62 |
+| examples/rest-api | 0 / 0 | 1 / 3 |
+| total | 48 / 568 | 14 / 241 |
+
 ## Allocation-based tests
 
 The no-copy tests measure allocation per thread through `com.sun.management.ThreadMXBean`
 and are skipped (JUnit assumption) on a JVM that cannot measure it. Passing
 `-Daxiom.requireAllocationTests=true` to Gradle turns that skip into a failure; the Build
-workflow sets it, and the `axiom.java-test` convention forwards it to every test JVM.
+workflow sets it, and the `axiom.java-test` convention forwards it to every test JVM
+(`test` and `integrationTest` alike).
 Locally it is off by default so a different JDK does not break `check`. Currently only
 the `axiom-json` test (`decodesFromAReadOnlyViewWithoutCopyingIt`) honors the flag; the
 `axiom-server` `CodecViewTest` case still skips silently (tracked as a limitation).
@@ -216,6 +256,6 @@ production sources, may declare only test-scope dependencies (`axiom-test` to co
 against, `axiom-http` and `axiom-json` at test runtime, so tests see only Axiom's API
 as an application would), and no other module may depend on it. Adding it therefore
 does not loosen any production rule: core, server and the test client still cannot
-depend on a codec or on Jackson. Its tests run in `check` and finish in a few
-seconds; `examples/rest-api` remains a usage example with its own tests. The module
+depend on a codec or on Jackson. Its tests run in its `integrationTest` task (part of
+`check`) and finish in a few seconds; `examples/rest-api` remains a usage example with its own tests. The module
 is not published and the BOM does not constrain it.

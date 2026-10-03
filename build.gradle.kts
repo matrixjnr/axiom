@@ -7,6 +7,23 @@ val modules = subprojects.filter { it.buildFile.isFile }
 tasks.named("check") { dependsOn(modules.map { "${it.path}:check" }) }
 tasks.named("assemble") { dependsOn(modules.map { "${it.path}:assemble" }) }
 
+// Test split (see docs/build.md): `unitTest` runs every module's `test` (no real sockets),
+// `integrationTest` every module's `integrationTest` (tests tagged integration, plus the whole
+// integration-tests module). Both are part of each module's check.
+fun testTasks(name: String) = provider {
+    subprojects.filter { name in it.tasks.names }.map { "${it.path}:$name" }
+}
+tasks.register("unitTest") {
+    group = "verification"
+    description = "Runs the unit tests (each module's test task) of all modules."
+    dependsOn(testTasks("test"))
+}
+tasks.register("integrationTest") {
+    group = "verification"
+    description = "Runs the integration tests (each module's integrationTest task) of all modules."
+    dependsOn(testTasks("integrationTest"))
+}
+
 // Consumer compatibility: publish every module into build/compat-repo and build small
 // Gradle (Kotlin and Groovy DSL) and Maven projects against it. Slow, so not part of check.
 val compatRepo = layout.buildDirectory.dir("compat-repo")

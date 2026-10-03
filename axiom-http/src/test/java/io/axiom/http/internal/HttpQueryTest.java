@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.axiom.http.Response;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+@Tag("integration")
 class HttpQueryTest {
     @Test void deliversDecodedQueryParametersOverTheWire() throws Exception {
         try (var fixture = new Fixture()) {
