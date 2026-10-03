@@ -1,14 +1,14 @@
 package consumer;
 
-import static io.axiom.validation.Rule.email;
-import static io.axiom.validation.Rule.maxLength;
-import static io.axiom.validation.Rule.notBlank;
-import static io.axiom.validation.Rule.notNull;
+import static com.jsgalactic.axiom.validation.Rule.email;
+import static com.jsgalactic.axiom.validation.Rule.maxLength;
+import static com.jsgalactic.axiom.validation.Rule.notBlank;
+import static com.jsgalactic.axiom.validation.Rule.notNull;
 
-import io.axiom.Axiom;
-import io.axiom.validation.Rules;
-import io.axiom.validation.Validation;
-import io.axiom.validation.Validator;
+import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.validation.Rules;
+import com.jsgalactic.axiom.validation.Validation;
+import com.jsgalactic.axiom.validation.Validator;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;

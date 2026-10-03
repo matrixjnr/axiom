@@ -1,12 +1,12 @@
 package example.rest;
 
-import io.axiom.Axiom;
-import io.axiom.application.Application;
-import io.axiom.context.BodyValidator;
-import io.axiom.context.Context;
-import io.axiom.context.Middleware;
-import io.axiom.error.NotFoundException;
-import io.axiom.error.Violation;
+import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.application.Application;
+import com.jsgalactic.axiom.context.BodyValidator;
+import com.jsgalactic.axiom.context.Context;
+import com.jsgalactic.axiom.context.Middleware;
+import com.jsgalactic.axiom.error.NotFoundException;
+import com.jsgalactic.axiom.error.Violation;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
