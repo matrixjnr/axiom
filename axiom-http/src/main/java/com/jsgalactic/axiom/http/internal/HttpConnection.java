@@ -109,6 +109,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final long responseNanos;
     private final int maxPipelined;
     private final int maxDiscardedInput;
+    /** Receives the listener's own error responses, or null. */
+    private final com.jsgalactic.axiom.lifecycle.RejectionObserver rejections;
     /**
      * True once the listener has started closing. Read on every response, from the moment the
      * listener's close begins, so a response sent after that carries {@code Connection: close} even
@@ -204,6 +206,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         this.responseNanos = settings.responseTimeout().toNanos();
         this.maxPipelined = settings.options().maxPipelinedRequests();
         this.maxDiscardedInput = settings.options().maxDiscardedInput();
+        this.rejections = settings.options().rejectionObserver().orElse(null);
         this.streamMetrics = new StreamMetrics(application.metrics());
     }
 
@@ -522,7 +525,20 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         return new WireResponse(response.status(), response.headers(), bytes, closeRequested(response.headers()), false);
     }
 
+    /** Reports a response the listener generated itself; a failing observer never affects the response. */
+    private void observe(Exchange exchange, WireResponse response) {
+        if (rejections == null || !response.framework()) { return; }
+        try {
+            rejections.rejected(response.status(), HttpStatus.defaultCode(response.status()),
+                    exchange.execution().requestId());
+        } catch (RuntimeException failure) {
+            LOG.log(System.Logger.Level.WARNING, "The rejection observer failed for HTTP request "
+                    + exchange.execution().requestId(), failure);
+        }
+    }
+
     private void send(ChannelHandlerContext ctx, Exchange exchange, WireResponse response) {
+        observe(exchange, response);
         boolean head = exchange.request().method().equals("HEAD");
         // Exactly one owner releases the body: this method until the write takes the message.
         ReferenceCounted owned = null;
@@ -712,7 +728,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static WireResponse error(int status, Exchange exchange) {
         return new WireResponse(status, Map.of("Content-Type", Problems.MEDIA_TYPE),
                 Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true,
-                false);
+                false, true);
     }
 
     /**
@@ -856,5 +872,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         void release() { if (reservation != null) { reservation.release(); } }
     }
     /** A prepared response; {@code streamed} marks a stream that was already written, with no body here. */
-    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean streamed) { }
+    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean streamed,
+            boolean framework) {
+        WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean streamed) {
+            this(status, headers, body, close, streamed, false);
+        }
+    }
 }

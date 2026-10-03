@@ -115,4 +115,15 @@ class ListenerOptionsTest {
                     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining(name);
         }
     }
+
+    @Test
+    void rejectionObserverIsOptionalAndKeptByToBuilder() {
+        assertThat(ListenerOptions.defaults().rejectionObserver()).isEmpty();
+        RejectionObserver observer = (status, code, requestId) -> { };
+        var options = ListenerOptions.builder().rejectionObserver(observer).build();
+        assertThat(options.rejectionObserver()).containsSame(observer);
+        assertThat(options.toBuilder().maxConnections(5).build().rejectionObserver()).containsSame(observer);
+        org.assertj.core.api.Assertions.assertThatNullPointerException()
+                .isThrownBy(() -> ListenerOptions.builder().rejectionObserver(null));
+    }
 }

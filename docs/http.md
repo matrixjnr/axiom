@@ -316,6 +316,7 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `maxRequestLine` | 4096 | 256 to 65,536 | Longest request line in bytes (414 beyond) |
 | `maxHeaderBytes` | 8192 | 256 to 1 MiB | Largest header section in bytes (431 beyond) |
 | `ioThreads` | processors, at least 2 | 1 to 1024 | I/O threads of the listener; handlers never run on them |
+| `rejectionObserver` | none | a `RejectionObserver` | Called with status, problem code and request ID for each error response the listener generates itself; see [observing rejections](errors.md#observing-listener-rejections) |
 
 Choosing values:
 

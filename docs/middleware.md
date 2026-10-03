@@ -181,6 +181,8 @@ run inside the global middleware.
 Requests rejected before routing do not run middleware: a body over the limit
 (413), CONNECT (501), and every error the listener produces itself (400, 408,
 414, 431, 503, 504 and the others in [errors](errors.md#framework-statuses)).
+To count or log them, set a read-only
+[`rejectionObserver`](errors.md#observing-listener-rejections) on the listener.
 
 HEAD keeps working: middleware see the HEAD request and the GET route's full
 response; the body is removed afterwards. Automatic OPTIONS keeps working and is
@@ -262,6 +264,6 @@ the Jakarta adapter can be passed directly; `Validation.require` is unchanged.
 ## Limitations
 
 - Middleware are synchronous and run after admission; they cannot influence
-  admission, run before the body is received, or see listener errors.
+  admission, run before the body is received, or see listener errors (use the listener's `rejectionObserver` to count those).
 - `Next` and the context are confined to the request thread; a middleware cannot
   continue the chain on another thread.

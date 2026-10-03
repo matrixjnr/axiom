@@ -197,6 +197,28 @@ matched. A request no route serves has no group, so only the application's handl
 exceptions of the custom `notFound`, `methodNotAllowed` and `notImplemented` handlers and global
 middleware. Like group routes, a group's handlers are removed if its configuration callback throws.
 
+### Observing listener rejections
+
+Middleware never see requests the listener rejects (400, 408, 413, 414, 417, 431, 501, 503, 504, 505 and
+its own 500), so operators cannot add metrics or logging to them there. Set a read-only observer on the
+listener instead:
+
+```java
+var options = ListenerOptions.builder()
+        .rejectionObserver((status, code, requestId) -> rejected.counter("status", Integer.toString(status)).increment())
+        .build();
+app.listen(new InetSocketAddress("127.0.0.1", 8080), options);
+```
+
+It is called once per such response, just before the response is written, with only the status, the
+problem `code` and the request ID that the response carries in `X-Request-ID`; never request content.
+It cannot change the response or let a request through, and an exception it throws is logged and ignored.
+It runs on a listener thread and must be fast, non-blocking and thread-safe. It is not called for responses
+the application produces (problem responses for `AxiomException`s, the router's 404 and 405, an
+`InternalServerErrorException`), for connections closed without a response, or in memory
+(`app.handle`, `TestClient`). The listener's 503 and 504 for admission and deadline failures are
+included; metrics for those also exist in the [observability guide](observability.md).
+
 ### Testing failures
 
 `TestClient.start(app)` lets an exception that nothing maps propagate to the test, and fails
