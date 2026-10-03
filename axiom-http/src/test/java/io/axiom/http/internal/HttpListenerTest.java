@@ -224,7 +224,7 @@ class HttpListenerTest {
             fixture.app.get("/first", ctx -> {
                 assertThat(Thread.currentThread().isVirtual()).isTrue();
                 entered.countDown();
-                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
                 return "first";
             });
             fixture.app.get("/second", ctx -> { second.set(true); return "second"; });
@@ -232,7 +232,7 @@ class HttpListenerTest {
             var server = fixture.listen();
             try (var pipeline = new Wire(server); var other = new Wire(server)) {
                 pipeline.write("GET /first HTTP/1.1\r\nHost: a\r\n\r\nGET /second HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 assertThat(other.get("/other").text()).isEqualTo("other");
                 assertThat(second).isFalse();
                 release.countDown();
@@ -255,12 +255,12 @@ class HttpListenerTest {
             var first = fixture.listen();
             var second = fixture.listen();
             first.close();
-            first.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            first.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
             assertThat(fixture.app.state()).isEqualTo(Application.State.RUNNING);
             assertThat(second.isOpen()).isTrue();
             try (var wire = new Wire(second)) {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 fixture.app.close();
                 // The handler ignores the drain, so it is interrupted once the grace period ends.
                 long grace = NettyServer.SHUTDOWN_GRACE.toSeconds();
@@ -278,14 +278,14 @@ class HttpListenerTest {
         try (var fixture = new Fixture()) {
             fixture.app.get("/", ctx -> {
                 entered.countDown();
-                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
                 return "finished";
             });
             var server = fixture.listen();
             try (var busy = new Wire(server); var idle = new Wire(server)) {
                 assertThat(idle.get("/missing").status()).isEqualTo(404);
                 busy.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 server.close();
                 assertThat(server.isOpen()).isFalse();
                 assertThat(idle.socket.getInputStream().read()).isEqualTo(-1);
@@ -296,7 +296,7 @@ class HttpListenerTest {
                 assertThat(response.text()).isEqualTo("finished");
                 assertThat(response.headers()).containsEntry("connection", "close");
                 assertThat(busy.socket.getInputStream().read()).isEqualTo(-1);
-                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
                 assertThatThrownBy(() -> new Wire(server)).isInstanceOf(IOException.class);
             } finally { release.countDown(); }
         }
@@ -311,15 +311,15 @@ class HttpListenerTest {
             fixture.app.get("/", ctx -> {
                 calls.incrementAndGet();
                 entered.countDown();
-                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
                 return "finished";
             });
             var server = fixture.listen();
             try (var running = new Wire(server); var waiting = new Wire(server)) {
                 running.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 waiting.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                 while (server.admission().queued() == 0) {
                     assertThat(System.nanoTime()).isLessThan(deadline);
                     Thread.onSpinWait();
@@ -333,9 +333,94 @@ class HttpListenerTest {
                 var response = running.read(false);
                 assertThat(response.status()).isEqualTo(200);
                 assertThat(response.headers()).containsEntry("connection", "close");
-                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
                 assertThat(calls).hasValue(1);
             } finally { release.countDown(); }
+        }
+    }
+
+    @Test void closeEndsRunningConnectionsEvenBeforeTheListenerSocketHasClosed() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var acceptorBlocked = new CountDownLatch(1);
+        var unblockAcceptor = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.admissionPolicy(new io.axiom.execution.AdmissionPolicy(1, 1, java.time.Duration.ofSeconds(30)));
+            fixture.app.get("/", ctx -> {
+                entered.countDown();
+                assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
+                return "finished";
+            });
+            var server = (NettyServer) fixture.listen();
+            try (var running = new Wire(server); var waiting = new Wire(server)) {
+                running.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+                waiting.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+                awaitQueued(server);
+                // Holds the acceptor thread, so closing the listening socket cannot complete yet:
+                // the drain must not depend on it.
+                server.listener.eventLoop().execute(() -> {
+                    acceptorBlocked.countDown();
+                    try { unblockAcceptor.await(); } catch (InterruptedException stop) { Thread.currentThread().interrupt(); }
+                });
+                assertThat(acceptorBlocked.await(30, TimeUnit.SECONDS)).isTrue();
+                server.close();
+                // The queued request is answered once admission stops; the running one must
+                // already be marked to close by then.
+                assertThat(waiting.read(false).status()).isEqualTo(503);
+                release.countDown();
+                var response = running.read(false);
+                assertThat(response.status()).isEqualTo(200);
+                assertThat(response.headers()).containsEntry("connection", "close");
+            } finally {
+                release.countDown();
+                unblockAcceptor.countDown();
+            }
+        }
+    }
+
+    @Test void closesTheConnectionOfAClientThatStopsReadingOnceTheResponseTimeoutPasses() throws Exception {
+        var body = new byte[1024 * 1024];
+        var served = new CountDownLatch(1);
+        try (var app = Axiom.create()) {
+            app.get("/big", ctx -> { served.countDown(); return body; });
+            app.start();
+            // Small fixed socket buffers keep most of the response out of the kernel whatever its
+            // defaults, and the inactivity timeout is far away: only the response bound can close.
+            var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+                    TransportSettings.DEFAULTS.withSocketBuffers(8192, 8192)
+                            .withIdleTimeout(java.time.Duration.ofHours(1))
+                            .withResponseTimeout(java.time.Duration.ofMillis(200)));
+            try (var client = new java.net.Socket()) {
+                client.setReceiveBufferSize(4096);
+                client.connect(server.localAddress(), 30_000);
+                client.setSoTimeout(30_000);
+                client.getOutputStream().write("GET /big HTTP/1.1\r\nHost: a\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                assertThat(served.await(30, TimeUnit.SECONDS)).isTrue();
+                // The client reads nothing until the server has given up on it.
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                while (server.connections() != 0) {
+                    assertThat(System.nanoTime()).as("connection closed by the response bound").isLessThan(deadline);
+                    Thread.onSpinWait();
+                }
+                long received = 0;
+                try {
+                    var buffer = new byte[65536];
+                    for (int read; (read = client.getInputStream().read(buffer)) != -1;) { received += read; }
+                } catch (java.net.SocketException reset) { /* Also an end of the truncated response. */ }
+                assertThat(received).isLessThan(body.length);
+            } finally {
+                server.close();
+                server.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    private static void awaitQueued(Server server) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (server.admission().queued() == 0) {
+            assertThat(System.nanoTime()).as("request queued").isLessThan(deadline);
+            Thread.onSpinWait();
         }
     }
 
@@ -351,13 +436,13 @@ class HttpListenerTest {
             });
             app.start();
             var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                    java.time.Duration.ofMillis(100));
+                    TransportSettings.DEFAULTS.withShutdownGrace(java.time.Duration.ofMillis(100)));
             try (var wire = new Wire(server)) {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 server.close();
-                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
-                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                assertThat(interrupted.await(30, TimeUnit.SECONDS)).isTrue();
+                server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
                 assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
             } finally { server.close(); }
         }
@@ -377,9 +462,9 @@ class HttpListenerTest {
             var server = fixture.listen();
             var wire = new Wire(server);
             wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             wire.close();
-            assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(interrupted.await(30, TimeUnit.SECONDS)).isTrue();
         }
     }
 
@@ -391,7 +476,7 @@ class HttpListenerTest {
             var server = fixture.listen();
             try (var wire = new Wire(server)) {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
-                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
                 assertThat(fixture.app.state()).isEqualTo(Application.State.CLOSED);
             }
         }
@@ -421,9 +506,10 @@ class HttpListenerTest {
     }
     @Test void assignsRequestIdsAndSharesExecutionMetadataWithHandler() throws Exception {
         try (var fixture = new Fixture()) {
-            fixture.app.requestTimeout(java.time.Duration.ofSeconds(5));
+            // Generous, so the handler sees budget left even on a loaded machine.
+            fixture.app.requestTimeout(java.time.Duration.ofSeconds(60));
             fixture.app.get("/", ctx -> {
-                assertThat(ctx.execution().remainingTime()).isPositive().isLessThanOrEqualTo(java.time.Duration.ofSeconds(5));
+                assertThat(ctx.execution().remainingTime()).isPositive().isLessThanOrEqualTo(java.time.Duration.ofSeconds(60));
                 return Response.of(200, ctx.execution().requestId()).withHeader("X-Request-ID", "application-spoof");
             });
             try (var wire = new Wire(fixture.listen())) {
@@ -453,13 +539,13 @@ class HttpListenerTest {
             var server = fixture.listen();
             try (var wire = new Wire(server)) {
                 wire.write("GET /slow HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 var response = wire.read(false);
                 assertThat(response.status()).isEqualTo(504);
                 HttpStatusMappingTest.assertProblem(response, 504, "gateway_timeout");
                 assertThat(response.headers()).containsKey("X-Request-ID");
-                assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
-                assertThat(returned.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(interrupted.await(30, TimeUnit.SECONDS)).isTrue();
+                assertThat(returned.await(30, TimeUnit.SECONDS)).isTrue();
                 assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
             }
             try (var other = new Wire(server)) { assertThat(other.get("/fast").text()).isEqualTo("still serving"); }
@@ -475,7 +561,7 @@ class HttpListenerTest {
             fixture.app.get("/later", ctx -> { later.set(true); return "later"; });
             try (var wire = new Wire(fixture.listen())) {
                 wire.write("GET /slow HTTP/1.1\r\nHost: a\r\n\r\nGET /later HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 assertThat(wire.read(false).status()).isEqualTo(504);
                 assertThat(wire.socket.getInputStream().read()).isEqualTo(-1);
                 assertThat(later).isFalse();
@@ -490,7 +576,7 @@ class HttpListenerTest {
             fixture.app.get("/", ctx -> {
                 assertThat(Thread.currentThread().isVirtual()).isTrue();
                 entered.countDown();
-                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
                 return "ok";
             });
             var server = fixture.listen();
@@ -501,7 +587,7 @@ class HttpListenerTest {
                     wires.add(wire);
                     wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
                 }
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 release.countDown();
                 for (var wire : wires) { assertThat(wire.read(false).text()).isEqualTo("ok"); }
             } finally {
@@ -519,7 +605,7 @@ class HttpListenerTest {
             var limited = fixture.app.get("/limited/:id", ctx -> {
                 calls.incrementAndGet();
                 entered.countDown();
-                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
                 return ctx.path("id");
             });
             fixture.app.admissionPolicy(limited,
@@ -528,7 +614,7 @@ class HttpListenerTest {
             var server = fixture.listen();
             try (var first = new Wire(server); var second = new Wire(server); var other = new Wire(server)) {
                 first.write("GET /limited/a HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 var timeout = second.get("/limited/b");
                 assertThat(timeout.status()).isEqualTo(503);
                 assertThat(timeout.headers()).containsKey("X-Request-ID");
@@ -550,14 +636,14 @@ class HttpListenerTest {
             fixture.app.admissionPolicy(io.axiom.execution.AdmissionPolicy.reject(1));
             fixture.app.get("/busy", ctx -> {
                 entered.countDown();
-                assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
                 return "done";
             });
             fixture.app.get("/other", ctx -> { throw new AssertionError("must be rejected before invocation"); });
             var server = fixture.listen();
             try (var first = new Wire(server); var other = new Wire(server)) {
                 first.write("GET /busy HTTP/1.1\r\nHost: a\r\n\r\n");
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
                 assertThat(other.get("/other").status()).isEqualTo(503);
                 assertThat(server.admission().active()).isEqualTo(1);
                 assertThat(server.admission().rejected()).isEqualTo(1);

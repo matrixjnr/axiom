@@ -36,7 +36,8 @@ Another coding before `chunked` on that line (for example `gzip, chunked`) recei
 **501**; more than one Transfer-Encoding line (whatever the values), `chunked` listed
 twice, a coding list that does not end in `chunked`, both Content-Length and
 Transfer-Encoding, or Transfer-Encoding on an HTTP/1.0 request receives **400**. All of
-these close the connection, and nothing sent after the request is read as a request. Content-Length must be a single value of 1 to 18
+these close the connection, and nothing sent after the request is read as a request
+(see [wire behavior](http.md#wire-behavior) for why the two statuses differ). Content-Length must be a single value of 1 to 18
 digits (surrounding whitespace is allowed, as for any field); signs, empty values,
 lists and other characters receive **400**. A request with neither Content-Length
 nor Transfer-Encoding has an empty body (RFC 9112 section 6.3), whatever its method;
@@ -83,7 +84,8 @@ process-wide body budget; size `L`, the request timeout and the heap together.
 A 413 (or another error) on a pipelined request is sent after the responses to
 earlier requests, which still run; see
 [errors on pipelined requests](http.md#errors-on-pipelined-requests). After the 413
-the listener discards the rest of the body (for up to two seconds and 16 MiB) instead
+the listener discards the rest of the body (for up to two seconds and 16 MiB, less once
+the client pauses for 500 milliseconds) instead
 of resetting the connection, so a client still sending reads the response; the same
 applies after any response that ends a connection; see
 [wire behavior](http.md#wire-behavior). Clients that send `Expect: 100-continue` and
