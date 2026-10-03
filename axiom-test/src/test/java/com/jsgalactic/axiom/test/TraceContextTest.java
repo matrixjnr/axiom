@@ -99,7 +99,7 @@ class TraceContextTest {
             @Override public void flush() { }
             @Override public void close() { }
         };
-        var logger = java.util.logging.Logger.getLogger("com.jsgalactic.axiom.server.internal.DefaultApplication");
+        var logger = java.util.logging.Logger.getLogger("com.jsgalactic.axiom.failures");
         logger.addHandler(handler);
         try {
             var app = Axiom.create();

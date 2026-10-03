@@ -12,18 +12,20 @@ import com.jsgalactic.axiom.http.Response;
  *
  * <p>Error handlers run after every middleware has unwound, on the request's thread and under its
  * deadline, with the request's context; the context's status is reset to 200 first. The response
- * is encoded by the installed codecs without an Accept check. Throwing an
+ * is encoded by the installed codecs without an Accept check: an error is never answered 406,
+ * because the client would then lose the error itself. Throwing an
  * {@link com.jsgalactic.axiom.error.AxiomException} answers with that exception's problem response; that
  * exception is not offered to error handlers again. Any other exception, or a {@code null}
  * result, is logged with the request ID and answered with the generic 500 problem response.
- * The original exception is logged at WARNING with the request ID unless it is an
- * {@code AxiomException} below 500 answered below 500.
+ * The original exception is logged once, with the request ID, unless it is an
+ * {@code AxiomException} below 500 answered below 500; see
+ * {@link com.jsgalactic.axiom.application.Application#failureLog}.
  * Error handlers never run for a cancelled or expired request, and are never offered
  * {@link InterruptedException} or {@link java.util.concurrent.CancellationException}.
  *
  * <p>Middleware have already unwound when an error handler runs, so headers they add after
- * {@code next.run()} (security headers, for example) are not on its response; an error handler
- * that must carry them adds them itself.
+ * {@code next.run()} are not on its response by themselves; each middleware that was entered
+ * decorates the response through {@link Middleware#afterError}, as it does for problem responses.
  *
  * <p>Everything the returned response contains reaches the client: never copy exception
  * messages, class names or stack traces into it.

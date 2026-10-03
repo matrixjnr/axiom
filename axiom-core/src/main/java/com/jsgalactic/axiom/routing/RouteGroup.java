@@ -153,4 +153,26 @@ public interface RouteGroup {
      * @throws IllegalStateException if configuration has ended
      */
     RouteGroup group(String prefix, Consumer<RouteGroup> configure);
+
+    /**
+     * Maps exceptions of a class and its subclasses to responses for the routes of this scope and
+     * its nested groups, with the same rules as {@link com.jsgalactic.axiom.application.Application#error}.
+     * For a request, the handlers of the group that owns the matched route are consulted first,
+     * then those of each enclosing group, then the application's: the first scope with a handler
+     * for the exception's class or a superclass wins, even if an outer scope has a nearer class.
+     * Everything that runs for the request uses the route's scopes, including global middleware.
+     * The built-in mapping of {@link com.jsgalactic.axiom.error.AxiomException} counts as a handler
+     * at the application level, so a group's handler for {@code Exception} does not replace it.
+     * Requests no route serves (404, 405, OPTIONS, 501) have no group; only the application's
+     * handlers apply to exceptions of their custom handlers and global middleware. A handler
+     * registered in a group that fails to configure is removed with the group, like its routes.
+     *
+     * @param type exception class
+     * @param handler shared, thread-safe mapping
+     * @param <E> exception type
+     * @return this scope
+     * @throws IllegalArgumentException if this scope already has a handler for the class
+     * @throws IllegalStateException if configuration has ended
+     */
+    <E extends Exception> RouteGroup error(Class<E> type, com.jsgalactic.axiom.context.ErrorHandler<? super E> handler);
 }

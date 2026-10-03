@@ -453,6 +453,27 @@ public interface Context {
     }
 
     /**
+     * Builds the standard problem response for an exception: its status, the typed headers it
+     * carries ({@code Allow}, {@code Retry-After}, {@code WWW-Authenticate}),
+     * {@code application/problem+json} and a body of only status, code, this request's ID and the
+     * violations, exactly what the runtime sends for it when no error handler is registered.
+     * An {@link ErrorHandler} uses it to decorate the standard answer instead of replacing it:
+     * <pre>{@code
+     * app.error(AxiomException.class, (ctx, failure) ->
+     *         ctx.problem(failure).withHeader("Cache-Control", "no-store"));
+     * }</pre>
+     * It does not log, and it is independent of the context's status.
+     *
+     * @param failure the exception to answer, possibly one the handler built itself
+     * @return the problem response
+     * @throws UnsupportedOperationException if this context cannot build it (the runtime's
+     *         contexts can; this default exists for application test doubles)
+     */
+    default Response problem(com.jsgalactic.axiom.error.AxiomException failure) {
+        throw new UnsupportedOperationException("This context cannot build problem responses");
+    }
+
+    /**
      * Maps a body using the current status (200 by default).
      * Strings use UTF-8 text and byte arrays use application/octet-stream.
      * Other objects are retained without a Content-Type and are not encoded; use

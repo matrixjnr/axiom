@@ -206,6 +206,49 @@ class HttpStreamTest {
         }
     }
 
+    @Test void errorHandlersAndAfterErrorNeverRunForABodyThatFailsAfterTheHeadWasSent() throws Exception {
+        var handled = new AtomicInteger();
+        var decorated = new AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.use(new com.jsgalactic.axiom.context.Middleware() {
+                @Override public Response handle(com.jsgalactic.axiom.context.Context ctx, Next next) throws Exception {
+                    return next.run();
+                }
+                @Override public Response afterError(com.jsgalactic.axiom.context.Context ctx, Response response) {
+                    decorated.incrementAndGet();
+                    return response.withHeader("X-Decorated", "yes");
+                }
+            });
+            fixture.app.error(Exception.class, (ctx, failure) -> { handled.incrementAndGet(); return Response.of(500, "mapped"); });
+            fixture.app.get("/broken", ctx -> Response.stream(200, "text/plain", out -> {
+                out.write("partial");
+                throw new IllegalStateException("handler bug");
+            }));
+            fixture.app.get("/before", ctx -> { throw new IllegalStateException("before the head"); });
+            var server = fixture.listen();
+            try (var wire = new Wire(server)) {
+                wire.write("GET /broken HTTP/1.1\r\nHost: a\r\n\r\n");
+                var head = wire.head();
+                assertThat(head.status()).isEqualTo(200);
+                assertThat(head.headers()).doesNotContainKey("X-Decorated");
+                assertThat(text(wire.chunk())).isEqualTo("partial");
+                // No second response: the connection is closed.
+                assertThat(wire.socket.getInputStream().readAllBytes()).isEmpty();
+            }
+            assertThat(handled).hasValue(0);
+            assertThat(decorated).hasValue(0);
+            // A failure before the head is an ordinary mapped and decorated response.
+            try (var wire = new Wire(server)) {
+                wire.write("GET /before HTTP/1.1\r\nHost: a\r\n\r\n");
+                var head = wire.head();
+                assertThat(head.status()).isEqualTo(500);
+                assertThat(head.headers()).containsEntry("X-Decorated", "yes");
+            }
+            assertThat(handled).hasValue(1);
+            assertThat(decorated).hasValue(1);
+        }
+    }
+
     @Test void aClientThatDisconnectsMidStreamAbortsTheWriterAndReleasesTheSlot() throws Exception {
         var reason = new CompletableFuture<Reason>();
         var probe = new Probe();

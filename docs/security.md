@@ -315,11 +315,9 @@ speak HTTPS; start with a short `max-age`, and add `includeSubDomains` or `prelo
 every subdomain is ready. Browsers ignore the header on plain HTTP, and
 `Request.isSecure()` tells a handler which kind of connection it is on.
 
-Registered globally it also decorates router answers (404, 405, OPTIONS, 501). It does
-**not** decorate responses mapped from exceptions, including the 401 and 403 of policies,
-because exceptions pass through middleware before they become responses (tracked in
-[#96](https://github.com/matrixjnr/axiom/issues/96); see the workaround in
-[middleware](middleware.md#middleware)).
+Registered globally it also decorates router answers (404, 405, OPTIONS, 501) and responses
+mapped from exceptions, including the 401 and 403 of policies, problem responses and error
+handler responses (through `Middleware.afterError`, see [middleware](middleware.md#middleware)).
 
 ## CORS
 
@@ -357,10 +355,9 @@ app.use(Cors.builder()
 - A request from another origin is **not rejected**: CORS is enforced by the browser and is
   not authentication. It is answered without CORS headers. Keep authenticating every request.
 - Register it with `app.use` globally: group middleware never see router answers, so a
-  group-scoped instance would miss preflights. Like other middleware, it does not decorate
-  responses mapped from exceptions, such as a 401 from a policy; a browser then reports a
-  CORS failure instead of the 401 for such responses
-  ([#96](https://github.com/matrixjnr/axiom/issues/96)).
+  group-scoped instance would miss preflights. It also decorates responses mapped from
+  exceptions, such as a 401 from a policy, so a browser reads the status instead of reporting
+  a CORS failure; a preflight whose chain failed gets only `Vary`.
 
 ## Rejected alternatives
 

@@ -49,8 +49,10 @@ public final class ListenerOptions {
     private final int maxRequestLine;
     private final int maxHeaderBytes;
     private final int ioThreads;
+    private final RejectionObserver rejectionObserver;
 
     private ListenerOptions(Builder b) {
+        rejectionObserver = b.rejectionObserver;
         name = b.name;
         shutdownGrace = b.shutdownGrace;
         idleTimeout = b.idleTimeout;
@@ -107,6 +109,7 @@ public final class ListenerOptions {
         b.maxRequestLine = maxRequestLine;
         b.maxHeaderBytes = maxHeaderBytes;
         b.ioThreads = ioThreads;
+        b.rejectionObserver = rejectionObserver;
         return b;
     }
 
@@ -144,6 +147,9 @@ public final class ListenerOptions {
     public int maxHeaderBytes() { return maxHeaderBytes; }
     /** @return number of I/O threads per listener */
     public int ioThreads() { return ioThreads; }
+
+    /** @return the observer of the listener's own error responses, if one was set */
+    public Optional<RejectionObserver> rejectionObserver() { return Optional.ofNullable(rejectionObserver); }
 
     /** @return the listener's name, the value of the {@code listener} metric tag */
     public String name() { return name; }
@@ -185,6 +191,7 @@ public final class ListenerOptions {
         private int maxRequestLine = 4096;
         private int maxHeaderBytes = 8192;
         private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
+        private RejectionObserver rejectionObserver;
 
         private Builder() { }
 
@@ -431,6 +438,17 @@ public final class ListenerOptions {
          */
         public Builder ioThreads(int threads) {
             ioThreads = range("ioThreads", threads, 1, 1024);
+            return this;
+        }
+
+        /**
+         * Sets an observer called for each error response the listener generates itself, such as
+         * 413, 431 or 503, for metrics and logging. It is read-only; see {@link RejectionObserver}.
+         * @param observer the observer; one is replaced by the next call
+         * @return this builder
+         */
+        public Builder rejectionObserver(RejectionObserver observer) {
+            rejectionObserver = Objects.requireNonNull(observer, "rejectionObserver");
             return this;
         }
 
