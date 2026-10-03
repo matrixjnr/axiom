@@ -143,8 +143,11 @@ class JacksonBodyCodecTest {
 
     @Test void decodesFromAReadOnlyViewWithoutCopyingIt() {
         var threads = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
-        org.junit.jupiter.api.Assumptions.assumeTrue(threads.isThreadAllocatedMemorySupported()
-                && threads.isThreadAllocatedMemoryEnabled());
+        boolean measurable = threads.isThreadAllocatedMemorySupported() && threads.isThreadAllocatedMemoryEnabled();
+        if (Boolean.getBoolean("axiom.requireAllocationTests")) {
+            assertThat(measurable).as("thread allocation measurement is required by axiom.requireAllocationTests").isTrue();
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(measurable);
         int padding = 8 * 1024 * 1024;
         var content = new byte[padding + 64];
         java.util.Arrays.fill(content, (byte) ' ');
