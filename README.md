@@ -124,6 +124,11 @@ try (var client = TestClient.start(TasksApi.create())) {
   SPI, `authenticated()`/`hasRole`/`hasPermission` policies (401 vs 403 problem responses),
   a strict JDK-only JWT authenticator, trusted-proxy client addresses, header redaction and
   secure default headers ([security](docs/security.md)).
+- **Observability (opt-in registry)**: a dependency-free `Metrics` SPI instrumenting requests
+  by route template and status class, latency, admission rejections and queue depth and wait;
+  an in-memory registry with Prometheus text output; liveness and readiness routes that turn
+  unready while draining; and a strictly parsed W3C `traceparent` on the context
+  ([observability](docs/observability.md)).
 - **Secure path handling**: raw paths with dot or empty segments, backslashes or encoded
   separators are rejected with 400, never normalized ([routing](docs/routing.md#raw-paths-and-ownership)).
 
@@ -133,7 +138,7 @@ try (var client = TestClient.start(TasksApi.create())) {
 - WebSocket and server-sent events
 - Streaming request and response bodies (bodies are buffered in memory)
 - Sessions, cookie authentication, CSRF, CORS and OAuth flows; JWKS key fetching
-- Observability integrations such as metrics and tracing
+- OpenTelemetry, tracing spans and metrics exporters other than Prometheus text
 - OpenAPI generation
 - Native transports (epoll, io_uring)
 - Publication to Maven Central
@@ -155,6 +160,7 @@ remaining milestones in the [roadmap, #18](https://github.com/matrixjnr/axiom/is
 | `axiom-validation-jakarta` | `axiom-validation-jakarta` | Jakarta Validation through Hibernate Validator (opt-in) |
 | `axiom-security` | `axiom-security` | Authenticator SPI, role and permission policies, trusted proxies, header redaction, security headers (opt-in) |
 | `axiom-security-jwt` | `axiom-security-jwt` | Strict JWT bearer-token authenticator on the JDK only (opt-in) |
+| `axiom-metrics` | `axiom-metrics` | Bounded in-memory metrics registry and Prometheus text output (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
@@ -244,6 +250,24 @@ tokens 401 `invalid_token` (never echoing the token); a missing role or permissi
 Forwarded client addresses are believed only from configured proxies
 (`TrustedProxies.of("10.0.0.0/8").resolve(ctx.request())`). See [security](docs/security.md).
 
+## Observability
+
+Metrics, health checks and trace context need no extra dependency; `axiom-metrics` adds an
+in-memory registry and a Prometheus renderer.
+
+```java
+var registry = MetricsRegistry.create();
+var app = Axiom.create().metrics(registry);             // requests, latency, admission, queue depth
+var health = Health.builder(app).readiness("database", () -> pool.isValid(1)).build();
+health.register(app, security.hasRole("ops"));          // GET /health/live, GET /health/ready
+app.get("/metrics", PrometheusText.handler(registry), security.hasRole("ops"));
+// shutdown: health.beginDrain(); then app.close()
+```
+
+Tags are route templates and status classes, never raw paths or user input. **Do not expose
+`/metrics` or the health routes publicly without authentication.** See
+[observability](docs/observability.md).
+
 ## Build and test
 
 JDK 21 and the committed Gradle wrapper (on Windows, `gradlew.bat`):
@@ -264,7 +288,8 @@ Details are in [build decisions](docs/build.md).
 
 - [Programming model](docs/programming-model.md), [routing](docs/routing.md),
   [request bodies and JSON](docs/bodies.md), [errors](docs/errors.md),
-  [middleware](docs/middleware.md), [validation](docs/validation.md), [security](docs/security.md)
+  [middleware](docs/middleware.md), [validation](docs/validation.md), [security](docs/security.md),
+  [observability](docs/observability.md)
 - [HTTP listeners](docs/http.md), [execution and deadlines](docs/execution.md),
   [admission](docs/admission.md), [benchmarks](docs/benchmarks.md)
 - [Build decisions](docs/build.md), [releasing](docs/releasing.md),

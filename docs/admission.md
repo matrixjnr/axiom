@@ -113,3 +113,6 @@ Counters are scoped to one listener and remain readable after shutdown. Snapshot
 are a polling surface for diagnostics and future metrics adapters. No observer
 callbacks run under admission locks or on transport threads. Per-route metrics,
 adaptive limits, CPU execution classes and distributed budgets remain future work.
+
+Counters, queue depth and queue wait are also available as metrics; see
+[observability](observability.md).
