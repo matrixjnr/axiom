@@ -43,7 +43,9 @@ Methods remain case-sensitive.
 When no complete match is registered for the method, the response is **405**. Its
 `Allow` header is the union of the methods registered on every template that
 matches the complete path, sorted alphabetically. An unknown path returns 404. Both
-use `application/problem+json` bodies (see [errors](errors.md)).
+use `application/problem+json` bodies (see [errors](errors.md)). OPTIONS is the
+exception: when no matching template registered it, the application answers it
+itself (see [automatic OPTIONS](#automatic-options)).
 
 HEAD is served by an explicit HEAD route or, failing that, by the GET route on the
 same template, checked template by template in precedence order. With
@@ -68,6 +70,25 @@ the same rule, so a listener answers a request line whose method is not a token 
 
 Methods are matched exactly. Nothing is upper-cased: `get` is a method distinct from
 `GET`, may be registered on its own, and a `get` request never runs a `GET` route.
+
+### Automatic OPTIONS
+
+An OPTIONS request for a path with at least one complete match, none of which has an
+OPTIONS route, is answered **204 No Content** with an `Allow` header and no body. No
+handler runs. `Allow` is the 405 union above (every method registered on any template
+matching the path, plus `HEAD` wherever `GET` is) with `OPTIONS` added, sorted
+alphabetically: with `GET /users` and `POST /users`, `OPTIONS /users` gets
+`Allow: GET, HEAD, OPTIONS, POST`.
+
+An explicit OPTIONS route is selected like any other method, so it wins on its own
+template and also serves paths whose more specific templates lack OPTIONS: with
+`GET /users/me` and `OPTIONS /users/:id`, `OPTIONS /users/me` runs the OPTIONS route.
+An unknown path is still 404. `resolve` returns empty for an automatic answer, so
+over HTTP and through `TestClient` it is admitted in the default bucket shared with
+404 and 405 responses, under the application's default policy (see
+[admission](admission.md)); it can be refused with 503 like any request. A request
+body is read and limited as for any method (413 over `maxRequestBody`) and then
+discarded. CORS preflight handling is not part of this answer.
 
 ## Conflicts and startup
 

@@ -24,7 +24,7 @@ import java.util.concurrent.RejectedExecutionException;
  * the queue is exhausted or the queue wait expires, and 504 when the request deadline expires.
  * Framework errors use the same {@code application/problem+json} bodies as the listener: request
  * bodies over the application's {@code maxRequestBody} get 413, unknown routes 404, method
- * mismatches 405 with {@code Allow}, and {@link io.axiom.error.AxiomException}s thrown by handlers
+ * mismatches 405 with {@code Allow}, OPTIONS without an OPTIONS route 204 with {@code Allow}, and {@link io.axiom.error.AxiomException}s thrown by handlers
  * (including body decoding failures) their own status. Other exceptions thrown by a handler
  * propagate to the test instead of becoming a 500 response. After codec encoding, response bodies
  * must be {@code null}, {@code String} or {@code byte[]} and within the transport size limits;

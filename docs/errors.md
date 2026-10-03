@@ -123,7 +123,7 @@ the error is sent and the connection closes (see
 | 200 | Return a value, `ctx.text(...)` or `ctx.json(value)` |
 | 201 | `ctx.status(201).json(created).withLocation("/items/" + id)` |
 | 202 | `ctx.status(202).json(ticket)` or `ctx.status(202).response(null)` |
-| 204 | Return `null` or `ctx.noContent()` |
+| 204 | Return `null` or `ctx.noContent()`; also the [automatic OPTIONS](routing.md#automatic-options) answer, with `Allow` |
 | 304 | `Response.of(304, null)` with the validators your application computes |
 | 301, 302, 303, 307, 308 | `ctx.redirect(303, "/orders/7")` |
 

@@ -52,7 +52,9 @@ propagates those exceptions.
 The transport controls Content-Length, Transfer-Encoding, connection headers and
 `Date`, which every response carries as an IMF-fixdate with one-second precision.
 Hop-by-hop headers, including names nominated by Connection, are removed. HEAD
-uses an explicit HEAD route or falls back to GET and sends no body bytes. A successful
+uses an explicit HEAD route or falls back to GET and sends no body bytes. OPTIONS
+for a routed path without an OPTIONS route is answered 204 with `Allow` and no
+handler runs (see [automatic OPTIONS](routing.md#automatic-options)). A successful
 HEAD response (2xx other than 204 and 205) carries the Content-Length the GET
 representation would have, its encoded body length, replacing any value the
 application set; a representation the transport could not send is a 500 for HEAD as

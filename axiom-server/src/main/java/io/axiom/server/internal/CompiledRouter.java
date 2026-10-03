@@ -75,7 +75,8 @@ final class CompiledRouter {
      * Finds the most specific complete path match registered for the request method.
      * Complete matches are visited in precedence order; one without the method is skipped
      * so a less specific template can serve it. When no complete match has the method, the
-     * result reports a method mismatch whose Allow value is the union over all of them.
+     * result reports a method mismatch whose Allow value is the union over all of them; for
+     * OPTIONS that union also lists OPTIONS, which the application then answers itself.
      */
     Match match(Request request) {
         var method = request.method();
@@ -121,6 +122,11 @@ final class CompiledRouter {
             }
         }
         if (mismatch == null) { return null; }
+        if (method.equals("OPTIONS")) {
+            // Automatic OPTIONS: no matching template registered OPTIONS, so the application answers it.
+            if (allowed == null) { allowed = new TreeSet<>(mismatch.methods()); }
+            allowed.add("OPTIONS");
+        }
         return new Match(null, allowed == null ? mismatch.allow() : String.join(", ", allowed), null);
     }
 

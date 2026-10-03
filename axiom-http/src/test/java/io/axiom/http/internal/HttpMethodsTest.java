@@ -27,6 +27,50 @@ class HttpMethodsTest {
         }
     }
 
+    @Test void answersOptionsWith204AndAllowWithoutRunningAHandler() throws Exception {
+        var calls = new AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/users", ctx -> { calls.incrementAndGet(); return "users"; });
+            fixture.app.post("/users", ctx -> { calls.incrementAndGet(); return "created"; });
+            fixture.app.options("/custom", ctx -> ctx.status(200).text("custom"));
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("OPTIONS /users HTTP/1.1\r\nHost: a\r\n\r\n");
+                var options = wire.read(false);
+                assertThat(options.status()).isEqualTo(204);
+                assertThat(options.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS, POST");
+                assertThat(options.headers()).doesNotContainKey("Content-Length").doesNotContainKey("Content-Type");
+                assertThat(options.headers()).containsKey("X-Request-ID").containsKey("Date");
+                assertThat(options.body()).isEmpty();
+
+                wire.write("OPTIONS /custom HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).text()).isEqualTo("custom");
+                wire.write("OPTIONS /missing HTTP/1.1\r\nHost: a\r\n\r\n");
+                assertThat(wire.read(false).status()).isEqualTo(404);
+
+                // A body is read within the limit and discarded; the connection carries the next request.
+                wire.write("OPTIONS /users HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello"
+                        + "OPTIONS /users HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n");
+                assertThat(wire.read(false).status()).isEqualTo(204);
+                assertThat(wire.read(false).status()).isEqualTo(204);
+                assertThat(wire.get("/users").text()).isEqualTo("users");
+            }
+            assertThat(calls).hasValue(1);
+        }
+    }
+
+    @Test void rejectsAnOversizedOptionsBodyWith413() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.maxRequestBody(4);
+            fixture.app.get("/users", ctx -> "users");
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("OPTIONS /users HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello");
+                var reply = wire.read(false);
+                assertThat(reply.status()).isEqualTo(413);
+                assertThat(reply.headers()).containsEntry("Connection", "close");
+            }
+        }
+    }
+
     @Test void matchesMethodTokensCaseSensitively() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.route("M-SEARCH", "/x", ctx -> ctx.method());

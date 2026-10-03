@@ -4,7 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import io.axiom.Axiom;
+import io.axiom.http.Body;
 import io.axiom.http.Request;
+import io.axiom.routing.Route;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -30,6 +34,77 @@ class HttpMethodsTest {
             app.route(method, "/x", ctx -> ctx.method());
             app.start();
             assertThat(app.handle(new Request(method, "/x")).body()).isEqualTo(method);
+        }
+    }
+
+    @Test
+    void answersOptionsForARoutedPathWithoutRunningAHandler() throws Exception {
+        var calls = new AtomicInteger();
+        try (var app = Axiom.create()) {
+            app.get("/users", ctx -> { calls.incrementAndGet(); return "get"; });
+            app.post("/users", ctx -> { calls.incrementAndGet(); return "post"; });
+            app.route("PROPFIND", "/users", ctx -> { calls.incrementAndGet(); return "propfind"; });
+            app.post("/submit", ctx -> { calls.incrementAndGet(); return "submit"; });
+            app.start();
+            var options = app.handle(new Request("OPTIONS", "/users"));
+            assertThat(options.status()).isEqualTo(204);
+            assertThat(options.body()).isNull();
+            assertThat(options.headers()).containsExactly(Map.entry("Allow", "GET, HEAD, OPTIONS, POST, PROPFIND"));
+            // HEAD is listed only where GET is registered.
+            assertThat(app.handle(new Request("OPTIONS", "/submit")).headers())
+                    .containsEntry("Allow", "OPTIONS, POST");
+            assertThat(app.resolve(new Request("OPTIONS", "/users"))).isEmpty();
+            assertThat(calls).hasValue(0);
+        }
+    }
+
+    @Test
+    void listsTheMethodsOfEveryTemplateMatchingTheOptionsTarget() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/users/me", ctx -> "me");
+            app.put("/users/:id", ctx -> "put");
+            app.delete("/users/*rest", ctx -> "delete");
+            app.start();
+            assertThat(app.handle(new Request("OPTIONS", "/users/me")).headers())
+                    .containsEntry("Allow", "DELETE, GET, HEAD, OPTIONS, PUT");
+            assertThat(app.handle(new Request("OPTIONS", "/users/7")).headers())
+                    .containsEntry("Allow", "DELETE, OPTIONS, PUT");
+            assertThat(app.handle(new Request("OPTIONS", "/users/7/x")).headers())
+                    .containsEntry("Allow", "DELETE, OPTIONS");
+        }
+    }
+
+    @Test
+    void anExplicitOptionsRouteWinsAndAnUnknownPathStays404() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/users/me", ctx -> "me");
+            app.options("/users/:id", ctx -> ctx.status(200).text("explicit " + ctx.path("id")));
+            app.get("/plain", ctx -> "plain");
+            app.start();
+            // As for every method, the most specific template that has OPTIONS serves it.
+            var explicit = app.handle(new Request("OPTIONS", "/users/me"));
+            assertThat(explicit.status()).isEqualTo(200);
+            assertThat(explicit.body()).isEqualTo("explicit me");
+            assertThat(explicit.headers()).doesNotContainKey("Allow");
+            assertThat(app.resolve(new Request("OPTIONS", "/users/me")))
+                    .contains(new Route("OPTIONS", "/users/:id"));
+            assertThat(app.handle(new Request("OPTIONS", "/plain")).status()).isEqualTo(204);
+            var missing = app.handle(new Request("OPTIONS", "/missing"));
+            assertThat(missing.status()).isEqualTo(404);
+            assertThat(missing.headers()).doesNotContainKey("Allow");
+        }
+    }
+
+    @Test
+    void readsAndLimitsAnOptionsBodyLikeAnyOther() throws Exception {
+        try (var app = Axiom.create()) {
+            app.maxRequestBody(4);
+            app.get("/x", ctx -> "x");
+            app.start();
+            var within = app.handle(new Request("OPTIONS", "/x", Map.of(), Body.of("text/plain", new byte[4])));
+            assertThat(within.status()).isEqualTo(204);
+            var over = app.handle(new Request("OPTIONS", "/x", Map.of(), Body.of("text/plain", new byte[5])));
+            assertThat(over.status()).isEqualTo(413);
         }
     }
 

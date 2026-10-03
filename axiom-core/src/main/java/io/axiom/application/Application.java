@@ -114,7 +114,9 @@ public interface Application extends AutoCloseable {
     }
 
     /**
-     * Registers a route for this HTTP method.
+     * Registers an OPTIONS route. Without one, OPTIONS for a routed path is answered
+     * automatically with 204 and an Allow header; an explicit route replaces that answer for the
+     * paths it matches.
      *
      * @param path route path
      * @param handler callback
@@ -243,6 +245,8 @@ public interface Application extends AutoCloseable {
      * body the HTTP transport could not send, so that HEAD fails where GET would.
      * Returns 404 for an unknown path, and 405 when no matching template has the method, with
      * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
+     * An OPTIONS request that no matching template registered is answered 204 without invoking
+     * a handler, with that Allow list plus OPTIONS.
      * Bodies over {@link #maxRequestBody()} receive 413. Unknown paths, method mismatches and
      * {@link io.axiom.error.AxiomException}s thrown by handlers or {@code Context.body} become
      * {@code application/problem+json} responses with only status, code, request ID and
