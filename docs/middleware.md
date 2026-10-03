@@ -1,7 +1,6 @@
 # Middleware, route groups and error handlers
 
-Status: middleware, route groups, framework answers and error handlers are
-implemented; validated bodies are the next step of this design.
+Status: implemented.
 
 ## Goals
 

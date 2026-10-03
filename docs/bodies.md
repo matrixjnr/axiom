@@ -12,6 +12,9 @@ app.post("/owners/:owner/notes", ctx -> {
 });
 ```
 
+`ctx.validatedBody(NewNote.class, validator)` decodes and then checks the value,
+answering violations with 422 (see [validation](validation.md#validated-request-bodies)).
+
 Add `axiom-json` to the **runtime** classpath (`runtimeOnly`) to install the JSON
 codec; application code never compiles against it. See the
 [rest-api example](../examples/rest-api) for a complete API with tests.
