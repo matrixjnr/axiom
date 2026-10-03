@@ -348,8 +348,10 @@ public interface Application extends RouteGroup, AutoCloseable {
      * Bodies over {@link #maxRequestBody()} receive 413. Unknown paths, method mismatches and
      * {@link com.jsgalactic.axiom.error.AxiomException}s thrown by handlers or {@code Context.body} become
      * {@code application/problem+json} responses with only status, code, request ID and
-     * violations. Responses whose Content-Type has an installed codec are checked against the
-     * request's Accept header (406 when nothing matches) and non-String, non-byte[] bodies are
+     * violations. Responses of safe-method requests (GET, HEAD, OPTIONS, TRACE) whose Content-Type
+     * has an installed codec are checked against the request's Accept header (406 when nothing
+     * matches; other methods ignore Accept, so a 406 cannot follow a side effect) and
+     * non-String, non-byte[] bodies are
      * encoded by that codec. Exceptions from handlers and middleware are first offered to the
      * handlers registered with {@link #error}; a failing error handler produces the generic 500
      * problem response. Other handler exceptions propagate unchanged; this method is not a

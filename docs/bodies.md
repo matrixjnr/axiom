@@ -333,12 +333,18 @@ client fail on a typo; a client that wants a 406 must send a well-formed header 
 64 ranges or fewer. The boundary (64 parsed, 65 ignored) and the real-client
 headers above are covered by tests.
 
-**The 406 is decided after the handler has run**, because the representation is
-only known once the handler returns. Side effects of the handler (a created
-record, a sent message) have already happened when the client receives 406.
-Handlers with side effects must not rely on negotiation to prevent them; check
-`ctx.header("Accept")` up front if that matters. A value the codec cannot encode, or `json` without a JSON codec
-installed, is a server error (500 over HTTP).
+**Only safe methods are negotiated.** The representation is known only once the handler
+returns, so a 406 is decided after the handler has run. For the safe methods `GET`, `HEAD`,
+`OPTIONS` and `TRACE` (RFC 9110 section 9.2.1) that is harmless: the handler changes no
+state, and a client that retries gets the same answer. For every other method (`POST`, `PUT`,
+`PATCH`, `DELETE` and extension methods) `Accept` is **advisory**: the handler's response is
+always sent, encoded by its own codec, whatever the client accepts. This prevents a `POST`
+from creating a resource and then answering 406, which would invite a retry that creates it
+again. Route declarations do not list representations, so negotiating before the handler
+runs is not possible without them; a handler that must refuse a client that cannot be served
+checks `ctx.header("Accept")` itself and throws `NotAcceptableException` before it acts.
+A value the codec cannot encode, or `json` without a JSON codec installed, is a server error
+(500 over HTTP).
 
 ## Codecs
 

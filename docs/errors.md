@@ -163,7 +163,7 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 | 400 | Path capture that `ctx.pathDecoded` cannot decode safely (malformed UTF-8, or a decoded separator, backslash, NUL or dot segment); code `invalid_path_encoding` | Runtime |
 | 404 | No route matches the path and the method is recognized (see [custom methods](routing.md#custom-methods)) | Runtime |
 | 405 | Route exists for other methods, including every TRACE request to a routed path; `Allow` lists them | Runtime |
-| 406 | Accept excludes the codec response's media type, decided after the handler ran (see [negotiation](bodies.md#accept-negotiation-406)) | Runtime |
+| 406 | Accept excludes the codec response's media type of a safe-method request (`GET`, `HEAD`, `OPTIONS`, `TRACE`), decided after the handler ran; other methods ignore Accept (see [negotiation](bodies.md#accept-negotiation-406)) | Runtime |
 | 408 | Request head not complete within ten seconds, or body not complete by the request deadline | Listener |
 | 413 | Body over `maxRequestBody` | Listener and runtime |
 | 414 | Request line longer than 4 KiB (`maxRequestLine`) | Listener |
