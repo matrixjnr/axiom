@@ -157,7 +157,7 @@ as RFC 8259 permits.
 ## JSON codec
 
 `axiom-json` registers a Jackson-based codec for `application/json` through the
-`io.axiom.codec.spi.BodyCodec` service. No Jackson type appears in Axiom's API.
+`com.jsgalactic.axiom.codec.spi.BodyCodec` service. No Jackson type appears in Axiom's API.
 Decoding is strict:
 
 | Input | Code |

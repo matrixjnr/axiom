@@ -166,7 +166,7 @@ grouped by family (Netty, Jackson, validation, test tools).
 
 ## Starter artifact
 
-`axiom-starter` is published as `io.axiom:axiom`. It has `api` on `axiom-core` and
+`axiom-starter` is published as `com.jsgalactic.axiom:axiom`. It has `api` on `axiom-core` and
 `runtimeOnly` on `axiom-http`, `axiom-server` and `axiom-json`, so one dependency is
 enough to compile a Hello World or a JSON API and to run it. The jar itself is empty
 apart from the manifest; sources and Javadoc jars are published empty as well.
@@ -245,7 +245,7 @@ are trust-on-first-use; signature verification is off. A modified checksum makes
 build fail.
 
 The Gradle consumers in `compatibility/` are standalone builds, each with its own
-`gradle/verification-metadata.xml`. Artifacts in group `io.axiom` are trusted
+`gradle/verification-metadata.xml`. Artifacts in group `com.jsgalactic.axiom` are trusted
 (`<trusted-artifacts>`) because they come from the locally published repository and
 change with every build; every other artifact, including POMs and module files, is
 checksummed. Regenerate a consumer's file from an empty Gradle home, so every artifact

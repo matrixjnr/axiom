@@ -36,7 +36,7 @@ status and headers without the body and, unlike successful HEAD responses, carry
 
 ## Throwing errors
 
-Handlers throw a subtype of `io.axiom.error.AxiomException`. Each has a no-argument
+Handlers throw a subtype of `com.jsgalactic.axiom.error.AxiomException`. Each has a no-argument
 constructor using the default code and a constructor taking a custom safe code:
 
 ```java

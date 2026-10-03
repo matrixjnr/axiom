@@ -8,7 +8,7 @@ in-memory testing through the same dispatcher, middleware and route groups. Bodi
 are buffered in memory (no streaming), and there is no TLS or HTTP/2 yet.
 
 ```java
-import io.axiom.Axiom;
+import com.jsgalactic.axiom.Axiom;
 
 try (var app = Axiom.create()) {
     app.get("/", ctx -> "Hello, world!");
@@ -42,7 +42,7 @@ JSON notes API on the same port.
 - `axiom-http`: HTTP/1.1 transport with Netty kept behind the public API
 - `axiom-json`: strict JSON codec built on Jackson, added on the runtime classpath
 - `axiom-test`: in-memory test client, sending raw request bodies
-- `axiom-starter`: published as `io.axiom:axiom`, the single dependency for applications
+- `axiom-starter`: published as `com.jsgalactic.axiom:axiom`, the single dependency for applications
 - `axiom-validation`: validator interface and annotation-free rules reported as 422 field violations ([validation](docs/validation.md))
 - `axiom-validation-jakarta`: Jakarta Validation annotations through Hibernate Validator, kept behind the validator interface
 - `axiom-bom`: aligned library versions
@@ -59,8 +59,9 @@ Jackson stay inside `axiom-http` and `axiom-json`.
 ## Install (not yet published)
 
 No artifacts are published yet; the snippets below show the intended coordinates and
-will not resolve until a first release. The `io.axiom` namespace is provisional until
-ownership is validated. `io.axiom:axiom` is a starter that brings the core API at
+will not resolve until a first release. The group `com.jsgalactic.axiom` follows the project
+domain `axiom.jsgalactic.com`; verifying it with Maven Central is an owner action listed in
+[releasing](docs/releasing.md). `com.jsgalactic.axiom:axiom` is a starter that brings the core API at
 compile time and the HTTP server and JSON codec at run time. Publication and release
 steps are in [releasing](docs/releasing.md). No performance claims have been established.
 
@@ -68,8 +69,8 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
-    implementation(platform("io.axiom:axiom-bom:VERSION"))
-    implementation("io.axiom:axiom")
+    implementation(platform("com.jsgalactic.axiom:axiom-bom:VERSION"))
+    implementation("com.jsgalactic.axiom:axiom")
 }
 ```
 
@@ -77,8 +78,8 @@ Gradle (Groovy DSL):
 
 ```groovy
 dependencies {
-    implementation platform('io.axiom:axiom-bom:VERSION')
-    implementation 'io.axiom:axiom'
+    implementation platform('com.jsgalactic.axiom:axiom-bom:VERSION')
+    implementation 'com.jsgalactic.axiom:axiom'
 }
 ```
 
@@ -88,7 +89,7 @@ Maven:
 <dependencyManagement>
   <dependencies>
     <dependency>
-      <groupId>io.axiom</groupId>
+      <groupId>com.jsgalactic.axiom</groupId>
       <artifactId>axiom-bom</artifactId>
       <version>VERSION</version>
       <type>pom</type>
@@ -98,14 +99,14 @@ Maven:
 </dependencyManagement>
 <dependencies>
   <dependency>
-    <groupId>io.axiom</groupId>
+    <groupId>com.jsgalactic.axiom</groupId>
     <artifactId>axiom</artifactId>
   </dependency>
 </dependencies>
 ```
 
-Validation is opt-in and not part of the starter: add `io.axiom:axiom-validation`, or
-`io.axiom:axiom-validation-jakarta` for Jakarta annotations, alongside it (versions come
+Validation is opt-in and not part of the starter: add `com.jsgalactic.axiom:axiom-validation`, or
+`com.jsgalactic.axiom:axiom-validation-jakarta` for Jakarta annotations, alongside it (versions come
 from the BOM). See [validation](docs/validation.md).
 
 Consumer builds against locally published artifacts are exercised by
