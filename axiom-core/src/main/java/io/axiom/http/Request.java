@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
  * {@link #toString()} omits the query, header values and body content, which may hold
  * credentials.
  * @param method case-sensitive HTTP method token
- * @param path absolute raw path without query or fragment
+ * @param path absolute raw path without query or fragment, or {@code *} for {@code OPTIONS *}
  * @param query raw query without the leading {@code ?}; {@code ""} when absent
  * @param headers request header fields; copied into an immutable case-insensitive map
  * @param body request content; never null, {@link Body#empty()} when absent
@@ -68,7 +68,10 @@ public record Request(String method, String path, String query, Map<String, Stri
 
     /**
      * Creates and validates the request.
-     * The path must start with {@code /} and contain only RFC 3986 path characters,
+     * The path is either {@code *} or an absolute path. {@code *} (the asterisk-form of
+     * {@code OPTIONS *}) is accepted only with the method {@code OPTIONS} and an empty query; it
+     * addresses the server rather than a resource and is never routed.
+     * A path must start with {@code /} and contain only RFC 3986 path characters,
      * well-formed percent-escapes, and non-ASCII characters other than controls and spaces.
      * It is rejected when it contains an empty segment ({@code //}; a single trailing slash is
      * allowed), a {@code .} or {@code ..} segment, a backslash, a NUL or other control
@@ -103,7 +106,15 @@ public record Request(String method, String path, String query, Map<String, Stri
         if (!TOKEN.matcher(method).matches()) {
             throw new IllegalArgumentException("Invalid HTTP method: " + method);
         }
-        validatePath(path);
+        if (path.equals("*")) {
+            // RFC 9110 section 7.1: the asterisk-form addresses the server, and only for OPTIONS.
+            if (!method.equals("OPTIONS")) {
+                throw new InvalidRequestPathException("The asterisk-form target is only valid for OPTIONS");
+            }
+            if (!query.isEmpty()) { throw new InvalidRequestPathException("The asterisk-form target has no query"); }
+        } else {
+            validatePath(path);
+        }
         validateQuery(query);
         if (headers.isEmpty()) {
             headers = Map.of();
@@ -196,13 +207,14 @@ public record Request(String method, String path, String query, Map<String, Stri
     }
 
     /**
-     * Creates a request from an HTTP origin-form request target ({@code path[?query]}). The
-     * path is validated as by {@link #Request(String, String)} and the query, which is retained,
-     * as by the canonical constructor. Transports and the test client use this instead of
-     * splitting the target themselves.
+     * Creates a request from an HTTP origin-form request target ({@code path[?query]}), or from
+     * the asterisk-form {@code *} of an OPTIONS request. The path is validated as by
+     * {@link #Request(String, String)} and the query, which is retained, as by the canonical
+     * constructor. Absolute-form targets ({@code http://host/path}) are rejected, not normalized.
+     * Transports and the test client use this instead of splitting the target themselves.
      *
      * @param method HTTP token
-     * @param target origin-form request target
+     * @param target origin-form request target, or {@code *} for OPTIONS
      * @return a request for the target's path and query
      * @throws InvalidRequestPathException for a rejected path
      * @throws IllegalArgumentException for an invalid method or query
@@ -211,6 +223,9 @@ public record Request(String method, String path, String query, Map<String, Stri
         Objects.requireNonNull(target, "target");
         int query = target.indexOf('?');
         if (query < 0) { return new Request(method, target); }
+        if (query == 1 && target.charAt(0) == '*') {
+            throw new InvalidRequestPathException("The asterisk-form target has no query");
+        }
         return new Request(method, target.substring(0, query), target.substring(query + 1), Map.of(), Body.empty());
     }
 

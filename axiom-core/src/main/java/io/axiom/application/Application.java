@@ -246,7 +246,8 @@ public interface Application extends AutoCloseable {
      * Returns 404 for an unknown path, and 405 when no matching template has the method, with
      * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
      * An OPTIONS request that no matching template registered is answered 204 without invoking
-     * a handler, with that Allow list plus OPTIONS.
+     * a handler, with that Allow list plus OPTIONS. {@code OPTIONS *} is answered 204 without route
+     * lookup, with an Allow list of every registered method (HEAD if GET is registered) plus OPTIONS.
      * Bodies over {@link #maxRequestBody()} receive 413. Unknown paths, method mismatches and
      * {@link io.axiom.error.AxiomException}s thrown by handlers or {@code Context.body} become
      * {@code application/problem+json} responses with only status, code, request ID and

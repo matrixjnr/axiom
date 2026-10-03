@@ -109,6 +109,37 @@ class HttpMethodsTest {
     }
 
     @Test
+    void answersOptionsAsteriskWithEveryRegisteredMethodWithoutRouteLookup() throws Exception {
+        var calls = new AtomicInteger();
+        try (var app = Axiom.create()) {
+            app.get("/a", ctx -> { calls.incrementAndGet(); return "a"; });
+            app.route("PROPFIND", "/b/:id", ctx -> { calls.incrementAndGet(); return "b"; });
+            app.post("/c/*rest", ctx -> { calls.incrementAndGet(); return "c"; });
+            // An OPTIONS route never serves the asterisk-form, even one matching every path.
+            app.options("/*any", ctx -> { calls.incrementAndGet(); return "options"; });
+            app.start();
+            var asterisk = app.handle(Request.fromTarget("OPTIONS", "*"));
+            assertThat(asterisk.status()).isEqualTo(204);
+            assertThat(asterisk.body()).isNull();
+            assertThat(asterisk.headers()).containsExactly(Map.entry("Allow", "GET, HEAD, OPTIONS, POST, PROPFIND"));
+            assertThat(app.resolve(Request.fromTarget("OPTIONS", "*"))).isEmpty();
+            assertThat(calls).hasValue(0);
+        }
+        try (var empty = Axiom.create()) {
+            empty.start();
+            assertThat(empty.handle(new Request("OPTIONS", "*")).headers()).containsEntry("Allow", "OPTIONS");
+        }
+    }
+
+    @Test
+    void refusesTheAsteriskFormAsARouteTemplate() {
+        try (var app = Axiom.create()) {
+            assertThatIllegalArgumentException().isThrownBy(() -> app.options("*", ctx -> "x"));
+            assertThatIllegalArgumentException().isThrownBy(() -> app.get("*", ctx -> "x"));
+        }
+    }
+
+    @Test
     void doesNotFoldTheCaseOfMethods() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/x", ctx -> "upper");

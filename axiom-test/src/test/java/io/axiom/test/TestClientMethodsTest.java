@@ -41,6 +41,19 @@ class TestClientMethodsTest {
     }
 
     @Test
+    void answersOptionsAsteriskAndRejectsTheAsteriskFormForOtherMethods() throws Exception {
+        var app = Axiom.create();
+        app.get("/x", ctx -> "x");
+        app.put("/y", ctx -> "y");
+        try (var client = TestClient.start(app)) {
+            var asterisk = client.execute(Request.fromTarget("OPTIONS", "*"));
+            assertThat(asterisk.status()).isEqualTo(204);
+            assertThat(asterisk.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS, PUT");
+            assertThatIllegalArgumentException().isThrownBy(() -> Request.fromTarget("GET", "*"));
+        }
+    }
+
+    @Test
     void admitsAutomaticOptionsUnderTheDefaultPolicy() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);

@@ -71,6 +71,45 @@ class HttpMethodsTest {
         }
     }
 
+    @Test void answersOptionsAsteriskWithTheServerWideAllow() throws Exception {
+        var calls = new AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/a", ctx -> { calls.incrementAndGet(); return "a"; });
+            fixture.app.route("PROPFIND", "/b", ctx -> { calls.incrementAndGet(); return "b"; });
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write("OPTIONS * HTTP/1.1\r\nHost: a\r\n\r\n");
+                var asterisk = wire.read(false);
+                assertThat(asterisk.status()).isEqualTo(204);
+                assertThat(asterisk.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS, PROPFIND");
+                assertThat(asterisk.headers()).doesNotContainKey("Content-Length");
+                // Keep-alive: the next request on the connection is served.
+                assertThat(wire.get("/a").text()).isEqualTo("a");
+                wire.write("OPTIONS * HTTP/1.0\r\n\r\n");
+                assertThat(wire.read(false).status()).isEqualTo(204);
+            }
+            assertThat(calls).hasValue(1);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"GET *", "HEAD *", "POST *", "options *", "PROPFIND *", "OPTIONS *?x=1", "OPTIONS *?",
+            "OPTIONS **", "OPTIONS */a", "OPTIONS *a", "OPTIONS http://a/a", "GET http://a/a", "OPTIONS a",
+            "OPTIONS //a", "OPTIONS /a/../a", "OPTIONS /a%2Fb"})
+    void rejectsOtherAsteriskAbsoluteAndUnsafeTargetsWith400(String requestLine) throws Exception {
+        var calls = new AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/a", ctx -> { calls.incrementAndGet(); return "a"; });
+            fixture.app.options("/*any", ctx -> { calls.incrementAndGet(); return "any"; });
+            try (var wire = new Wire(fixture.listen())) {
+                wire.write(requestLine + " HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n");
+                var reply = wire.read(requestLine.startsWith("HEAD"));
+                assertThat(reply.status()).isEqualTo(400);
+                assertThat(reply.headers()).containsEntry("Connection", "close");
+            }
+            assertThat(calls).hasValue(0);
+        }
+    }
+
     @Test void matchesMethodTokensCaseSensitively() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.route("M-SEARCH", "/x", ctx -> ctx.method());

@@ -17,10 +17,13 @@ import java.util.TreeSet;
 final class CompiledRouter {
     private final Node root;
     private final Map<String, Node> exactPaths;
+    /** Allow value for {@code OPTIONS *}: every registered method, HEAD where GET is, and OPTIONS. */
+    private final String serverAllow;
 
-    private CompiledRouter(Node root, Map<String, Node> exactPaths) {
+    private CompiledRouter(Node root, Map<String, Node> exactPaths, String serverAllow) {
         this.root = root;
         this.exactPaths = Map.copyOf(exactPaths);
+        this.serverAllow = serverAllow;
     }
 
     static CompiledRouter compile(Map<Route, Handler> registrations) {
@@ -68,7 +71,11 @@ final class CompiledRouter {
         }
         var exactPaths = new HashMap<String, Node>();
         exact.forEach((path, node) -> exactPaths.put(path, node.frozen));
-        return new CompiledRouter(root.frozen, exactPaths);
+        var everyMethod = new TreeSet<String>();
+        registrations.keySet().forEach(route -> everyMethod.add(route.method()));
+        if (everyMethod.contains("GET")) { everyMethod.add("HEAD"); }
+        everyMethod.add("OPTIONS");
+        return new CompiledRouter(root.frozen, exactPaths, String.join(", ", everyMethod));
     }
 
     /**
@@ -77,9 +84,12 @@ final class CompiledRouter {
      * so a less specific template can serve it. When no complete match has the method, the
      * result reports a method mismatch whose Allow value is the union over all of them; for
      * OPTIONS that union also lists OPTIONS, which the application then answers itself.
+     * {@code OPTIONS *} is never looked up: it reports a mismatch listing every registered method.
      */
     Match match(Request request) {
         var method = request.method();
+        // OPTIONS * addresses the server, not a resource; Request admits "*" for OPTIONS only.
+        if (request.path().equals("*")) { return new Match(null, serverAllow, null); }
         var exact = exactPaths.get(request.path());
         if (exact != null) {
             var endpoint = select(exact, method);

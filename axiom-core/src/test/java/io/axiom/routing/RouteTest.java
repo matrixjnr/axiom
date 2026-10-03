@@ -21,4 +21,10 @@ class RouteTest {
     void rejectsMalformedOrAmbiguousCaptureSyntax(String path) {
         assertThatIllegalArgumentException().isThrownBy(() -> new Route("GET", path));
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"OPTIONS", "GET"})
+    void rejectsTheAsteriskFormAsATemplate(String method) {
+        assertThatIllegalArgumentException().isThrownBy(() -> new Route(method, "*"));
+    }
 }

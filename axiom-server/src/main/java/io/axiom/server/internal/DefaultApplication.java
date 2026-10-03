@@ -254,7 +254,7 @@ final class DefaultApplication implements Application {
         var match = published.router().match(request);
         if (match == null) { return Problems.response(404, execution.requestId()); }
         if (!match.methodAllowed()) {
-            // The path is routed but no matching template registered OPTIONS: answer it without a handler.
+            // OPTIONS *, or a routed path where no matching template registered OPTIONS: no handler runs.
             if (request.method().equals("OPTIONS")) { return Response.of(204, null).withHeader("Allow", match.allow()); }
             return Problems.response(405, execution.requestId()).withHeader("Allow", match.allow());
         }

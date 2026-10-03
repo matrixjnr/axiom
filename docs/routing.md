@@ -90,6 +90,27 @@ over HTTP and through `TestClient` it is admitted in the default bucket shared w
 body is read and limited as for any method (413 over `maxRequestBody`) and then
 discarded. CORS preflight handling is not part of this answer.
 
+### OPTIONS *
+
+`OPTIONS *` (the asterisk-form request target, RFC 9110 section 9.3.7) asks about
+the server as a whole. It is answered **204** with an `Allow` header listing every
+method registered on any route, `HEAD` when `GET` is registered anywhere, and
+`OPTIONS`, sorted alphabetically (`Allow: OPTIONS` for an application without
+routes). No route is looked up and no handler runs, not even an OPTIONS route that
+matches every path; `resolve` returns empty and admission uses the default bucket, as
+for automatic OPTIONS. `*` is not a path and cannot be a route template.
+
+`Request` accepts the target `*` only with the method `OPTIONS` and no query
+(`Request.fromTarget("OPTIONS", "*")` or `new Request("OPTIONS", "*")`); its `path()`
+is then `"*"`. Any other method with `*`, `*?query`, `**` or `*/a` throws
+`InvalidRequestPathException`, which a listener answers with 400.
+
+Absolute-form targets (`GET http://host/path`) are rejected with 400 for every
+method, `OPTIONS` included. They are meant for proxies; an origin server must accept
+them (RFC 9112 section 3.2.2), but normalizing one would mean choosing between the
+target's authority and `Host`, so Axiom does not and treats them as an unsupported
+target.
+
 ## Conflicts and startup
 
 Identical method/template pairs fail at registration. So do distinct templates
