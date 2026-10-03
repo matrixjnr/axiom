@@ -3,6 +3,7 @@ package com.jsgalactic.axiom.http.internal;
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
+import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
@@ -28,40 +29,46 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class NettyServer implements Server {
+    // The production defaults; they live in ListenerOptions, which validates every override.
     /** How long close() lets in-flight exchanges finish before interrupting them. */
-    static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(5);
+    static final Duration SHUTDOWN_GRACE = ListenerOptions.defaults().shutdownGrace();
     /**
      * Network inactivity (no read and no write progress) after which a connection closes. It also
      * catches a response write stalled by a client that stopped reading.
      */
-    static final Duration IDLE_TIMEOUT = Duration.ofSeconds(30);
+    static final Duration IDLE_TIMEOUT = ListenerOptions.defaults().idleTimeout();
     /** Open connections per listener; further accepted connections close immediately. */
-    static final int MAX_CONNECTIONS = 128;
+    static final int MAX_CONNECTIONS = ListenerOptions.defaults().maxConnections();
     /**
      * Connections that only linger after their last response and no longer count against
      * {@link #MAX_CONNECTIONS}. Beyond this many, a lingering connection keeps its regular slot.
      */
-    static final int MAX_LINGERING = 32;
+    static final int MAX_LINGERING = ListenerOptions.defaults().maxLingeringConnections();
     /** Pending-accept queue length requested from the operating system. */
     static final int BACKLOG = 1024;
     /** Per-connection outbound buffering at which the channel reports itself unwritable. */
     static final WriteBufferWaterMark WATER_MARK = new WriteBufferWaterMark(32 * 1024, 128 * 1024);
-    private static final int IO_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors());
     private final MultiThreadIoEventLoopGroup acceptors = new MultiThreadIoEventLoopGroup(
             1, Thread.ofPlatform().name("axiom-http-accept-", 0).factory(), NioIoHandler.newFactory());
-    final MultiThreadIoEventLoopGroup io = new MultiThreadIoEventLoopGroup(
-            IO_THREADS, Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());
-    private final DefaultChannelGroup channels = new DefaultChannelGroup(io.next(), true);
+    final MultiThreadIoEventLoopGroup io;
+    private final DefaultChannelGroup channels;
     private final RequestDispatcher handlers;
     private final CompletableFuture<Void> stopped;
     private final AtomicBoolean closing = new AtomicBoolean();
-    private final ConnectionSlots slots = new ConnectionSlots(MAX_CONNECTIONS, MAX_LINGERING);
+    private final ConnectionSlots slots;
     private final TransportSettings settings;
+    private final HttpDecoderConfig decoderConfig;
     Channel listener;
     private InetSocketAddress address;
 
     private NettyServer(AdmissionPolicy policy, Metrics metrics, TransportSettings settings) {
         this.settings = settings;
+        var options = settings.options();
+        slots = new ConnectionSlots(options.maxConnections(), options.maxLingeringConnections());
+        decoderConfig = decoderConfig(options);
+        io = new MultiThreadIoEventLoopGroup(options.ioThreads(),
+                Thread.ofPlatform().name("axiom-http-io-", 0).factory(), NioIoHandler.newFactory());
+        channels = new DefaultChannelGroup(io.next(), true);
         handlers = new RequestDispatcher(policy, metrics);
         stopped = CompletableFuture.allOf(handlers.termination().toCompletableFuture(),
                 completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
@@ -117,19 +124,23 @@ final class NettyServer implements Server {
         channel.closeFuture().addListener(ignored -> slot.release());
         channel.pipeline().addLast(
                 new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS),
-                new RequestDecoder(decoderConfig()), new HttpResponseEncoder(),
+                new RequestDecoder(decoderConfig), new HttpResponseEncoder(),
                 new HttpConnection(application, handlers, settings, slot, closing::get));
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */
-    static HttpDecoderConfig decoderConfig() {
-        return new HttpDecoderConfig().setMaxInitialLineLength(4096)
-                .setMaxHeaderSize(8192).setMaxChunkSize(8192)
+    static HttpDecoderConfig decoderConfig() { return decoderConfig(ListenerOptions.defaults()); }
+
+    static HttpDecoderConfig decoderConfig(ListenerOptions options) {
+        return new HttpDecoderConfig().setMaxInitialLineLength(options.maxRequestLine())
+                .setMaxHeaderSize(options.maxHeaderBytes()).setMaxChunkSize(8192)
                 .setValidateHeaders(true).setAllowDuplicateContentLengths(false)
                 .setStrictLineParsing(true).setUseRfc9112TransferEncoding(true);
     }
 
     @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }
+    /** The bounds this listener applies; for tests. */
+    TransportSettings settings() { return settings; }
     /** Connections holding a regular slot; for tests. */
     int connections() { return slots.open(); }
     /** Lingering connections that no longer hold a regular slot; for tests. */

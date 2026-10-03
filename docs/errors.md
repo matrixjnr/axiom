@@ -146,15 +146,15 @@ The [method table](routing.md#methods) shows which of these each HTTP method rec
 | 406 | Accept excludes the codec response's media type, decided after the handler ran (see [negotiation](bodies.md#accept-negotiation-406)) | Runtime |
 | 408 | Request head not complete within ten seconds, or body not complete by the request deadline | Listener |
 | 413 | Body over `maxRequestBody` | Listener and runtime |
-| 414 | Request line longer than 4 KiB | Listener |
+| 414 | Request line longer than 4 KiB (`maxRequestLine`) | Listener |
 | 415 | Missing, unsupported or non-UTF-8 Content-Type in `ctx.body` | Runtime |
 | 417 | An `Expect` value other than `100-continue` | Listener |
-| 431 | Header section larger than 8 KiB | Listener |
+| 431 | Header section larger than 8 KiB (`maxHeaderBytes`) | Listener |
 | 500 | Unexpected handler or middleware exception without an error handler, unencodable or oversized response | Listener (in memory: exception propagates) |
 | 500 | Failing [error handler](#error-handlers) | Runtime |
 | 501 | CONNECT (also from `app.handle` and `TestClient`), Upgrade, or a single Transfer-Encoding line applying another coding before a final `chunked` (RFC 9112 section 6.1; see [wire behavior](http.md#wire-behavior)) | Listener |
 | 501 | No route matches the path and the method is not recognized | Runtime |
-| 503 | No execution capacity, queue wait expired, listener draining, more than eight outstanding pipelined requests or their bodies over the connection's share | Listener and `TestClient` |
+| 503 | No execution capacity, queue wait expired, listener draining, more than eight outstanding pipelined requests (`maxPipelinedRequests`) or their bodies over the connection's share | Listener and `TestClient` |
 | 504 | Request deadline expired while queued or running | Listener and `TestClient` |
 | 505 | HTTP version other than 1.0 or 1.1 | Listener |
 
