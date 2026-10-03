@@ -59,16 +59,14 @@ callbacks from before promotion cannot cancel the promoted request.
 Expiry does not depend on timers alone. Each queued request has a timer for the
 smaller of its queue wait and remaining deadline, and in addition every completed
 request, and every submission that would otherwise be refused for a full queue,
-checks the head of each route's queue, including routes at their own active
-limit that cannot promote anything. Because every request of a route has the
-same queue wait and joins its queue in arrival order, an expired queue wait
-always reaches the head first, so this check fails every expired wait without
-scanning the queue: its cost is bounded by the number of routes with waiting
-requests plus the requests it expires. A late timer therefore delays a queue-wait
-expiry only until the next completion or refused submission, and an expired wait
-never holds a queue slot that a new request needs. A request whose own execution
-deadline is shorter than the queue wait of the request ahead of it is expired by
-its timer, or when it reaches the head.
+fails every waiting request whose queue wait or execution deadline has run out, including
+requests of routes at their own active limit that cannot promote anything and requests whose
+own deadline is shorter than the wait of the requests ahead of them. Waiting requests are
+kept ordered by the moment they expire, so this check removes expired requests in order
+of expiry and stops at the first live one: its cost is a logarithmic removal per expired
+request, never a scan of the queue, and it holds the dispatcher lock for that long only.
+A late timer therefore delays an expiry only until the next completion or refused
+submission, and an expired request never holds a queue slot that a new request needs.
 
 - Full active capacity with no available queue slot: **503**, then connection close.
 - Queue wait expires: **503**, then connection close; the handler is never invoked.

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -38,6 +39,12 @@ public final class RequestDispatcher implements AutoCloseable {
     private final Set<Task<?>> tasks = new HashSet<>();
     private final Set<Bucket> queuedBuckets = new LinkedHashSet<>();
     private final Map<Object, Bucket> buckets = new HashMap<>();
+    /**
+     * Waiting requests ordered by the moment their queue wait or execution deadline runs out,
+     * whichever is first, so expired waits are found in order of expiry whatever their budgets.
+     * Insertion and removal are logarithmic; expiring k requests costs k removals.
+     */
+    private final TreeSet<Task<?>> byExpiry = new TreeSet<>(RequestDispatcher::expiresBefore);
     private final CompletableFuture<Void> stopped = new CompletableFuture<>();
     private int active;
     private int queued;
@@ -165,7 +172,7 @@ public final class RequestDispatcher implements AutoCloseable {
             boolean full = !room && queueFull(bucket);
             if (full) {
                 // Slots held by waits that already expired are reclaimed before refusing.
-                expireStaleHeads(signals);
+                expireDue(signals);
                 full = queueFull(bucket);
             }
             if (full) {
@@ -183,7 +190,11 @@ public final class RequestDispatcher implements AutoCloseable {
                     task.queuedAt = clock.getAsLong();
                     task.queueBudget = Math.min(policy.queueTimeout().toNanos(), endpointPolicy.queueTimeout().toNanos());
                     task.sequence = sequence++;
+                    // Both bounds in this dispatcher's clock, from the time the request joined the queue.
+                    task.deadlineAt = task.queuedAt + context.remainingTime().toNanos();
+                    task.expiresAt = Math.min(task.queuedAt + task.queueBudget, task.deadlineAt);
                     bucket.enqueue(task);
+                    byExpiry.add(task);
                     queued++;
                     metrics.queued(1);
                     queuedBuckets.add(bucket);
@@ -354,6 +365,7 @@ public final class RequestDispatcher implements AutoCloseable {
 
     private void unqueue(Task<?> task) {
         var bucket = task.bucket;
+        byExpiry.remove(task);
         bucket.waiting.remove(task);
         queued--;
         metrics.queued(-1);
@@ -395,28 +407,31 @@ public final class RequestDispatcher implements AutoCloseable {
     }
 
     /**
-     * Fails the expired heads of every endpoint queue, including endpoints at their own active
-     * limit, which {@link #drain} skips. The queue budget is the same for every request of an
-     * endpoint and arrival times are monotonic, so a queue-wait expiry always reaches the head
-     * first: removing expired heads until a live one is found removes every expired wait. Cost
-     * is bounded by queued endpoints plus the requests expired, never by queue length. A request
-     * whose own execution deadline is shorter than the head's remains its timer's to expire.
+     * Fails every waiting request whose queue wait or execution deadline has run out, including
+     * requests of endpoints at their own active limit, which {@link #drain} skips, and requests whose
+     * own deadline is shorter than the wait of the requests ahead of them. Requests are visited in
+     * order of expiry, so the cost is a logarithmic removal per expired request and never a scan of
+     * the queue.
      */
-    private void expireStaleHeads(List<Runnable> signals) {
-        if (queuedBuckets.isEmpty()) { return; }
+    private void expireDue(List<Runnable> signals) {
+        if (byExpiry.isEmpty()) { return; }
         long now = clock.getAsLong();
-        for (var bucket : List.copyOf(queuedBuckets)) {
-            while (!bucket.waiting.isEmpty()) {
-                var head = bucket.waiting.iterator().next();
-                var expired = expiry(head, now);
-                if (expired == null) { break; }
-                finish(head, null, expired, false, signals);
-            }
+        while (!byExpiry.isEmpty()) {
+            var first = byExpiry.first();
+            var expired = expiry(first, now);
+            if (expired == null) { return; }
+            finish(first, null, expired, false, signals);
         }
     }
 
+    /** Orders waiting requests by when they expire, then by arrival. */
+    private static int expiresBefore(Task<?> a, Task<?> b) {
+        long difference = a.expiresAt - b.expiresAt;
+        return difference != 0 ? Long.signum(difference) : Long.compare(a.sequence, b.sequence);
+    }
+
     private static Throwable expiry(Task<?> task, long now) {
-        if (task.context.isExpired()) { return new DeadlineExceededException(); }
+        if (task.context.isExpired() || now - task.deadlineAt >= 0) { return new DeadlineExceededException(); }
         if (now - task.queuedAt >= task.queueBudget) { return new QueueTimeoutException(); }
         return null;
     }
@@ -467,6 +482,9 @@ public final class RequestDispatcher implements AutoCloseable {
         private long sequence;
         private long queuedAt;
         private long queueBudget;
+        /** While waiting: when the execution deadline and the earlier of both bounds run out, on the dispatcher clock. */
+        private long deadlineAt;
+        private long expiresAt;
         private Thread runner;
         private boolean waiting;
         private boolean reserved;
@@ -525,7 +543,7 @@ public final class RequestDispatcher implements AutoCloseable {
                 finish(this, value, failure, false, signals);
                 runner = null;
                 release(this);
-                expireStaleHeads(signals);
+                expireDue(signals);
                 drain(signals);
             }
             publish(signals);
