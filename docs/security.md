@@ -5,7 +5,7 @@ the Axiom API; versions come from the BOM.
 
 | Module | Package | Contents |
 | --- | --- | --- |
-| `axiom-security` | `com.jsgalactic.axiom.security` | `Authenticator`, policies (`Security`), `TrustedProxies`, `HeaderRedaction`, `SecurityHeaders` |
+| `axiom-security` | `com.jsgalactic.axiom.security` | `Authenticator`, policies (`Security`), `TrustedProxies`, `HeaderRedaction`, `SecurityHeaders`, `Cors` |
 | `axiom-security-jwt` | `com.jsgalactic.axiom.security.jwt` | `JwtAuthenticator`: strict JWT bearer tokens (HMAC, RSA, ECDSA) |
 
 Core contributes the identity itself: `SecurityIdentity` and two `Context` methods, so
@@ -206,6 +206,45 @@ because exceptions pass through middleware before they become responses (tracked
 [#96](https://github.com/matrixjnr/axiom/issues/96); see the workaround in
 [middleware](middleware.md#middleware)).
 
+## CORS
+
+`Cors` is global middleware that answers browser preflights on top of the router's
+automatic `OPTIONS` (204 with `Allow`) and decorates cross-origin responses.
+
+```java
+app.use(Cors.builder()
+        .allowOrigin("https://app.example.com")
+        .allowMethods("GET", "POST", "DELETE")      // default: GET, HEAD
+        .allowHeaders("Content-Type", "Authorization")
+        .exposeHeaders("X-Request-ID")
+        .allowCredentials()
+        .maxAge(Duration.ofMinutes(10))             // default; 0 omits the header
+        .build());
+```
+
+- **Misconfiguration fails at `build()`**: no origin; the wildcard (`anyOrigin()`) together
+  with credentials or with listed origins; an origin that is not an exact lower-case
+  `http(s)://host[:port]` (no `*`, path, user information, `null`); `*` or invalid tokens as
+  methods or headers.
+- **Origins match exactly** against the request's `Origin` value, so a different scheme,
+  port, sub-domain suffix or a list of origins never matches. The matching origin is echoed
+  in `Access-Control-Allow-Origin` with `Vary: Origin` (`anyOrigin()` answers `*` and adds no
+  `Vary`).
+- **Preflight** is `OPTIONS` with `Origin` and `Access-Control-Request-Method`. The rest of
+  the chain runs first; a successful answer is decorated only when the origin is allowed, the
+  method is configured and in the route's `Allow`, and every requested header is configured
+  (at most 64). Anything else keeps the plain answer without CORS headers, so the browser
+  fails the preflight. An unrouted path stays 404. `Access-Control-Allow-Methods` lists the
+  configured methods the route allows; `Access-Control-Allow-Headers` echoes the requested,
+  validated headers.
+- A request from another origin is **not rejected**: CORS is enforced by the browser and is
+  not authentication. It is answered without CORS headers. Keep authenticating every request.
+- Register it with `app.use` globally: group middleware never see router answers, so a
+  group-scoped instance would miss preflights. Like other middleware, it does not decorate
+  responses mapped from exceptions, such as a 401 from a policy; a browser then reports a
+  CORS failure instead of the 401 for such responses
+  ([#96](https://github.com/matrixjnr/axiom/issues/96)).
+
 ## Rejected alternatives
 
 - A generic attribute map on `Context`: more API and untyped; the identity is the one
@@ -229,5 +268,5 @@ because exceptions pass through middleware before they become responses (tracked
   revocation or replay check (`jti`) ([#120](https://github.com/matrixjnr/axiom/issues/120)).
 - Security headers and other middleware headers are missing on problem responses
   ([#96](https://github.com/matrixjnr/axiom/issues/96)).
-- No sessions, cookies, CSRF protection, CORS or OAuth flows; authentication is
+- No sessions, cookies, CSRF protection or OAuth flows; authentication is
   per-request credentials only ([#122](https://github.com/matrixjnr/axiom/issues/122)).
