@@ -30,10 +30,12 @@ class TestClientStreamTest {
     /** Tells a test, without polling, that a request gave its admission slot back. */
     private static final class Releases implements Metrics {
         final Semaphore released = new Semaphore(0);
-        @Override public Counter counter(String name, String... tags) { return new Counter() {
-            @Override public void increment() { }
-            @Override public void add(long amount) { }
-        }; }
+        @Override public Counter counter(String name, String... tags) {
+            return new Counter() {
+                @Override public void increment() { }
+                @Override public void add(long amount) { }
+            };
+        }
         @Override public Gauge gauge(String name, String... tags) {
             return delta -> { if (name.equals("axiom.admission.active") && delta < 0) { released.release(); } };
         }
