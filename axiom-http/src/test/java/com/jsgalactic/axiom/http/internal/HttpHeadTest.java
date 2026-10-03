@@ -52,14 +52,14 @@ class HttpHeadTest {
             wire.write("HEAD /submit HTTP/1.1\r\nHost: a\r\n\r\n");
             var postOnly = wire.read(true);
             assertThat(postOnly.status()).isEqualTo(405);
-            assertThat(postOnly.headers()).containsEntry("Allow", "POST");
+            assertThat(postOnly.headers()).containsEntry("Allow", "OPTIONS, POST");
             assertThat(postOnly.headers()).containsEntry("Content-Type", "application/problem+json");
 
             // GET registered: Allow lists HEAD beside GET.
             wire.write("PUT /items/7 HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n");
             var mismatch = wire.read(false);
             assertThat(mismatch.status()).isEqualTo(405);
-            assertThat(mismatch.headers()).containsEntry("Allow", "GET, HEAD, POST");
+            assertThat(mismatch.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS, POST");
 
             wire.write("HEAD /missing HTTP/1.1\r\nHost: a\r\n\r\n");
             assertThat(wire.read(true).status()).isEqualTo(404);

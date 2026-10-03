@@ -119,7 +119,7 @@ class HttpMethodsTest {
                 wire.write("TRACE /x HTTP/1.1\r\nHost: a\r\nCookie: session=secret\r\nAuthorization: Bearer token\r\n\r\n");
                 var trace = wire.read(false);
                 assertThat(trace.status()).isEqualTo(405);
-                assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD");
+                assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
                 assertThat(trace.headers()).containsEntry("Content-Type", "application/problem+json");
                 assertThat(trace.headers().get("Content-Type")).isNotEqualTo("message/http");
                 assertThat(trace.text()).doesNotContain("secret").doesNotContain("token").doesNotContain("TRACE");
@@ -163,7 +163,7 @@ class HttpMethodsTest {
                 wire.write("FOO /dav HTTP/1.1\r\nHost: a\r\n\r\n");
                 var mismatch = wire.read(false);
                 assertThat(mismatch.status()).isEqualTo(405);
-                assertThat(mismatch.headers()).containsEntry("Allow", "PROPFIND");
+                assertThat(mismatch.headers()).containsEntry("Allow", "OPTIONS, PROPFIND");
 
                 wire.write("PROPFIND /missing HTTP/1.1\r\nHost: a\r\n\r\n");
                 assertThat(wire.read(false).status()).isEqualTo(404);
@@ -195,7 +195,7 @@ class HttpMethodsTest {
                     wire.write("POST /only-delete HTTP/1.1\r\nHost: a\r\n" + header + ": DELETE\r\nContent-Length: 0\r\n\r\n");
                     var mismatch = wire.read(false);
                     assertThat(mismatch.status()).as(header).isEqualTo(405);
-                    assertThat(mismatch.headers()).as(header).containsEntry("Allow", "DELETE");
+                    assertThat(mismatch.headers()).as(header).containsEntry("Allow", "DELETE, OPTIONS");
                 }
             }
         }
@@ -255,7 +255,7 @@ class HttpMethodsTest {
                 wire.write("Get /x HTTP/1.1\r\nHost: a\r\n\r\n");
                 var mixed = wire.read(false);
                 assertThat(mixed.status()).isEqualTo(405);
-                assertThat(mixed.headers()).containsEntry("Allow", "GET, HEAD, M-SEARCH, get");
+                assertThat(mixed.headers()).containsEntry("Allow", "GET, HEAD, M-SEARCH, OPTIONS, get");
                 // A method mismatch is a runtime error: the connection stays open.
                 assertThat(wire.get("/x").status()).isEqualTo(200);
             }

@@ -73,6 +73,8 @@ final class CompiledRouter {
             builder.literals.forEach((segment, child) -> literals.put(segment, child.frozen));
             var methods = new TreeSet<>(builder.endpoints.keySet());
             if (methods.contains("GET")) { methods.add("HEAD"); }
+            // Every routed path answers OPTIONS, with its own route or automatically.
+            methods.add("OPTIONS");
             builder.frozen = new Node(Map.copyOf(literals),
                     builder.parameter == null ? null : builder.parameter.frozen,
                     builder.wildcard == null ? null : builder.wildcard.frozen,
@@ -91,8 +93,8 @@ final class CompiledRouter {
      * Finds the most specific complete path match registered for the request method.
      * Complete matches are visited in precedence order; one without the method is skipped
      * so a less specific template can serve it. When no complete match has the method, the
-     * result reports a method mismatch whose Allow value is the union over all of them; for
-     * OPTIONS that union also lists OPTIONS, which the application then answers itself.
+     * result reports a method mismatch whose Allow value is the union over all of them, which
+     * always lists OPTIONS: for an OPTIONS request the application then answers itself.
      * {@code OPTIONS *} is never looked up: it reports a mismatch listing every registered method.
      */
     Match match(Request request) {
@@ -141,11 +143,6 @@ final class CompiledRouter {
             }
         }
         if (mismatch == null) { return null; }
-        if (method.equals("OPTIONS")) {
-            // Automatic OPTIONS: no matching template registered OPTIONS, so the application answers it.
-            if (allowed == null) { allowed = new TreeSet<>(mismatch.methods()); }
-            allowed.add("OPTIONS");
-        }
         return new Match(null, allowed == null ? mismatch.allow() : String.join(", ", allowed), null);
     }
 

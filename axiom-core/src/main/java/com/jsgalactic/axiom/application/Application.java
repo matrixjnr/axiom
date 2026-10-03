@@ -267,7 +267,7 @@ public interface Application extends RouteGroup, AutoCloseable {
      * body the HTTP transport could not send, so that HEAD fails where GET would.
      * Returns 404 for an unknown path (501 when the method is neither an RFC 9110 method, PATCH,
      * nor registered on any route), and 405 when no matching template has the method, with
-     * an Allow header listing the methods of all matching templates (HEAD wherever GET is).
+     * an Allow header listing the methods of all matching templates (HEAD wherever GET is, and OPTIONS).
      * An OPTIONS request that no matching template registered is answered 204 without invoking
      * a handler, with that Allow list plus OPTIONS. {@code OPTIONS *} is answered 204 without route
      * lookup, with an Allow list of every registered method (HEAD if GET is registered) plus OPTIONS.

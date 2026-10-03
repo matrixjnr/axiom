@@ -75,6 +75,33 @@ class HttpMethodsTest {
     }
 
     @Test
+    void methodNotAllowedListsOptionsAndMatchesTheOptionsAnswer() throws Exception {
+        try (var app = Axiom.create()) {
+            app.post("/submit", ctx -> "submit");
+            app.get("/items/:id", ctx -> "item");
+            app.delete("/items/*rest", ctx -> "delete");
+            app.options("/with-options", ctx -> "explicit");
+            app.get("/with-options", ctx -> "get");
+            app.start();
+            for (var path : java.util.List.of("/submit", "/items/7", "/items/7/x", "/with-options")) {
+                var mismatch = app.handle(new Request("PUT", path));
+                assertThat(mismatch.status()).as(path).isEqualTo(405);
+                assertThat(mismatch.headers().get("Allow")).as(path).contains("OPTIONS");
+                // OPTIONS itself is served, by a route or automatically, so 405 never contradicts it.
+                var options = app.handle(new Request("OPTIONS", path));
+                assertThat(options.status()).as(path).isIn(200, 204);
+            }
+            assertThat(app.handle(new Request("PUT", "/submit")).headers()).containsEntry("Allow", "OPTIONS, POST");
+            assertThat(app.handle(new Request("PUT", "/with-options")).headers())
+                    .containsEntry("Allow", "GET, HEAD, OPTIONS");
+            assertThat(app.handle(new Request("PUT", "/items/7")).headers())
+                    .containsEntry("Allow", "DELETE, GET, HEAD, OPTIONS");
+            assertThat(app.handle(new Request("OPTIONS", "/items/7")).headers())
+                    .containsEntry("Allow", app.handle(new Request("PUT", "/items/7")).headers().get("Allow"));
+        }
+    }
+
+    @Test
     void anExplicitOptionsRouteWinsAndAnUnknownPathStays404() throws Exception {
         try (var app = Axiom.create()) {
             app.get("/users/me", ctx -> "me");
@@ -158,7 +185,7 @@ class HttpMethodsTest {
                     Body.of("text/plain", "body-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
             var trace = app.handle(request);
             assertThat(trace.status()).isEqualTo(405);
-            assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD");
+            assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
             assertThat(new String((byte[]) trace.body(), java.nio.charset.StandardCharsets.UTF_8))
                     .doesNotContain("secret").doesNotContain("Cookie").doesNotContain("TRACE");
             assertThat(app.handle(new Request("TRACE", "/missing")).status()).isEqualTo(404);
@@ -197,7 +224,7 @@ class HttpMethodsTest {
             for (var method : new String[] {"FOO", "PROPPATCH", "QUERY", "get", "DELETE"}) {
                 var mismatch = app.handle(new Request(method, "/dav/7"));
                 assertThat(mismatch.status()).as(method).isEqualTo(405);
-                assertThat(mismatch.headers()).as(method).containsEntry("Allow", "GET, HEAD, PROPFIND, REPORT");
+                assertThat(mismatch.headers()).as(method).containsEntry("Allow", "GET, HEAD, OPTIONS, PROPFIND, REPORT");
             }
             // An unrouted path: 404 for standard methods and methods registered anywhere, 501 otherwise.
             for (var method : new String[] {"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE",
@@ -231,7 +258,7 @@ class HttpMethodsTest {
                     .isEqualTo("get GET");
             var mismatch = app.handle(new Request("POST", "/only-delete", Map.of(header, "DELETE"), Body.empty()));
             assertThat(mismatch.status()).isEqualTo(405);
-            assertThat(mismatch.headers()).containsEntry("Allow", "DELETE");
+            assertThat(mismatch.headers()).containsEntry("Allow", "DELETE, OPTIONS");
             // Not even for OPTIONS, TRACE or CONNECT, and not to escape 501.
             assertThat(app.handle(new Request("OPTIONS", "/x", Map.of(header, "DELETE"), Body.empty())).status())
                     .isEqualTo(204);

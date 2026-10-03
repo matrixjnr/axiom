@@ -42,7 +42,9 @@ Methods remain case-sensitive.
 
 When no complete match is registered for the method, the response is **405**. Its
 `Allow` header is the union of the methods registered on every template that
-matches the complete path, sorted alphabetically. An unknown path returns 404, or
+matches the complete path, plus `HEAD` wherever `GET` is and always `OPTIONS` (every
+routed path answers it, with a route or [automatically](#automatic-options)), sorted
+alphabetically: with only `POST /submit`, `PUT /submit` gets `Allow: OPTIONS, POST`. An unknown path returns 404, or
 501 for a method the application does not recognize (see
 [custom methods](#custom-methods)). All use `application/problem+json` bodies (see
 [errors](errors.md)). OPTIONS is the
@@ -63,7 +65,7 @@ body's encoded length, and the listener sends that header with no body bytes.
 
 This table is the reference for every method. "Routed" means at least one template
 matches the complete path; "Allow" is the union of the methods registered on all
-templates that match it, plus `HEAD` wherever `GET` is registered, sorted
+templates that match it, plus `HEAD` wherever `GET` is registered and `OPTIONS`, sorted
 alphabetically.
 
 | Method | Registration | Routed, a matching template has the method | Routed, no matching template has it | Not routed |
@@ -78,9 +80,9 @@ alphabetically.
 | Any other token, including `get` and `Get` | `route` (then it is an extension method) | | 405, `Allow` | 501 |
 | Not a token (`G(T`, `G T`, empty) | Refused: `IllegalArgumentException` | 400 from the listener, which closes the connection; `new Request` throws | | |
 
-`Allow` on a 405 lists only registered methods (and `HEAD` for `GET`); it never lists
-`TRACE` or `CONNECT`, and lists `OPTIONS` only where an OPTIONS route is registered,
-although the path also answers OPTIONS automatically. Every error in the table is an
+`Allow` on a 405 lists the registered methods, `HEAD` for `GET` and `OPTIONS` (which
+every routed path answers, RFC 9110 section 15.5.6), and is the same list the
+automatic OPTIONS answer sends. It never lists `TRACE` or `CONNECT`. Every error in the table is an
 `application/problem+json` response (see [errors](errors.md)); 400 and the listener's
 501 for CONNECT close the connection, the others keep it open. Request bodies are
 accepted and limited the same way for every method (see

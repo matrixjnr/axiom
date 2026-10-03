@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- List `OPTIONS` in the `Allow` header of 405 responses, since every routed path answers it (RFC 9110 section 15.5.6); the list now equals the automatic OPTIONS answer.
 - Add observability: a dependency-free `Metrics` SPI in core with `Application.metrics(...)`; the dispatcher records requests by method, route template and status class, latency, admission rejections, queue wait and active and queued depth (no raw paths or user input as tags); the opt-in `axiom-metrics` module with a bounded in-memory `MetricsRegistry` and `PrometheusText` renderer and handler; `Health` and `HealthCheck` for liveness and readiness with `/health/live` and `/health/ready` routes and `beginDrain()`; and a strictly parsed W3C `traceparent` as `Context.traceContext()`. **Binary incompatible (pre-release):** `Application` gained `metrics(Metrics)` and `metrics()`. See `docs/observability.md`.
 - Add opt-in security modules: `axiom-security` (Authenticator SPI, `authenticate`/`authenticated`/`hasRole`/`hasAnyRole`/`hasPermission` policies answering 401 or 403, trusted-proxy client addresses, header redaction, secure default response headers) and `axiom-security-jwt` (strict JDK-only JWT bearer authenticator for HS, RS and ES algorithms). Core gains `SecurityIdentity`, `Context.identity()` and the set-once `Context.identity(SecurityIdentity)`.
 - Expose the connection's peer as `Request.remoteAddress()` (set by the HTTP listener, `null` in memory) with `Request.withRemoteAddress`. `Request` gained a sixth record component; the five-argument constructor remains.
