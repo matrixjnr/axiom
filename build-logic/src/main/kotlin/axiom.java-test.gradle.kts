@@ -1,6 +1,12 @@
-plugins { id("axiom.java-base") }
+plugins {
+    id("axiom.java-base")
+    jacoco
+}
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
+// Every Test task (test and integrationTest) runs with the JaCoCo agent and writes
+// build/jacoco/<task>.exec. No class is excluded from coverage.
+jacoco { toolVersion = libs.findVersion("jacoco").get().requiredVersion }
 dependencies {
     "testImplementation"(platform(libs.findLibrary("junit-bom").get()))
     "testImplementation"(libs.findLibrary("junit-jupiter").get())
@@ -38,3 +44,14 @@ val checkIntegrationTags = tasks.register("checkIntegrationTags") {
     }
 }
 tasks.named("check") { dependsOn(checkIntegrationTags) }
+
+// Per-module coverage: build/reports/jacoco/test/{html,jacocoTestReport.xml} from the execution
+// data of every Test task in the module. Runs those tests; not part of check.
+tasks.named<JacocoReport>("jacocoTestReport") {
+    dependsOn(tasks.withType<Test>())
+    executionData.setFrom(fileTree(layout.buildDirectory.dir("jacoco")) { include("*.exec") })
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}

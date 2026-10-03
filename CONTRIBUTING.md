@@ -10,6 +10,8 @@ and run in the module's `integrationTest` task (the module applies the
 `axiom.integration-test` convention); all other tests run in `test`. `./gradlew unitTest`
 and `./gradlew integrationTest` run either half for every module; `check` runs both. See
 `docs/build.md`.
+`./gradlew coverageReport` writes per-module and aggregated JaCoCo reports; coverage
+is reported, not yet enforced.
 
 Every commit of a pull request must pass `./gradlew check` on its own; CI builds each
 commit (see `docs/build.md`). Add the checksums in `gradle/verification-metadata.xml`

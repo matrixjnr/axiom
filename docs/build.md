@@ -96,6 +96,49 @@ Split when it was introduced (classes / tests):
 | examples/rest-api | 0 / 0 | 1 / 3 |
 | total | 48 / 568 | 14 / 241 |
 
+## Coverage
+
+The `axiom.java-test` convention applies the Gradle `jacoco` plugin with the JaCoCo version
+pinned in the version catalog (`jacoco`). Every test task (`test` and `integrationTest`) runs
+with the JaCoCo agent and writes `build/jacoco/<task>.exec` in its module.
+
+- Per module: `./gradlew :axiom-http:jacocoTestReport` runs the module's test tasks and writes
+  `build/reports/jacoco/test/html/` and `build/reports/jacoco/test/jacocoTestReport.xml` from
+  the execution data of both. It covers the module's classes with the module's own tests only.
+- Aggregated: `./gradlew coverageReport` (root) runs the tests it needs, writes every
+  per-module report, and writes `build/reports/jacoco/coverageReport/html/` and
+  `build/reports/jacoco/coverageReport/coverageReport.xml`. The root applies Gradle's
+  `jacoco-report-aggregation` plugin over the eight library modules and `integration-tests`,
+  so a class is covered by any test of any of them (for example, codec classes exercised by
+  `integration-tests`). The `axiom.integration-test` convention publishes the
+  `integrationTest` execution data as a variant with the test suite name `integrationTest`;
+  the root merges the `test` and `integrationTest` aggregates (also available on their own
+  as `testCodeCoverageReport` and `integrationTestCodeCoverageReport`). The BOM has no code;
+  examples and benchmarks are not library code and are not aggregated.
+
+No class is excluded from coverage. Coverage is reported, not enforced: there is no
+minimum yet. Per-module floors will be introduced later, starting from the baseline below,
+and then raised.
+
+Baseline, measured on 2026-10-03 with JaCoCo 0.8.15 by `./gradlew coverageReport` on the
+commit that introduced coverage (parent `bf8e50b`), as covered lines and branches:
+
+| Module | Line, aggregated | Branch, aggregated | Line, own tests | Branch, own tests |
+| --- | --- | --- | --- | --- |
+| axiom-core | 92.8% (544/586) | 89.5% (418/467) | 87.4% (512/586) | 88.4% (413/467) |
+| axiom-server | 97.3% (695/714) | 89.4% (454/508) | 96.9% (692/714) | 88.4% (449/508) |
+| axiom-http | 98.2% (389/396) | 83.9% (292/348) | 98.2% (389/396) | 83.9% (292/348) |
+| axiom-json | 94.0% (142/151) | 81.2% (69/85) | 94.0% (142/151) | 81.2% (69/85) |
+| axiom-test | 93.8% (45/48) | 70.0% (14/20) | 93.8% (45/48) | 70.0% (14/20) |
+| axiom-validation | 97.6% (248/254) | 91.1% (224/246) | 97.6% (248/254) | 91.1% (224/246) |
+| axiom-validation-jakarta | 90.7% (78/86) | 73.9% (65/88) | 90.7% (78/86) | 73.9% (65/88) |
+| total | 95.8% (2141/2235) | 87.2% (1536/1762) | | |
+
+"Aggregated" is the module's share of `coverageReport` (all tests of all aggregated
+modules); "own tests" is the module's `jacocoTestReport`. `axiom-starter` has no classes.
+Of the total, `test` alone covers 90.7% of lines and 81.8% of branches, `integrationTest`
+alone 68.3% and 54.6%.
+
 ## Allocation-based tests
 
 The no-copy tests measure allocation per thread through `com.sun.management.ThreadMXBean`
@@ -188,9 +231,14 @@ artifact resolved by the main build and by `build-logic` (including Gradle plugi
 generated with:
 
 ```sh
-./gradlew --write-verification-metadata sha256 clean check publishAllPublicationsToCompatRepository \
-    --rerun-tasks --no-build-cache --no-configuration-cache
+./gradlew --write-verification-metadata sha256 clean check coverageReport \
+    publishAllPublicationsToCompatRepository --rerun-tasks --no-build-cache --no-configuration-cache
 ```
+
+Run it with an empty Gradle home (`GRADLE_USER_HOME` pointing at a new directory), so every
+artifact is downloaded and checksummed rather than taken from a cache. `coverageReport` is
+included because the JaCoCo agent, report and aggregation configurations are resolved only
+when coverage runs.
 
 The checksums were taken from the repositories as served at generation time and
 are trust-on-first-use; signature verification is off. A modified checksum makes the
