@@ -13,5 +13,7 @@ dependencies {
         api(project(":axiom-starter"))
         api(project(":axiom-validation"))
         api(project(":axiom-validation-jakarta"))
+        api(project(":axiom-security"))
+        api(project(":axiom-security-jwt"))
     }
 }
