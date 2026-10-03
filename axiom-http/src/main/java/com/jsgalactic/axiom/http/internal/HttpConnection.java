@@ -34,6 +34,7 @@ import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.codec.http.TooLongHttpHeaderException;
 import io.netty.handler.codec.http.TooLongHttpLineException;
+import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCounted;
 import java.net.InetSocketAddress;
@@ -311,7 +312,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var peer = ctx.channel().remoteAddress() instanceof InetSocketAddress address && !address.isUnresolved()
                     ? address : null;
             receiving = new Exchange(Request.fromTarget(request.method().name(), request.uri()).withHeaders(fields)
-                    .withRemoteAddress(peer),
+                    .withRemoteAddress(peer).withTls(ctx.pipeline().get(SslHandler.class) != null),
                     HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
         } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
         if (chunked || length > 0) {
@@ -712,7 +713,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         boolean shuttingDown = draining || listenerClosing.getAsBoolean();
         lingerDeadline = now + (shuttingDown ? Math.min(lingerNanos, shutdownLingerNanos) : lingerNanos);
         scheduleLingerCheck(ctx, now);
-        duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
+        // A TLS connection says goodbye with close_notify before the TCP half-close.
+        var ssl = ctx.pipeline().get(SslHandler.class);
+        if (ssl == null) {
+            duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
+        } else {
+            ssl.closeOutbound().addListener(sent -> {
+                if (!sent.isSuccess() || !ctx.channel().isActive()) { ctx.close(); return; }
+                duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
+            });
+        }
     }
 
     /** Arms the single linger timer for whichever comes first: the deadline or the quiet period. */

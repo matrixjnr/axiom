@@ -94,6 +94,10 @@ contract, and its `test` task is disabled. A module whose tests carry the tag wi
 applying `axiom.integration-test` fails `check` (`checkIntegrationTags`) instead of
 silently running those tests nowhere.
 
+TLS tests (`TlsListenerTest`) generate their certificates with the JDK's own `keytool` from
+`java.home` and write the PEM files themselves, so they need a JDK rather than a JRE and no
+third-party library; each test removes its temporary directory.
+
 The root project has two aggregates: `./gradlew unitTest` runs every module's `test`, and
 `./gradlew integrationTest` runs every module's `integrationTest`. A single module runs as
 `./gradlew :axiom-http:test` or `./gradlew :axiom-http:integrationTest`.

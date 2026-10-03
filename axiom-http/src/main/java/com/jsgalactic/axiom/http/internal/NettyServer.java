@@ -5,6 +5,7 @@ import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
+import com.jsgalactic.axiom.lifecycle.TlsConfigurationException;
 import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
@@ -19,12 +20,14 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpResponseEncoder;
+import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.IdleStateHandler;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -58,11 +61,20 @@ final class NettyServer implements Server {
     private final ConnectionSlots slots;
     private final TransportSettings settings;
     private final HttpDecoderConfig decoderConfig;
+    private static final System.Logger LOG = System.getLogger(NettyServer.class.getName());
+    private final TlsMetrics tlsMetrics;
+    /** The key material new connections use; replaced as a whole by a reload. Null for plain HTTP. */
+    private volatile TlsMaterial tls;
+    private final Object reloadLock = new Object();
+    private String failedFingerprint;
+    private ScheduledFuture<?> tlsPoll;
     Channel listener;
     private InetSocketAddress address;
 
-    private NettyServer(AdmissionPolicy policy, Metrics metrics, TransportSettings settings) {
+    private NettyServer(AdmissionPolicy policy, Metrics metrics, TransportSettings settings, TlsMaterial tls) {
         this.settings = settings;
+        this.tls = tls;
+        this.tlsMetrics = new TlsMetrics(metrics);
         var options = settings.options();
         slots = new ConnectionSlots(options.maxConnections(), options.maxLingeringConnections());
         decoderConfig = decoderConfig(options);
@@ -81,7 +93,10 @@ final class NettyServer implements Server {
     /** Binds with non-default bounds; for tests that must tolerate a slow machine or observe one bound. */
     static NettyServer bind(Application application, InetSocketAddress address, TransportSettings settings)
             throws IOException {
-        var server = new NettyServer(application.admissionPolicy(), application.metrics(), settings);
+        // Invalid key material stops startup before any thread or socket exists.
+        var tlsOptions = settings.options().tls();
+        var material = tlsOptions.isPresent() ? TlsMaterial.load(tlsOptions.get()) : null;
+        var server = new NettyServer(application.admissionPolicy(), application.metrics(), settings, material);
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
                     .channel(NioServerSocketChannel.class)
@@ -101,6 +116,7 @@ final class NettyServer implements Server {
             if (!bound.isSuccess()) { throw new IOException("Could not bind HTTP listener to " + address, bound.cause()); }
             server.listener = bound.channel();
             server.address = (InetSocketAddress) server.listener.localAddress();
+            server.startTlsPolling();
             return server;
         } catch (IOException | RuntimeException | Error failure) {
             server.close();
@@ -122,6 +138,18 @@ final class NettyServer implements Server {
         }
         // The slot is released exactly once, by this listener, whether or not setup succeeds.
         channel.closeFuture().addListener(ignored -> slot.release());
+        var material = tls;
+        if (material != null) {
+            try {
+                var ssl = new SslHandler(material.newEngine());
+                ssl.setHandshakeTimeoutMillis(settings.options().handshakeTimeout().toMillis());
+                channel.pipeline().addLast(ssl, new TlsHandshakeHandler(tlsMetrics));
+            } catch (RuntimeException failure) {
+                LOG.log(System.Logger.Level.ERROR, "Could not start TLS on a connection; it was closed", failure);
+                channel.close();
+                return;
+            }
+        }
         channel.pipeline().addLast(
                 new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS),
                 new RequestDecoder(decoderConfig), new HttpResponseEncoder(),
@@ -136,6 +164,53 @@ final class NettyServer implements Server {
                 .setMaxHeaderSize(options.maxHeaderBytes()).setMaxChunkSize(8192)
                 .setValidateHeaders(true).setAllowDuplicateContentLengths(false)
                 .setStrictLineParsing(true).setUseRfc9112TransferEncoding(true);
+    }
+
+    @Override public void reloadTls() throws IOException {
+        var options = settings.options().tls()
+                .orElseThrow(() -> new IllegalStateException("This listener does not serve TLS"));
+        synchronized (reloadLock) {
+            try {
+                tls = TlsMaterial.load(options);
+                failedFingerprint = null;
+                tlsMetrics.reload(TlsMetrics.Reload.COMPLETED);
+            } catch (TlsConfigurationException rejected) {
+                tlsMetrics.reload(TlsMetrics.Reload.FAILED);
+                throw rejected;
+            }
+        }
+    }
+
+    private void startTlsPolling() {
+        var interval = settings.options().tls().flatMap(options -> options.reloadInterval());
+        if (interval.isEmpty()) { return; }
+        long millis = interval.get().toMillis();
+        // Parsing and key generation do not belong on the acceptor thread.
+        tlsPoll = acceptors.next().scheduleWithFixedDelay(
+                () -> Thread.ofVirtual().name("axiom-tls-reload").start(this::pollTls), millis, millis, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Reloads the key material when its files changed since they were last loaded. A rejected
+     * change is logged and counted once per distinct content and retried when the files change
+     * again; the previous material stays in use. For the polling task and tests.
+     */
+    void pollTls() {
+        var options = settings.options().tls();
+        if (options.isEmpty() || closing.get()) { return; }
+        synchronized (reloadLock) {
+            var current = TlsMaterial.currentFingerprint(options.get());
+            if (current == null || current.equals(tls.fingerprint()) || current.equals(failedFingerprint)) { return; }
+            try {
+                tls = TlsMaterial.load(options.get());
+                tlsMetrics.reload(TlsMetrics.Reload.COMPLETED);
+            } catch (TlsConfigurationException rejected) {
+                failedFingerprint = current;
+                tlsMetrics.reload(TlsMetrics.Reload.FAILED);
+                LOG.log(System.Logger.Level.WARNING, "TLS reload rejected, keeping the previous material: "
+                        + rejected.getMessage());
+            }
+        }
     }
 
     @Override public AdmissionSnapshot admission() { return handlers.snapshot(); }
@@ -162,6 +237,7 @@ final class NettyServer implements Server {
         // per-connection drain also runs at once rather than after the listening socket has closed,
         // which completes on the acceptor thread and may be delayed.
         handlers.stopAdmission();
+        if (tlsPoll != null) { tlsPoll.cancel(false); }
         if (listener == null) { stop(); return; }
         // Accepts racing with this see the flag and close themselves (see accept).
         var drained = channels.newCloseFuture();

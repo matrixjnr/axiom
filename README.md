@@ -130,6 +130,9 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
   deadlines ([programming model](docs/programming-model.md#testing-without-ports)).
 - **Graceful drain**: closing a listener stops admission, lets running handlers finish
   within a grace period, then interrupts them ([HTTP listeners](docs/http.md#ownership-and-shutdown)).
+- **TLS** on the HTTP/1.1 listener with the JDK's TLS: PEM or `SSLContext` key material validated at
+  startup, TLS 1.2 minimum with modern suites, optional mutual TLS, certificate reload without a
+  restart, ALPN `http/1.1`, and `Request.isSecure()` ([TLS](docs/tls.md)).
 - **Security modules (opt-in)**: a request-scoped `SecurityIdentity`, an `Authenticator`
   SPI, `authenticated()`/`hasRole`/`hasPermission` policies (401 vs 403 problem responses),
   a strict JDK-only JWT authenticator, trusted-proxy client addresses, header redaction and
@@ -144,7 +147,7 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 
 ## Not yet
 
-- TLS and HTTP/2
+- HTTP/2
 - WebSocket
 - Streaming request bodies (request bodies are buffered in memory)
 - Sessions, cookie authentication, CSRF, CORS and OAuth flows; JWKS key fetching
@@ -301,7 +304,7 @@ Details are in [build decisions](docs/build.md).
   [errors](docs/errors.md),
   [middleware](docs/middleware.md), [validation](docs/validation.md), [security](docs/security.md),
   [observability](docs/observability.md)
-- [HTTP listeners](docs/http.md), [execution and deadlines](docs/execution.md),
+- [HTTP listeners](docs/http.md), [TLS](docs/tls.md), [execution and deadlines](docs/execution.md),
   [admission](docs/admission.md), [benchmarks](docs/benchmarks.md)
 - [Build decisions](docs/build.md), [releasing](docs/releasing.md),
   [changelog](CHANGELOG.md)
