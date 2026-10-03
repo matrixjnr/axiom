@@ -126,7 +126,12 @@ reset. The quiet period is longer than a typical TCP retransmission timeout, so 
 single lost segment does not end it. The trade-off is a client that is still sending
 but pauses for longer (a very lossy link, or a client that stalls between writes): its
 next bytes arrive at a closed connection, the operating system answers with a reset,
-and response bytes the client has not read yet may be lost. Once the listener is
+and response bytes the client has not read yet may be lost. The quiet period is the
+`lingerQuietTimeout` listener option (see [listener options](#listener-options)): raise it
+for clients known to upload slowly or over lossy links, up to the `lingerTimeout` total, which
+is the hard bound either way. The cost of a longer period is that a client which reads the
+response and then idles keeps its lingering connection (and its socket) for that long, which
+the lingering pool and its bound limit (see [resource limits](#resource-limits)). Once the listener is
 closing, lingering lasts at most 500 milliseconds in total by default, so lingering connections
 barely delay shutdown. A lingering connection holds no request data and no longer
 counts against the connection limit (see [resource limits](#resource-limits)).
@@ -217,8 +222,10 @@ within 30 seconds of handing it to the socket: a client that keeps reading a few
 bytes at a time never looks inactive, so without this bound it could hold a
 connection indefinitely. When the bound passes, the connection closes and the
 client receives a truncated response; at the 1 MiB response limit this needs a
-client reading slower than about 35 KB/s. The bound covers final responses, not the
-interim `100 Continue`, which carries no body. A [stream](streaming.md) is not a response of at
+client reading slower than about 35 KB/s. The same bound applies to the write of the interim
+`100 Continue`, tracked separately from the final response because the client may send its body
+while that write is pending: a client that never reads loses the connection after
+`responseTimeout` instead of after the inactivity timeout. A [stream](streaming.md) is not a response of at
 most 1 MiB: its body is limited by its own byte cap (64 MiB by default), by the request
 deadline, and by the same 30 seconds for a client that takes no data, applied to each wait for
 the channel to become writable rather than to the whole stream. The inactivity timeout does not
@@ -263,7 +270,7 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `shutdownGrace` | 5 s | 0 to 1 day | Time `close()` lets running exchanges finish before connections close and handlers are interrupted; zero interrupts at once |
 | `idleTimeout` | 30 s | 1 ms to 1 day | Network inactivity after which a connection closes |
 | `headTimeout` | 10 s | 1 ms to 1 day | Time from a request's first byte until its head is complete (408) |
-| `responseTimeout` | 30 s | 1 ms to 1 day | Time to write one response to the socket |
+| `responseTimeout` | 30 s | 1 ms to 1 day | Time to write one response to the socket, including an interim `100 Continue` |
 | `lingerTimeout` | 2 s | 1 ms to 1 day | Total linger after the last response |
 | `lingerQuietTimeout` | 500 ms | 1 ms to 1 day | Silence that ends lingering |
 | `shutdownLingerTimeout` | 500 ms | 1 ms to 1 day | Total linger once the listener is closing (the smaller of this and `lingerTimeout` applies) |

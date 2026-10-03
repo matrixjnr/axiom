@@ -141,6 +141,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private long lastInput;
     /** Bounds the response write in progress; at most one response is written at a time. */
     private ScheduledFuture<?> responseTimer;
+    /**
+     * Bounds the write of the interim {@code 100 Continue}. Separate from {@link #responseTimer}
+     * because the client may send the body, and the final response may start, while it is pending.
+     */
+    private ScheduledFuture<?> continueTimer;
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
     /**
@@ -383,8 +388,18 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private void sendContinue(ChannelHandlerContext ctx) {
         if (!continuePending || busy || !pending.isEmpty() || closing || deferredStatus != 0) { return; }
         continuePending = false;
-        ctx.writeAndFlush(new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE,
-                Unpooled.EMPTY_BUFFER)).addListener(future -> { if (!future.isSuccess()) { abort(ctx); } });
+        var written = ctx.writeAndFlush(new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
+                HttpResponseStatus.CONTINUE, Unpooled.EMPTY_BUFFER));
+        // The interim response is a response write like any other: a client that never reads loses
+        // the connection after the response timeout instead of holding it for the inactivity timeout.
+        if (!written.isDone()) {
+            continueTimer = ctx.executor().schedule(() -> { continueTimer = null; abort(ctx); },
+                    responseNanos, TimeUnit.NANOSECONDS);
+        }
+        written.addListener(future -> {
+            if (continueTimer != null) { continueTimer.cancel(false); continueTimer = null; }
+            if (!future.isSuccess()) { abort(ctx); }
+        });
     }
 
     /** HTTP/1.1 requires exactly one Host; HTTP/1.0 may omit it but must not send an invalid one. */
@@ -750,6 +765,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         closing = true;
         if (lingerTimer != null) { lingerTimer.cancel(false); lingerTimer = null; }
         if (responseTimer != null) { responseTimer.cancel(false); responseTimer = null; }
+        if (continueTimer != null) { continueTimer.cancel(false); continueTimer = null; }
         headComplete();
         releaseBody();
         receiving = null;

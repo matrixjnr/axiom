@@ -90,6 +90,66 @@ class HttpContinueTest {
         assertRejectedAfterEarlierResponse("POST /echo HTTP/1.1\r\nHost: a\r\nExpect: 100-continue, x\r\nContent-Length: 5\r\n\r\n", 417);
     }
 
+    /** A channel whose writes stay pending, like a client that reads nothing, with the clock frozen. */
+    private EmbeddedChannel stalledChannel(java.util.List<io.netty.channel.ChannelPromise> promises,
+            java.util.List<Object> held) {
+        var stall = new io.netty.channel.ChannelOutboundHandlerAdapter() {
+            @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
+                    io.netty.channel.ChannelPromise promise) { held.add(message); promises.add(promise); }
+        };
+        var stalled = new EmbeddedChannel(stall, new RequestDecoder(NettyServer.decoderConfig()),
+                new HttpResponseEncoder(), new HttpConnection(app, executor, TRANSPORT, null, () -> false));
+        stalled.freezeTime();
+        return stalled;
+    }
+
+    /** A response bound well inside the request deadline (10 s), so only it can close the connection. */
+    private static final TransportSettings TRANSPORT =
+            TransportSettings.DEFAULTS.withResponseTimeout(java.time.Duration.ofSeconds(2));
+    private static final long BOUND = TRANSPORT.responseTimeout().toMillis();
+
+    private static final String EXPECTING = "POST /echo HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\n"
+            + "Content-Length: 5\r\n\r\n";
+
+    @Test void interimResponseThatTheClientNeverReadsClosesTheConnectionAtTheResponseTimeout() {
+        var promises = new java.util.ArrayList<io.netty.channel.ChannelPromise>();
+        var held = new java.util.ArrayList<Object>();
+        var stalled = stalledChannel(promises, held);
+        try {
+            stalled.writeInbound(ascii(EXPECTING));
+            assertThat(held).isNotEmpty();
+            stalled.advanceTimeBy(BOUND - 1, TimeUnit.MILLISECONDS);
+            stalled.runScheduledPendingTasks();
+            assertThat(stalled.isActive()).isTrue();
+            stalled.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+            stalled.runScheduledPendingTasks();
+            assertThat(stalled.isActive()).isFalse();
+        } finally {
+            held.forEach(io.netty.util.ReferenceCountUtil::release);
+            stalled.finishAndReleaseAll();
+        }
+    }
+
+    @Test void interimResponseTakenBeforeTheResponseTimeoutLeavesNoDeadlineBehind() {
+        var promises = new java.util.ArrayList<io.netty.channel.ChannelPromise>();
+        var held = new java.util.ArrayList<Object>();
+        var stalled = stalledChannel(promises, held);
+        try {
+            stalled.writeInbound(ascii(EXPECTING));
+            assertThat(held).isNotEmpty();
+            stalled.advanceTimeBy(BOUND - 1, TimeUnit.MILLISECONDS);
+            stalled.runScheduledPendingTasks();
+            // The encoder splits the response into several writes; the client takes all of them.
+            held.forEach(io.netty.util.ReferenceCountUtil::release);
+            promises.forEach(io.netty.channel.ChannelPromise::setSuccess);
+            stalled.advanceTimeBy(BOUND, TimeUnit.MILLISECONDS);
+            stalled.runScheduledPendingTasks();
+            assertThat(stalled.isActive()).isTrue();
+        } finally {
+            stalled.finishAndReleaseAll();
+        }
+    }
+
     private void assertRejectedAfterEarlierResponse(String request, int status) throws Exception {
         channel.writeInbound(ascii(SLOW + request));
         assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
