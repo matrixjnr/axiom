@@ -14,8 +14,9 @@ type appears in an Axiom API, and applications add `axiom-json` with `runtimeOnl
 The 2.x line was chosen because its package names and exceptions are stable across
 the ecosystem; moving to Jackson 3 would only change `axiom-json` internals.
 Telemetry dependencies will be selected when their implementations land.
-JPMS and stress suites are later work. The BOM constrains all eight published libraries
-(core, server, http, json, test, the starter, validation and validation-jakarta).
+JPMS and stress suites are later work. The BOM constrains all ten published libraries
+(core, server, http, json, test, the starter, validation, validation-jakarta, security and
+security-jwt).
 
 Validation uses Hibernate Validator 9.1 (the Jakarta Validation 3.1 reference
 implementation, actively maintained, Java 17+, with container-element constraints and
@@ -42,6 +43,10 @@ Jakarta Validation and Hibernate Validator (`jakarta.validation`, `org.hibernate
 are confined to `axiom-validation-jakarta`, which depends on `axiom-validation`, which
 depends on core only. Both validation modules may use `axiom-test` in test configurations
 only, for end-to-end tests; a signature test keeps provider types out of their public API.
+`axiom-security` depends on core only and `axiom-security-jwt` on `axiom-security`; neither
+may declare an external production dependency, so JWT parsing and signature verification
+use the JDK. Both may use `axiom-test` in test configurations only. They are published and
+constrained by the BOM but not part of the starter.
 
 Core discovers the default runtime through a JDK service provider. HTTP and test
 client consumers receive core through `api`. HTTP uses server through
@@ -108,7 +113,7 @@ with the JaCoCo agent and writes `build/jacoco/<task>.exec` in its module.
 - Aggregated: `./gradlew coverageReport` (root) runs the tests it needs, writes every
   per-module report, and writes `build/reports/jacoco/coverageReport/html/` and
   `build/reports/jacoco/coverageReport/coverageReport.xml`. The root applies Gradle's
-  `jacoco-report-aggregation` plugin over the eight library modules and `integration-tests`,
+  `jacoco-report-aggregation` plugin over the ten library modules and `integration-tests`,
   so a class is covered by any test of any of them (for example, codec classes exercised by
   `integration-tests`). The `axiom.integration-test` convention publishes the
   `integrationTest` execution data as a variant with the test suite name `integrationTest`;
@@ -192,7 +197,7 @@ Every library module applies the `axiom.publish` convention (through
 `axiom.java-library`); the BOM applies it directly. Each publishes a binary jar, a
 sources jar, a Javadoc jar, a POM (name, description, URL, Apache-2.0 license, SCM,
 issue tracker, developer) and Gradle module metadata. The BOM is a `java-platform`
-that constrains the eight published library modules. Archives stay reproducible.
+that constrains the ten published library modules. Archives stay reproducible.
 
 Targets: `build/compat-repo` (a file repository used by the compatibility tests) and,
 only when `axiom.publish.url` is given, one remote repository whose credentials come
@@ -286,7 +291,7 @@ the Gradle cache of `gradle/actions/setup-gradle`:
 | Job | Runs | Timeout |
 | --- | --- | --- |
 | `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
-| `unit` | `./gradlew :<module>:test -Daxiom.requireAllocationTests=true`, a matrix over the seven library modules with tests; uploads the module's test report on failure | 20 min |
+| `unit` | `./gradlew :<module>:test -Daxiom.requireAllocationTests=true`, a matrix over the nine library modules with tests; uploads the module's test report on failure | 20 min |
 | `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure | 30 min |
 | `quality` | `./gradlew coverageReport`, uploads `build/reports/jacoco/coverageReport/` (XML and HTML) as the `coverage-report` artifact, then the hello smoke run `./gradlew :examples:hello:run --args=--smoke` | 30 min |
 | `check` | needs the four jobs above and fails unless each succeeded (it runs even when one failed or was cancelled) | 5 min |

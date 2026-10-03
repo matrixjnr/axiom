@@ -118,6 +118,10 @@ try (var client = TestClient.start(TasksApi.create())) {
   deadlines ([programming model](docs/programming-model.md#testing-without-ports)).
 - **Graceful drain**: closing a listener stops admission, lets running handlers finish
   within a grace period, then interrupts them ([HTTP listeners](docs/http.md#ownership-and-shutdown)).
+- **Security modules (opt-in)**: a request-scoped `SecurityIdentity`, an `Authenticator`
+  SPI, `authenticated()`/`hasRole`/`hasPermission` policies (401 vs 403 problem responses),
+  a strict JDK-only JWT authenticator, trusted-proxy client addresses, header redaction and
+  secure default headers ([security](docs/security.md)).
 - **Secure path handling**: raw paths with dot or empty segments, backslashes or encoded
   separators are rejected with 400, never normalized ([routing](docs/routing.md#raw-paths-and-ownership)).
 
@@ -126,7 +130,7 @@ try (var client = TestClient.start(TasksApi.create())) {
 - TLS and HTTP/2
 - WebSocket and server-sent events
 - Streaming request and response bodies (bodies are buffered in memory)
-- Security features such as authentication and JWT
+- Sessions, cookie authentication, CSRF, CORS and OAuth flows; JWKS key fetching
 - Observability integrations such as metrics and tracing
 - OpenAPI generation
 - Native transports (epoll, io_uring)
@@ -147,6 +151,8 @@ remaining milestones in the [roadmap, #18](https://github.com/matrixjnr/axiom/is
 | `axiom-test` | `axiom-test` | In-memory `TestClient` |
 | `axiom-validation` | `axiom-validation` | Validator interface and annotation-free rules (opt-in) |
 | `axiom-validation-jakarta` | `axiom-validation-jakarta` | Jakarta Validation through Hibernate Validator (opt-in) |
+| `axiom-security` | `axiom-security` | Authenticator SPI, role and permission policies, trusted proxies, header redaction, security headers (opt-in) |
+| `axiom-security-jwt` | `axiom-security-jwt` | Strict JWT bearer-token authenticator on the JDK only (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
@@ -212,6 +218,30 @@ Validation is opt-in: add `com.jsgalactic.axiom:axiom-validation`, or
 `com.jsgalactic.axiom:axiom-validation-jakarta` for Jakarta annotations (versions from
 the BOM). See [validation](docs/validation.md).
 
+## Security
+
+Security is opt-in too: add `com.jsgalactic.axiom:axiom-security`, or
+`com.jsgalactic.axiom:axiom-security-jwt` for bearer JWTs (it brings `axiom-security`).
+Neither adds a third-party dependency.
+
+```java
+var jwt = JwtAuthenticator.builder()
+        .publicKey(JwsAlgorithm.RS256, issuerPublicKey)   // alg allow-list = registered keys
+        .issuer("https://login.example.com")
+        .audience("notes-api")
+        .build();
+var security = Security.of(jwt);
+
+app.use(SecurityHeaders.defaults());                      // nosniff, frame and referrer policies, CSP
+app.get("/me", ctx -> ctx.identity().orElseThrow().principal(), security.authenticated());
+app.group("/admin", admin -> admin.use(security.hasRole("admin")));   // 401 anonymous, 403 otherwise
+```
+
+Missing credentials answer 401 with `WWW-Authenticate`; malformed, expired or forged
+tokens 401 `invalid_token` (never echoing the token); a missing role or permission 403.
+Forwarded client addresses are believed only from configured proxies
+(`TrustedProxies.of("10.0.0.0/8").resolve(ctx.request())`). See [security](docs/security.md).
+
 ## Build and test
 
 JDK 21 and the committed Gradle wrapper (on Windows, `gradlew.bat`):
@@ -232,7 +262,7 @@ Details are in [build decisions](docs/build.md).
 
 - [Programming model](docs/programming-model.md), [routing](docs/routing.md),
   [request bodies and JSON](docs/bodies.md), [errors](docs/errors.md),
-  [middleware](docs/middleware.md), [validation](docs/validation.md)
+  [middleware](docs/middleware.md), [validation](docs/validation.md), [security](docs/security.md)
 - [HTTP listeners](docs/http.md), [execution and deadlines](docs/execution.md),
   [admission](docs/admission.md), [benchmarks](docs/benchmarks.md)
 - [Build decisions](docs/build.md), [releasing](docs/releasing.md),

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add opt-in security modules: `axiom-security` (Authenticator SPI, `authenticate`/`authenticated`/`hasRole`/`hasAnyRole`/`hasPermission` policies answering 401 or 403, trusted-proxy client addresses, header redaction, secure default response headers) and `axiom-security-jwt` (strict JDK-only JWT bearer authenticator for HS, RS and ES algorithms). Core gains `SecurityIdentity`, `Context.identity()` and the set-once `Context.identity(SecurityIdentity)`.
+- Expose the connection's peer as `Request.remoteAddress()` (set by the HTTP listener, `null` in memory) with `Request.withRemoteAddress`. `Request` gained a sixth record component; the five-argument constructor remains.
 - Rename the Java packages and the Maven group from `io.axiom` to `com.jsgalactic.axiom` (the starter is now `com.jsgalactic.axiom:axiom`; artifact IDs are unchanged). Nothing had been published under `io.axiom`.
 - Add `Context.validatedBody(type, validator)` with core's `BodyValidator`, which axiom-validation's `Validator` now extends.
 - Map exceptions to responses with `app.error(type, handler)`; the nearest registered superclass wins, problem responses stay the default for AxiomException, and a failing error handler produces the generic 500.
