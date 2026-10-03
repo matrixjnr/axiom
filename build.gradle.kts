@@ -79,7 +79,7 @@ tasks.register("unitTestMatrix") {
 jacoco { toolVersion = libs.versions.jacoco.get() }
 val coverageModules = listOf("axiom-core", "axiom-server", "axiom-http", "axiom-json", "axiom-test",
     "axiom-starter", "axiom-validation", "axiom-validation-jakarta", "axiom-security", "axiom-security-jwt",
-    "axiom-metrics", "axiom-openapi", "integration-tests")
+    "axiom-metrics", "axiom-openapi", "axiom-openapi-ui", "integration-tests")
 dependencies { coverageModules.forEach { jacocoAggregation(project(":$it")) } }
 reporting {
     reports {

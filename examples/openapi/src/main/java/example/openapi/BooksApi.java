@@ -10,6 +10,7 @@ import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.error.NotFoundException;
 import com.jsgalactic.axiom.openapi.OpenApi;
 import com.jsgalactic.axiom.openapi.SecurityScheme;
+import com.jsgalactic.axiom.openapi.ui.SwaggerUi;
 import com.jsgalactic.axiom.routing.RouteDoc;
 import com.jsgalactic.axiom.validation.Rules;
 import java.util.List;
@@ -135,6 +136,9 @@ public final class BooksApi {
         if (docsAccess != null) {
             openApi.serve(app, "/openapi.json", docsAccess);        // OpenAPI 3.1
             openApi.serveSwagger(app, "/swagger.json", docsAccess); // Swagger 2.0
+            SwaggerUi.builder()                                     // Swagger UI at /docs
+                    .spec("OpenAPI 3.1", "/openapi.json").spec("Swagger 2.0", "/swagger.json")
+                    .build().register(app, docsAccess);
         }
         // endregion serve
         return app;
@@ -142,14 +146,15 @@ public final class BooksApi {
 
     /**
      * Serves the API on http://127.0.0.1:8080. The documentation routes exist only when the
-     * environment variable {@code DOCS_KEY} is set, and then require it in {@code X-Docs-Key}.
+     * environment variable {@code DOCS_PASSWORD} is set, and then require it as the password of user {@code docs}.
      *
      * @param args unused
      * @throws Exception if the listener cannot start
      */
     public static void main(String[] args) throws Exception {
-        var key = System.getenv("DOCS_KEY");
-        var app = create(key == null || key.isBlank() ? null : DocsAccess.requireKey(key)).closeOnJvmShutdown();
+        var password = System.getenv("DOCS_PASSWORD");
+        var app = create(password == null || password.isBlank() ? null : DocsAccess.requirePassword(password))
+                .closeOnJvmShutdown();
         var server = app.listen(8080);
         System.out.println("Listening on http://127.0.0.1:" + server.localAddress().getPort() + "/");
         server.termination().toCompletableFuture().join();

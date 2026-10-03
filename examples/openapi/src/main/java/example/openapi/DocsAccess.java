@@ -8,35 +8,44 @@ import com.jsgalactic.axiom.security.Authenticator;
 import com.jsgalactic.axiom.security.Security;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Base64;
 import java.util.Optional;
 import java.util.Set;
 
-/** Guards the documentation routes with a shared key sent in the {@code X-Docs-Key} header. */
+/**
+ * Guards the documentation routes with HTTP Basic authentication (user {@code docs}). A browser
+ * asks for the credentials once and then sends them with every request of the Swagger UI page.
+ */
 public final class DocsAccess {
     private DocsAccess() { }
 
     // region protect
     /**
-     * Returns middleware that answers 401 unless the request carries the given key.
+     * Returns middleware that answers 401 unless the request carries the docs credentials.
      *
-     * @param expectedKey the key, read from configuration, never a literal in source
-     * @return middleware for {@code serve(app, path, middleware)}
+     * @param password the password, read from configuration, never a literal in source
+     * @return middleware for {@code serve(app, path, middleware)} and {@code SwaggerUi.register}
      */
-    public static Middleware requireKey(String expectedKey) {
-        var expected = expectedKey.getBytes(StandardCharsets.UTF_8);
+    public static Middleware requirePassword(String password) {
+        var expected = ("docs:" + password).getBytes(StandardCharsets.UTF_8);
         Authenticator authenticator = new Authenticator() {
             @Override public Optional<SecurityIdentity> authenticate(Request request) {
-                var sent = request.headers().get("X-Docs-Key");
-                if (sent == null) {
+                var header = request.headers().get("Authorization");
+                if (header == null || !header.regionMatches(true, 0, "Basic ", 0, 6)) {
                     return Optional.empty();
                 }
-                if (!MessageDigest.isEqual(sent.getBytes(StandardCharsets.UTF_8), expected)) {
-                    throw new UnauthorizedException(challenge(), "invalid_docs_key");
+                try {
+                    var sent = Base64.getDecoder().decode(header.substring(6).trim());
+                    if (MessageDigest.isEqual(sent, expected)) {
+                        return Optional.of(new SecurityIdentity("docs", Set.of("docs"), Set.of()));
+                    }
+                } catch (IllegalArgumentException notBase64) {
+                    // falls through to the same refusal as a wrong password
                 }
-                return Optional.of(new SecurityIdentity("docs", Set.of("docs"), Set.of()));
+                throw new UnauthorizedException(challenge(), "invalid_credentials");
             }
 
-            @Override public String challenge() { return "X-Docs-Key realm=\"docs\""; }
+            @Override public String challenge() { return "Basic realm=\"docs\", charset=\"UTF-8\""; }
         };
         return Security.of(authenticator).hasRole("docs");
     }

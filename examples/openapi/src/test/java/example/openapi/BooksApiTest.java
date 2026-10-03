@@ -39,23 +39,48 @@ class BooksApiTest {
         }
     }
 
-    @Test void theDocumentationIsServedOnlyToCallersWithTheKey() throws Exception {
-        var key = UUID.randomUUID().toString();
-        try (var client = TestClient.start(BooksApi.create(DocsAccess.requireKey(key)))) {
-            assertThat(client.get("/openapi.json").status()).isEqualTo(401);
-            assertThat(get(client, "/openapi.json", Map.of("X-Docs-Key", "wrong")).status()).isEqualTo(401);
+    private static Map<String, String> basic(String user, String password) {
+        var token = java.util.Base64.getEncoder().encodeToString((user + ":" + password).getBytes(StandardCharsets.UTF_8));
+        return Map.of("Authorization", "Basic " + token);
+    }
 
-            var openapi = get(client, "/openapi.json", Map.of("X-Docs-Key", key));
+    @Test void theDocumentationIsServedOnlyToCallersWithThePassword() throws Exception {
+        var password = UUID.randomUUID().toString();
+        try (var client = TestClient.start(BooksApi.create(DocsAccess.requirePassword(password)))) {
+            for (var path : java.util.List.of("/openapi.json", "/swagger.json", "/docs", "/docs/swagger-initializer.js")) {
+                var anonymous = client.get(path);
+                assertThat(anonymous.status()).as(path).isEqualTo(401);
+                assertThat(anonymous.headers().get("WWW-Authenticate")).startsWith("Basic realm=\"docs\"");
+                assertThat(get(client, path, basic("docs", "wrong")).status()).as(path).isEqualTo(401);
+                assertThat(get(client, path, Map.of("Authorization", "Basic !!!")).status()).as(path).isEqualTo(401);
+            }
+            var credentials = basic("docs", password);
+
+            var openapi = get(client, "/openapi.json", credentials);
             assertThat(openapi.status()).isEqualTo(200);
             var document = text(openapi);
             assertThat(document).contains("\"openapi\": \"3.1.0\"").contains("\"operationId\": \"addBook\"")
                     .contains("\"maxLength\": 120").contains("\"minimum\": 1400").contains("\"maximum\": 2100")
                     .contains("\"Reader\"").contains("\"favourites\"").contains("\"active\"")
                     .contains("\"people\"").contains("Unexpected server error")
-                    .doesNotContain("example.openapi").doesNotContain("/openapi.json");
+                    .doesNotContain("example.openapi").doesNotContain("/openapi.json").doesNotContain("/docs");
 
-            var swagger = text(get(client, "/swagger.json", Map.of("X-Docs-Key", key)));
+            var swagger = text(get(client, "/swagger.json", credentials));
             assertThat(swagger).contains("\"swagger\": \"2.0\"").contains("#/definitions/Book");
+
+            var page = get(client, "/docs", credentials);
+            assertThat(page.status()).isEqualTo(200);
+            assertThat(page.headers().get("Content-Security-Policy")).contains("script-src 'self'");
+            assertThat(text(get(client, "/docs/swagger-initializer.js", credentials)))
+                    .contains("{url: \"/openapi.json\", name: \"OpenAPI 3.1\"}")
+                    .contains("{url: \"/swagger.json\", name: \"Swagger 2.0\"}");
+        }
+    }
+
+    @Test void theUiAndDocumentsAreAbsentWhenDocumentationIsOff() throws Exception {
+        try (var client = TestClient.start(BooksApi.create(null))) {
+            assertThat(client.get("/docs").status()).isEqualTo(404);
+            assertThat(client.get("/docs/swagger-initializer.js").status()).isEqualTo(404);
         }
     }
 }

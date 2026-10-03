@@ -28,14 +28,16 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-security-jwt" to setOf("axiom-test"),
                 "axiom-metrics" to setOf("axiom-test"),
                 // Round-trip tests compare generated schemas with the real JSON codec.
-                "axiom-openapi" to setOf("axiom-test", "axiom-json")
+                "axiom-openapi" to setOf("axiom-test", "axiom-json"),
+                "axiom-openapi-ui" to setOf("axiom-test")
             )
             val testOnlyModules = ModuleBoundaries.testOnlyModules
             // Third-party production dependencies are confined to the module that adapts them.
             val externalGroups = mapOf(
                 "axiom-http" to setOf("io.netty"),
                 "axiom-json" to setOf("com.fasterxml.jackson", "com.fasterxml.jackson.core", "com.fasterxml.jackson.datatype"),
-                "axiom-validation-jakarta" to setOf("jakarta.validation", "org.hibernate.validator")
+                "axiom-validation-jakarta" to setOf("jakarta.validation", "org.hibernate.validator"),
+                "axiom-openapi-ui" to setOf("org.webjars")
             )
             val moduleAllowed = allowed[module]
                 ?: throw GradleException(

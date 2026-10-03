@@ -16,6 +16,7 @@ val descriptions = mapOf(
     "axiom-security-jwt" to "Axiom strict JWT bearer-token authenticator using only the JDK (HMAC, RSA and ECDSA).",
     "axiom-metrics" to "Axiom in-memory metrics registry and Prometheus text exposition, using only the JDK.",
     "axiom-openapi" to "Axiom OpenAPI 3.1 and Swagger 2.0 document generation from route metadata, using only the JDK.",
+    "axiom-openapi-ui" to "Axiom Swagger UI served from the application itself, with the UI files packaged statically (no CDN).",
     "axiom-bom" to "Axiom bill of materials aligning the versions of all Axiom modules."
 )
 val repositoryUrl = "https://github.com/matrixjnr/axiom"

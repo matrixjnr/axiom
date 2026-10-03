@@ -174,6 +174,7 @@ remaining milestones in the [roadmap, #18](https://github.com/matrixjnr/axiom/is
 | `axiom-security-jwt` | `axiom-security-jwt` | Strict JWT bearer-token authenticator on the JDK only (opt-in) |
 | `axiom-metrics` | `axiom-metrics` | Bounded in-memory metrics registry and Prometheus text output (opt-in) |
 | `axiom-openapi` | `axiom-openapi` | OpenAPI 3.1 and Swagger 2.0 documents from route descriptions (opt-in) |
+| `axiom-openapi-ui` | `axiom-openapi-ui` | Swagger UI served from the application, files packaged statically, no CDN (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
@@ -283,8 +284,8 @@ Tags are route templates and status classes, never raw paths or user input. **Do
 
 ## OpenAPI and Swagger
 
-Describe a route with plain code (no annotations), then serve the generated document. Nothing is
-served unless you register it.
+Describe a route with plain code (no annotations), then serve the generated documents and, if you
+want it, Swagger UI (no CDN: the UI files are packaged). Nothing is served unless you register it.
 
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#describe-route -->
 ```java
@@ -308,6 +309,9 @@ app.describe(add, RouteDoc.summary("Add a book")
 if (docsAccess != null) {
     openApi.serve(app, "/openapi.json", docsAccess);        // OpenAPI 3.1
     openApi.serveSwagger(app, "/swagger.json", docsAccess); // Swagger 2.0
+    SwaggerUi.builder()                                     // Swagger UI at /docs
+            .spec("OpenAPI 3.1", "/openapi.json").spec("Swagger 2.0", "/swagger.json")
+            .build().register(app, docsAccess);
 }
 ```
 
@@ -328,7 +332,7 @@ JDK 21 and the committed Gradle wrapper (on Windows, `gradlew.bat`):
 | `./gradlew compatibilityTest` | Gradle Kotlin, Gradle Groovy and Maven consumer builds against locally published artifacts |
 | `./gradlew :examples:hello:run` | Hello World on `http://127.0.0.1:8080/` |
 | `./gradlew :examples:rest-api:run` | The notes JSON API on the same port |
-| `./gradlew :examples:openapi:run` | The books API; set `DOCS_KEY` to also serve `/openapi.json` and `/swagger.json` |
+| `./gradlew :examples:openapi:run` | The books API; set `DOCS_PASSWORD` to also serve `/openapi.json`, `/swagger.json` and Swagger UI at `/docs` |
 
 Details are in [build decisions](docs/build.md).
 
