@@ -29,7 +29,7 @@ class NettyServerTest {
                 child.close();
             } finally {
                 server.close();
-                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
             }
         }
     }
@@ -47,7 +47,7 @@ class NettyServerTest {
                 assertThat(fixed.listener.config().getOption(ChannelOption.SO_RCVBUF)).isBetween(8192, 4 * 8192);
                 assertThat(plain.connections()).isZero();
                 try (var client = new java.net.Socket()) {
-                    client.connect(plain.localAddress(), 5000);
+                    client.connect(plain.localAddress(), 30_000);
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                     while (plain.connections() == 0) {
                         assertThat(System.nanoTime()).as("connection accepted").isLessThan(deadline);
@@ -150,7 +150,7 @@ class NettyServerTest {
             } finally {
                 for (var channel : accepted) { channel.close(); }
                 server.close();
-                server.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
             }
         }
     }

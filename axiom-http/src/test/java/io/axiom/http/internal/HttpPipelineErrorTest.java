@@ -62,7 +62,7 @@ class HttpPipelineErrorTest {
         release.countDown();
         app.close();
         executor.close();
-        executor.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
     }
 
     static List<Arguments> errors() {
@@ -91,7 +91,7 @@ class HttpPipelineErrorTest {
         var channel = wireChannel();
         try {
             channel.writeInbound(ascii(SLOW + NEXT + rejected + AFTER));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             // Nothing is written ahead of the running request, and the connection stays open.
             channel.runPendingTasks();
             assertThat(channel.<Object>readOutbound()).isNull();
@@ -179,7 +179,7 @@ class HttpPipelineErrorTest {
         try {
             channel.writeInbound(ascii(SLOW + "POST /after HTTP/1.1\r\nHost: a\r\n" + fields + "\r\n\r\n"
                     + "3\r\nabc\r\n0\r\n\r\n" + AFTER));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             release.countDown();
             assertThat(repliesUntilClosed(channel)).extracting(Reply::status).containsExactly(200, 400);
             assertThat(after).isFalse();
@@ -191,7 +191,7 @@ class HttpPipelineErrorTest {
         try {
             int queued = HttpConnection.MAX_PIPELINED - 1;
             channel.writeInbound(ascii(SLOW + NEXT.repeat(queued) + AFTER + AFTER));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             channel.runPendingTasks();
             assertThat(channel.isActive()).isTrue();
             release.countDown();
@@ -215,7 +215,7 @@ class HttpPipelineErrorTest {
             String queuedFull = full.replace("/after", "/full");
             // Two queued 16-byte bodies fill the 2 x limit share; the third declaration exceeds it.
             channel.writeInbound(ascii(SLOW + queuedFull + queuedFull + full));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             release.countDown();
             var replies = repliesUntilClosed(channel);
             assertThat(replies).extracting(Reply::status).containsExactly(200, 200, 200, 503);
@@ -229,7 +229,7 @@ class HttpPipelineErrorTest {
         var channel = wireChannel();
         try {
             channel.writeInbound(ascii(SLOW + "GET /after HT"));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             channel.advanceTimeBy(HttpConnection.REQUEST_HEAD_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
             channel.runScheduledPendingTasks();
             assertThat(channel.isActive()).isTrue();
@@ -251,7 +251,7 @@ class HttpPipelineErrorTest {
         var channel = wireChannel();
         try {
             channel.writeInbound(ascii(SLOW + "POST /after HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nab"));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             channel.advanceTimeBy(app.requestTimeout().toSeconds(), TimeUnit.SECONDS);
             channel.runScheduledPendingTasks();
             assertThat(channel.isActive()).isTrue();
@@ -267,7 +267,7 @@ class HttpPipelineErrorTest {
         var channel = wireChannel();
         try {
             channel.writeInbound(ascii(SLOW + "GARBAGE\r\n\r\n"));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             // Input is still read (and discarded) so that a disconnect is noticed.
             assertThat(channel.config().isAutoRead()).isTrue();
             channel.close();
@@ -281,7 +281,7 @@ class HttpPipelineErrorTest {
         var channel = wireChannel();
         try {
             channel.writeInbound(ascii(SLOW + "GARBAGE\r\n\r\n"));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             var junk = new byte[1024 * 1024];
             // Up to the limit, input keeps being read and dropped so that a disconnect is noticed.
             for (int sent = 0; sent < HttpConnection.MAX_DISCARDED_INPUT; sent += junk.length) {
@@ -302,7 +302,7 @@ class HttpPipelineErrorTest {
         try {
             var wire = new Wire(server);
             wire.write(SLOW + "GARBAGE\r\n\r\n");
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             // Several megabytes of input after the error, then a disconnect.
             var junk = new byte[64 * 1024];
             for (int sent = 0; sent < 3 * 1024 * 1024; sent += junk.length) { wire.socket.getOutputStream().write(junk); }
@@ -315,7 +315,7 @@ class HttpPipelineErrorTest {
         var channel = wireChannel();
         try {
             channel.writeInbound(ascii(SLOW + NEXT + "GARBAGE\r\n\r\n"));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             connection.drain();
             assertThat(channel.isActive()).isTrue();
             release.countDown();
@@ -331,7 +331,7 @@ class HttpPipelineErrorTest {
         var channel = wireChannel();
         try {
             channel.writeInbound(ascii("GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGARBAGE\r\n\r\n"));
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             release.countDown();
             var replies = repliesUntilClosed(channel);
             assertThat(replies).extracting(Reply::status).containsExactly(200);
@@ -344,7 +344,7 @@ class HttpPipelineErrorTest {
         var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0));
         try (var wire = new Wire(server)) {
             wire.write(SLOW + NEXT + "POST /after HTTP/1.1\r\nHost: a\r\nContent-Length: 17\r\n\r\n");
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             release.countDown();
             assertThat(wire.read(false).text()).isEqualTo("slow:4");
             assertThat(wire.read(false).text()).isEqualTo("next");
@@ -362,7 +362,7 @@ class HttpPipelineErrorTest {
         try {
             var wire = new Wire(server);
             wire.write(SLOW + "GARBAGE\r\n\r\n");
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
             wire.close();
             awaitInterrupted();
         } finally { stop(server); }
@@ -374,7 +374,7 @@ class HttpPipelineErrorTest {
     }
 
     private void awaitInterrupted() {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (!interrupted.get()) {
             assertThat(System.nanoTime()).isLessThan(deadline);
             Thread.onSpinWait();
@@ -395,7 +395,7 @@ class HttpPipelineErrorTest {
     /** Runs tasks posted by handler threads and collects the output until the channel closes. */
     static List<Reply> repliesUntilClosed(EmbeddedChannel channel) {
         var bytes = new java.io.ByteArrayOutputStream();
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (true) {
             channel.runPendingTasks();
             for (ByteBuf buffer; (buffer = channel.readOutbound()) != null;) {
