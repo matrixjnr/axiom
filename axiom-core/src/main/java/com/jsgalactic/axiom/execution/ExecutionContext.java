@@ -39,12 +39,8 @@ public final class ExecutionContext {
         return new ExecutionContext(timeout, Objects.requireNonNull(clock, "clock"));
     }
 
-    /**
-     * Validates a supported deadline budget.
-     * @param timeout positive duration, at most one day
-     * @throws IllegalArgumentException for an invalid budget
-     */
-    public static void validateTimeout(Duration timeout) {
+    /** Validates a supported deadline budget; shared in this package with {@link AdmissionPolicy}. */
+    static void validateTimeout(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout");
         if (timeout.isZero() || timeout.isNegative() || timeout.compareTo(Duration.ofDays(1)) > 0) {
             throw new IllegalArgumentException("Request timeout must be positive and at most one day");

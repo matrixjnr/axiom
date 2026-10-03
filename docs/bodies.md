@@ -24,7 +24,19 @@ codec; application code never compiles against it. See the
 `app.maxRequestBody(bytes)` sets the largest accepted body before startup. The
 default is 1 MiB; accepted values are 0 to 64 MiB, and zero rejects every non-empty
 body. Bodies are buffered completely in memory before the handler runs; there is no
-streaming API. Larger bodies receive **413** and the handler is never invoked:
+streaming API. Larger bodies receive **413** and the handler is never invoked.
+
+**Why 64 MiB is the ceiling, and why it stays.** Every accepted body is held in memory in one
+array, at least once for the listener and once more for a codec that decodes from an array. The
+limit is therefore a heap-safety bound, not only a policy: 64 MiB equals the listener's default
+in-flight body budget (`maxInFlightBodyBytes`), which must be at least `maxRequestBody` for a
+listener to start, so the largest permitted body always fits the default budget. A higher limit
+would need a larger budget, `3 × L` of per-connection memory, and a heap sized for several such
+bodies at once, which defeats the purpose of bounding them. The range is kept deliberately;
+anything larger than a request body that fits in memory is an upload and belongs in a streaming
+path, which this release does not provide. Raise `maxRequestBody` only together with
+`maxInFlightBodyBytes` and the heap, as described under
+[memory per connection](#memory-per-connection):
 
 - **Content-Length**: a declared length over the limit is answered before any body
   byte is read, and the connection closes.
@@ -76,7 +88,7 @@ connection closes. Handler-side memory is additional: `ctx.body(...)` passes the
 codec a read-only view of the running body, so the JSON codec reads it without a
 copy, but a codec that implements only the array method receives one copy (up to
 `L`); the decoded value lives until the handler drops it, and `Body.bytes()` copies
-on every call.
+on every call. [Handler-side cost by access pattern](#handler-side-cost) lists each.
 
 On top of the per-connection bounds, each listener has a **budget of request body bytes held at
 once across all its connections**: `maxInFlightBodyBytes` in the [listener options](http.md#listener-options),
@@ -144,10 +156,31 @@ body size if that is smaller) and doubles as bytes arrive, so a client that decl
 large Content-Length and then stalls holds only what it has sent. A declared body's
 array is capped at the declared length and ends exactly full; a chunked body's array
 is capped at the limit and trimmed once at the end. The finished array is handed to the
-`Body` without another copy. The body keeps the request's
+`Body` without another copy, through `Body.Builder`, which owns the array until
+`build()` and never exposes it. The body keeps the request's
 `Content-Type`; `mediaType()` and `charset()` parse it. Request headers are
 available through `ctx.header(name)` (one value per name; repeated fields are joined
 with `", "`). `Request.toString` omits header values.
+
+### Handler-side cost
+
+What each way of reading a request body costs beyond the listener's bound above
+(`L` = `maxRequestBody`, `n` = the body's length):
+
+| Access | Extra memory | Notes |
+| --- | --- | --- |
+| `ctx.body(Type.class)` with a codec that overrides `decode(ByteBuffer, Class)` (the JSON codec) | the decoded value only | Reads a read-only view of the body; no copy of the bytes. |
+| `ctx.body(Type.class)` with an array-only codec | `n` for the call, plus the value | The default `decode(ByteBuffer, Class)` copies the bytes once per call. Override it to avoid this. |
+| `ctx.body(...)` called again | the same again | Each call decodes anew; keep the first value instead of decoding twice. |
+| `body.asReadOnlyBuffer()`, `length()`, `isEmpty()`, `contentType()` | a few small objects | Never copies the content. |
+| `body.bytes()` | `n` per call | Always a fresh copy, so call it once and keep the array. Prefer the view. |
+| The decoded value | its own size, until the handler drops it | Additional to the connection bound, and held until the handler returns if it keeps a reference. |
+
+A test measures the difference: building a body from a buffer allocates its array once,
+`asReadOnlyBuffer()` allocates under a kilobyte for any size, and `bytes()` allocates the
+whole content (`BodyTest`, `CodecViewTest`). A cached view is not
+needed because the view is already a constant-size wrapper, and sharing one buffer between
+callers would share its position.
 
 ## Decoding
 
@@ -312,12 +345,18 @@ client fail on a typo; a client that wants a 406 must send a well-formed header 
 64 ranges or fewer. The boundary (64 parsed, 65 ignored) and the real-client
 headers above are covered by tests.
 
-**The 406 is decided after the handler has run**, because the representation is
-only known once the handler returns. Side effects of the handler (a created
-record, a sent message) have already happened when the client receives 406.
-Handlers with side effects must not rely on negotiation to prevent them; check
-`ctx.header("Accept")` up front if that matters. A value the codec cannot encode, or `json` without a JSON codec
-installed, is a server error (500 over HTTP).
+**Only safe methods are negotiated.** The representation is known only once the handler
+returns, so a 406 is decided after the handler has run. For the safe methods `GET`, `HEAD`,
+`OPTIONS` and `TRACE` (RFC 9110 section 9.2.1) that is harmless: the handler changes no
+state, and a client that retries gets the same answer. For every other method (`POST`, `PUT`,
+`PATCH`, `DELETE` and extension methods) `Accept` is **advisory**: the handler's response is
+always sent, encoded by its own codec, whatever the client accepts. This prevents a `POST`
+from creating a resource and then answering 406, which would invite a retry that creates it
+again. Route declarations do not list representations, so negotiating before the handler
+runs is not possible without them; a handler that must refuse a client that cannot be served
+checks `ctx.header("Accept")` itself and throws `NotAcceptableException` before it acts.
+A value the codec cannot encode, or `json` without a JSON codec installed, is a server error
+(500 over HTTP).
 
 ## Codecs
 
