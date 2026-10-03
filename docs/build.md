@@ -315,7 +315,20 @@ generated with:
     publishAllPublicationsToCompatRepository --rerun-tasks --no-build-cache --no-configuration-cache
 ```
 
-Run it with an empty Gradle home (`GRADLE_USER_HOME` pointing at a new directory), so every
+A fresh local run can record only the Gradle module file (`.module`) of a component while
+a CI runner also resolves its `.pom`, which then fails verification. After generating, run
+
+```sh
+python3 .github/scripts/verify-pom-checksums.py --fix gradle/verification-metadata.xml compatibility/*/gradle/verification-metadata.xml
+```
+
+which downloads the `.pom` of every component that has a `.module` but no `.pom` entry
+from Maven Central (then the Gradle plugin portal), retries HTTP 429 with a growing
+pause and inserts the SHA-256. Without `--fix` it only reports and exits 1; the `build`
+job runs it that way. Re-creating the committed POM entries with the script (after
+removing them) gave back exactly the entries Gradle had written.
+
+Run the generation with an empty Gradle home (`GRADLE_USER_HOME` pointing at a new directory), so every
 artifact is downloaded and checksummed rather than taken from a cache. `coverageReport` is
 included because the JaCoCo agent, report and aggregation configurations are resolved only
 when coverage runs.
@@ -390,11 +403,14 @@ does not build, even if a later commit repairs it, and it breaks `git bisect`.
 The `commits` job of the Build workflow (pull requests only, `contents: read`, no
 secrets) checks out the PR head with full history and runs
 `./gradlew clean check` on each non-merge commit between the base and the head, oldest
-first, through `.github/scripts/check-each-commit.sh`. It stops at the first failing
-commit. Up to 20 commits are all built. A longer series is bounded: only commits that
-touch build files (`*.gradle(.kts)`, `gradle/`, `build-logic/`, `gradle.properties`,
-the wrapper) are built, the newest 20 of them, so a non-build commit in a long series
-can still be unbuilt. The script's selection logic was exercised locally against a
+first, through `.github/scripts/check-each-commit.sh`. It builds every selected commit and
+reports all failures. Up to 20 commits are all built. A longer series is bounded (a full
+`check` per commit is minutes of runner time, and the job has a 90 minute limit): only
+commits that touch build files (`*.gradle(.kts)`, `gradle/`, `build-logic/`,
+`gradle.properties`, the wrapper) are built, the newest 20 of them, and a warning
+annotation lists every commit that was not built. For pull requests whose head branch
+starts with `dependabot/` only the tip commit is built, because the bot's own commit
+changes versions without checksums and cannot build. The script's selection logic was exercised locally against a
 scratch repository; the workflow itself only runs on GitHub.
 
 ## Integration tests
