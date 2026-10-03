@@ -145,7 +145,7 @@ socket; it is `null` for in-memory requests unless a test sets it with
 
 ```java
 static final TrustedProxies PROXIES = TrustedProxies.of("10.0.0.0/8", "fd00::/8");
-var origin = PROXIES.resolve(ctx.request());      // Optional<ClientOrigin>(address, scheme, forwarded)
+var origin = PROXIES.resolve(ctx.request());      // Optional<ClientOrigin>(address, scheme, forwarded, host, port)
 ```
 
 - Forwarding headers are believed only when the **peer** is a configured proxy.
@@ -157,6 +157,27 @@ var origin = PROXIES.resolve(ctx.request());      // Optional<ClientOrigin>(addr
   address. Entries are parsed as literals only, never resolved through DNS; ports and
   brackets are accepted.
 - `X-Forwarded-Proto` is used only when it is exactly `http` or `https`.
+- `X-Forwarded-Host` gives the original host (`ClientOrigin.host()`, lower case) and
+  `X-Forwarded-Port` the port (`ClientOrigin.port()`). Each is believed only as a single
+  value (a comma-separated list is ignored: nothing says which proxy to believe); the host
+  must be a DNS name, an IPv4 literal or a bracketed IPv6 literal, optionally with a port,
+  and the port 1 to 65535. A port inside the host wins over `X-Forwarded-Port`. Spaces,
+  paths, `@`, empty labels and out-of-range ports are ignored, never repaired. No default
+  port is inferred from the scheme.
+- **One header family at a time.** The default family is `X-Forwarded-*`;
+  `PROXIES.reading(ForwardedHeaders.FORWARDED)` selects RFC 7239 `Forwarded` instead. The
+  other family is ignored entirely, so a client cannot mix a spoofed header of one family
+  with a genuine one of the other.
+- `Forwarded` is parsed strictly: tokens and quoted strings only (a value with `:` or `[`
+  must be quoted, `for="[2001:db8::7]:4711"`), no whitespace around `=` or `;`, a repeated
+  parameter makes its element invalid, and an unterminated quote ignores the header. The
+  elements are walked right to left with the same trust rule and the 32-hop bound. `for`
+  must be an IPv4 literal or a bracketed IPv6 literal (port or obfuscated port allowed);
+  `unknown`, obfuscated identifiers (`_hidden`) and names stop the walk. `proto` and `host`
+  come from the element that vouches for the client address, since that proxy saw the
+  client's request.
+- Host and port are only as trustworthy as the proxy that sets them. Never build
+  password-reset or redirect URLs from them without an allow-list of your own hosts.
 - Ranges are IP literals or CIDR blocks with zero host bits; anything else is rejected at
   configuration time.
 
@@ -206,8 +227,6 @@ because exceptions pass through middleware before they become responses (tracked
   ([#119](https://github.com/matrixjnr/axiom/issues/119)).
 - JWT claims other than `sub` and the grant claims are not exposed, and there is no
   revocation or replay check (`jti`) ([#120](https://github.com/matrixjnr/axiom/issues/120)).
-- Only `X-Forwarded-For` and `X-Forwarded-Proto` are read; not RFC 7239 `Forwarded` or
-  `X-Forwarded-Host`/`-Port` ([#121](https://github.com/matrixjnr/axiom/issues/121)).
 - Security headers and other middleware headers are missing on problem responses
   ([#96](https://github.com/matrixjnr/axiom/issues/96)).
 - No sessions, cookies, CSRF protection, CORS or OAuth flows; authentication is
