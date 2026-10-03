@@ -144,10 +144,12 @@ class CodecsTest {
         };
         assertThat(Codecs.of(List.of(plain), failing).forMediaType("application/json")).isSameAs(plain);
         var late = new com.jsgalactic.axiom.observability.Metrics() {
-            @Override public Counter counter(String name, String... tags) { return new Counter() {
-                @Override public void increment() { throw new IllegalStateException(); }
-                @Override public void add(long amount) { throw new IllegalStateException(); }
-            }; }
+            @Override public Counter counter(String name, String... tags) {
+                return new Counter() {
+                    @Override public void increment() { throw new IllegalStateException(); }
+                    @Override public void add(long amount) { throw new IllegalStateException(); }
+                };
+            }
             @Override public Gauge gauge(String name, String... tags) { return delta -> { }; }
             @Override public Timer timer(String name, String... tags) { return nanos -> { throw new IllegalStateException(); }; }
         };

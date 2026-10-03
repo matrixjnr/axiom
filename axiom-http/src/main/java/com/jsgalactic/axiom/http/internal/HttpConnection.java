@@ -2,22 +2,22 @@ package com.jsgalactic.axiom.http.internal;
 
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.HttpStatus;
-import com.jsgalactic.axiom.internal.OwnedBodies;
-import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
+import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.observability.TraceContext;
+import com.jsgalactic.axiom.server.internal.Problems;
+import com.jsgalactic.axiom.server.internal.ResponseSerialization;
 import com.jsgalactic.axiom.server.internal.StreamRun;
 import com.jsgalactic.axiom.server.internal.execution.EndpointTag;
-import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
+import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
-import com.jsgalactic.axiom.server.internal.Problems;
-import com.jsgalactic.axiom.server.internal.ResponseSerialization;
-import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
+import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -29,11 +29,11 @@ import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpUtil;
-import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.codec.http.TooLongHttpHeaderException;
@@ -42,10 +42,7 @@ import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCounted;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.time.Duration;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Date;
@@ -56,6 +53,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 /** All mutable connection state belongs to the channel's event loop. */
@@ -164,11 +163,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final StreamMetrics streamMetrics;
     private final ListenerMetrics listenerMetrics;
     private ScheduledFuture<?> headTimer;
-    // Body of the request being received, copied out of each Netty buffer as it arrives. The array
+    // Body of the request being received, copied out of each Netty buffer as it arrives. Its array
     // grows by doubling as bytes arrive, capped at the declared Content-Length or, for chunked
     // bodies, at the limit, so a stalled sender holds little memory. Dropped on every exit path
     // (see releaseBody).
-    private byte[] bodyBytes;
+    private Body.Builder bodyBuilder;
     private boolean bodyChunked;
     private long declaredLength;
     private int bodyLength;
@@ -242,7 +241,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Releases a partially received body and its deadline timer; idempotent. */
     private void releaseBody() {
-        bodyBytes = null;
+        bodyBuilder = null;
         if (bodyTimer != null) { bodyTimer.cancel(false); bodyTimer = null; }
         bodyLength = 0;
         continuePending = false;
@@ -342,7 +341,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             // The peer is resolved by the socket; embedded test channels have no IP peer.
             var peer = ctx.channel().remoteAddress() instanceof InetSocketAddress address && !address.isUnresolved()
                     ? address : null;
-            receiving = new Exchange(Request.fromTarget(request.method().name(), request.uri()).withHeaders(fields)
+            // An absolute-form target is reduced to its path and query first; Host must agree with it.
+            var target = RequestTargets.originForm(request.uri(), headers.get(HttpHeaderNames.HOST));
+            receiving = new Exchange(Request.fromTarget(request.method().name(), target).withHeaders(fields)
                     .withRemoteAddress(peer).withTls(ctx.pipeline().get(SslHandler.class) != null),
                     HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
         } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
@@ -380,30 +381,32 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // Growth is capped at the declared length, so a complete declared body fills its array exactly.
         long cap = bodyChunked ? bodyLimit : declaredLength;
         if (total > cap) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
-        if (bodyBytes == null) {
+        if (bodyBuilder == null) {
             int capacity = (int) Math.min(cap, Math.max(INITIAL_BODY_CAPACITY, total));
             if (bodyChunked && !receivingReservation.grow(capacity)) { fail(ctx, 503); return false; }
-            bodyBytes = new byte[capacity];
-        } else if (total > bodyBytes.length) {
+            bodyBuilder = Body.builder(receiving.request().header("Content-Type").orElse(null), capacity);
+        } else if (total > bodyBuilder.capacity()) {
             // Doubling keeps the copying linear in the body size.
-            int capacity = (int) Math.min(cap, Math.max(total, 2L * bodyBytes.length));
-            if (bodyChunked && !receivingReservation.grow(capacity - bodyBytes.length)) { fail(ctx, 503); return false; }
-            bodyBytes = Arrays.copyOf(bodyBytes, capacity);
+            int capacity = (int) Math.min(cap, Math.max(total, 2L * bodyBuilder.capacity()));
+            if (bodyChunked && !receivingReservation.grow(capacity - bodyBuilder.capacity())) { fail(ctx, 503); return false; }
+            bodyBuilder.capacity(capacity);
         }
-        content.readBytes(bodyBytes, bodyLength, readable);
+        // Straight from the network buffer into the array that becomes the body.
+        for (var part : content.nioBuffers(content.readerIndex(), readable)) { bodyBuilder.write(part); }
+        content.skipBytes(readable);
         bodyLength = (int) total;
         return true;
     }
 
     private void completeRequest(ChannelHandlerContext ctx) {
         var exchange = receiving;
-        if (bodyBytes != null) {
+        if (bodyBuilder != null) {
             if (bodyLength != declaredLength && !bodyChunked) { fail(ctx, 400); return; }
             try {
                 // The array is handed over, not copied again unless it is larger than the body.
-                var bytes = bodyLength == bodyBytes.length ? bodyBytes : Arrays.copyOf(bodyBytes, bodyLength);
-                bodyBytes = null;
-                var body = OwnedBodies.adopt(exchange.request().header("Content-Type").orElse(null), bytes);
+                var builder = bodyBuilder;
+                bodyBuilder = null;
+                var body = builder.build();
                 exchange = new Exchange(exchange.request().withBody(body), exchange.keepAlive(),
                         exchange.http10(), exchange.execution(), null);
             } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
@@ -450,13 +453,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         var hosts = request.headers().getAll(HttpHeaderNames.HOST);
         if (http10 && hosts.isEmpty()) { return true; }
         if (hosts.size() != 1 || hosts.getFirst().isEmpty()) { return false; }
-        try {
-            var host = URI.create("http://" + hosts.getFirst());
-            return host.getHost() != null && host.getRawUserInfo() == null
-                    && host.getRawPath().isEmpty() && host.getRawQuery() == null
-                    && host.getRawFragment() == null && host.getPort() <= 65535
-                    && !hosts.getFirst().endsWith(":");
-        } catch (IllegalArgumentException invalid) { return false; }
+        return RequestTargets.validAuthority(hosts.getFirst());
     }
 
     private void dispatch(ChannelHandlerContext ctx) {
@@ -482,14 +479,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var tag = executor.endpointTag(route.<Object>map(value -> value).orElse(UNMATCHED));
             active = executor.submit(route.<Object>map(value -> value).orElse(UNMATCHED),
                     policy, exchange.execution(), () -> {
-                try {
-                    var response = application.handle(exchange.request(), exchange.execution());
-                    return response.isStreaming() ? stream(ctx, exchange, response, tag) : prepare(response, exchange);
-                } catch (Exception | Error failure) {
-                    logFailure(exchange, failure);
-                    throw failure;
-                }
-            }, WireResponse::status);
+                        try {
+                            var response = application.handle(exchange.request(), exchange.execution());
+                            return response.isStreaming() ? stream(ctx, exchange, response, tag) : prepare(response, exchange);
+                        } catch (Exception | Error failure) {
+                            logFailure(exchange, failure);
+                            throw failure;
+                        }
+                    }, WireResponse::status);
             active.result().whenComplete((response, thrown) -> {
                 // The outcome is final: the request body no longer counts against the listener.
                 exchange.release();

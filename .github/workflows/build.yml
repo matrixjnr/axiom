@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # Compilation (main, test and benchmark sources), jars, Javadoc and every check task except the
-  # tests: architectureTest, checkPublicationCoverage, checkIntegrationTags. Dependency
+  # tests: architectureTest, checkstyleMain, checkstyleTest, checkPublicationCoverage, checkIntegrationTags. Dependency
   # verification applies to every configuration resolved here.
   build:
     runs-on: ubuntu-latest
@@ -24,6 +24,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      # Every component with a .module must also have its .pom checksum (see docs/build.md).
+      - run: python3 .github/scripts/verify-pom-checksums.py gradle/verification-metadata.xml compatibility/*/gradle/verification-metadata.xml
       - run: ./gradlew assemble testClasses javadoc check -x test -x integrationTest
   # The modules that have unit tests, read from the build (`./gradlew unitTestMatrix`), so a new
   # module with tests is picked up without editing this file.
@@ -124,7 +126,8 @@ jobs:
           done
   # Every commit of a pull request must build on its own, so history stays bisectable and a
   # dependency never lands before its checksums. At most 20 commits are built; a longer series
-  # is reduced to the commits that touch build files (see .github/scripts/check-each-commit.sh).
+  # is reduced to the commits that touch build files, and the skipped ones are listed in a
+  # warning (see .github/scripts/check-each-commit.sh). Dependabot branches build the tip only.
   commits:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -144,6 +147,9 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Dependency update branches start with the bot's commit, which cannot carry the
+          # checksums; only the tip, where the regenerated metadata is pushed, is built.
+          TIP_ONLY: ${{ startsWith(github.event.pull_request.head.ref, 'dependabot/') }}
           CHECK_COMMAND: ./gradlew clean check --max-workers=2 --no-build-cache -Daxiom.requireAllocationTests=true
         run: |
           # Run a copy: the script must not change while commits are checked out under it.

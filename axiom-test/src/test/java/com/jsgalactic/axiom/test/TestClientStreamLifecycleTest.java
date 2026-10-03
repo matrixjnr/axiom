@@ -11,7 +11,6 @@ import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.http.StreamAbortedException.Reason;
-import com.jsgalactic.axiom.http.StreamBody;
 import com.jsgalactic.axiom.http.StreamOutcome;
 import com.jsgalactic.axiom.observability.Metrics;
 import java.io.IOException;

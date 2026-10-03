@@ -181,10 +181,11 @@ abstract class JsonContractTest {
         assertThat(reply.body()).isEqualTo(OrdersApi.SAMPLE_JSON);
     }
 
-    @Test void negotiatesAfterTheHandlerRuns() throws Exception {
+    @Test void treatsAcceptAsAdvisoryForUnsafeMethods() throws Exception {
         var headers = Map.of("Content-Type", JSON, "Accept", "text/html");
         var reply = client.send("POST", "/orders", headers, OrdersApi.SAMPLE_JSON.getBytes(StandardCharsets.UTF_8));
-        assertProblem(reply, 406, "not_acceptable", null);
+        // The handler created the order, so the client gets that answer rather than a 406 to retry.
+        assertThat(reply.status()).as(reply.body()).isEqualTo(201);
     }
 
     @ParameterizedTest

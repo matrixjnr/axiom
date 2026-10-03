@@ -3,9 +3,9 @@ package com.jsgalactic.axiom.execution;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
-import java.util.function.LongSupplier;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 
 /** Immutable request identity and monotonic deadline; safe to share with application tasks. */
 public final class ExecutionContext {
@@ -39,12 +39,8 @@ public final class ExecutionContext {
         return new ExecutionContext(timeout, Objects.requireNonNull(clock, "clock"));
     }
 
-    /**
-     * Validates a supported deadline budget.
-     * @param timeout positive duration, at most one day
-     * @throws IllegalArgumentException for an invalid budget
-     */
-    public static void validateTimeout(Duration timeout) {
+    /** Validates a supported deadline budget; shared in this package with {@link AdmissionPolicy}. */
+    static void validateTimeout(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout");
         if (timeout.isZero() || timeout.isNegative() || timeout.compareTo(Duration.ofDays(1)) > 0) {
             throw new IllegalArgumentException("Request timeout must be positive and at most one day");

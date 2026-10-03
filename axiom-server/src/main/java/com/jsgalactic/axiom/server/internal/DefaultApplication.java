@@ -28,8 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.ServiceLoader;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
@@ -504,7 +504,7 @@ final class DefaultApplication implements Application {
 
     @Override public synchronized Application requestTimeout(Duration timeout) {
         requireState(State.CONFIGURING);
-        ExecutionContext.validateTimeout(timeout);
+        ExecutionContext.create(timeout); // Rejects a budget that is not positive or exceeds one day.
         requestTimeout = timeout;
         return this;
     }
@@ -639,10 +639,18 @@ final class DefaultApplication implements Application {
         }
         try {
             // Composed chains always return a Response; encoding runs once, after every middleware.
-            return encode(published.codecs(), request, (Response) chain.handle(context), true);
+            return encode(published.codecs(), request, (Response) chain.handle(context), safe(request.method()));
         } catch (Exception failure) {
             return handleError(published, context, failure);
         }
+    }
+
+    /**
+     * Whether the method is safe (RFC 9110 section 9.2.1), so that a 406 decided after the handler
+     * ran cannot repeat a state change when the client retries. For other methods Accept is advisory.
+     */
+    private static boolean safe(String method) {
+        return method.equals("GET") || method.equals("HEAD") || method.equals("OPTIONS") || method.equals("TRACE");
     }
 
     /**
@@ -711,8 +719,9 @@ final class DefaultApplication implements Application {
     }
 
     /**
-     * Prepares a response whose Content-Type has an installed codec: checks the request's Accept
-     * header (406 when nothing matches) and encodes values other than String and byte[].
+     * Prepares a response whose Content-Type has an installed codec: when {@code negotiate} is set,
+     * checks the request's Accept header (406 when nothing matches), and encodes values other than
+     * String and byte[].
      */
     private static Response encode(Codecs codecs, Request request, Response response, boolean negotiate) {
         var mediaType = Codecs.mediaType(response.headers().get("Content-Type"));

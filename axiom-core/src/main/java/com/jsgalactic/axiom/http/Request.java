@@ -303,7 +303,8 @@ public record Request(String method, String path, String query, Map<String, Stri
      * Creates a request from an HTTP origin-form request target ({@code path[?query]}), or from
      * the asterisk-form {@code *} of an OPTIONS request. The path is validated as by
      * {@link #Request(String, String)} and the query, which is retained, as by the canonical
-     * constructor. Absolute-form targets ({@code http://host/path}) are rejected, not normalized.
+     * constructor. Absolute-form targets ({@code http://host/path}) are rejected here; the HTTP
+     * listener reduces them to origin-form, after checking them against {@code Host}, before calling this method.
      * Transports and the test client use this instead of splitting the target themselves.
      *
      * @param method HTTP token
