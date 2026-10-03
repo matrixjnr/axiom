@@ -5,6 +5,7 @@ import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.server.internal.Problems;
 import com.jsgalactic.axiom.server.internal.ResponseSerialization;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
@@ -30,7 +31,9 @@ import java.util.concurrent.RejectedExecutionException;
  * propagate to the test instead of becoming a 500 response. After codec encoding, response bodies
  * must be {@code null}, {@code String} or {@code byte[]} and within the transport size limits;
  * anything else fails the call with {@link IllegalStateException}, where the listener would answer
- * 500; HEAD follows the same rules and returns the {@code Content-Length} a listener sends. Bodies are sent as raw bytes; this module installs no codec, so decoding uses whatever codec
+ * 500; streamed responses (see {@code Response.stream}) are collected into bytes by {@link #execute} and
+ * {@link #submit}, with the listener's byte cap and deadline, and read incrementally with
+ * {@link #stream}; HEAD follows the same rules and returns the {@code Content-Length} a listener sends. Bodies are sent as raw bytes; this module installs no codec, so decoding uses whatever codec
  * the test's runtime classpath provides. Request targets may carry a query and are split and
  * validated by {@link Request#fromTarget(String, String)}, as the listener does; a target the
  * listener would answer with 400 throws {@link IllegalArgumentException} instead. Transport rules such as 414, 431, Expect handling,
@@ -173,7 +176,8 @@ public final class TestClient implements AutoCloseable {
     /**
      * Starts a request without waiting, so tests can hold capacity and observe queueing.
      * The future completes with a 503 or 504 response for admission and deadline failures, and
-     * exceptionally for handler failures.
+     * exceptionally for handler failures. A streamed response completes the future once its body
+     * has ended, with the whole body as bytes; use {@link #stream} to read it while it is written.
      *
      * @param request request to execute
      * @return the request outcome
@@ -188,24 +192,124 @@ public final class TestClient implements AutoCloseable {
             task = dispatcher.submit(route.<Object>map(value -> value).orElse(UNMATCHED), policy, context, () -> {
                 var response = application.handle(request, context);
                 checkSerializable(response);
-                return response;
+                return response.isStreaming() ? collect(response, context) : response;
             }, Response::status);
         } catch (RejectedExecutionException overloaded) {
             return CompletableFuture.completedFuture(Problems.response(503, context.requestId()));
         }
         return task.result().handle((response, thrown) -> {
-            var failure = thrown;
-            while (failure instanceof CompletionException && failure.getCause() != null) { failure = failure.getCause(); }
+            var failure = unwrap(thrown);
             if (failure == null) { return response; }
-            if (failure instanceof RequestDispatcher.DeadlineExceededException) {
-                return Problems.response(504, context.requestId());
-            }
-            if (failure instanceof RequestDispatcher.QueueTimeoutException
-                    || failure instanceof RequestDispatcher.DispatchRejectedException) {
-                return Problems.response(503, context.requestId());
-            }
+            var problem = problem(failure, context);
+            if (problem != null) { return problem; }
             throw new CompletionException(failure);
         }).toCompletableFuture();
+    }
+
+    /**
+     * Executes a request and returns as soon as the response head is known, so that a streamed
+     * body (see {@code Response.stream} and {@code Response.sse}) can be read piece by piece with
+     * {@link StreamedResponse#next()} while the handler is still writing it. A response that is
+     * not streamed is returned as a single chunk. The request keeps its admission slot until the
+     * body ends or the response is {@linkplain StreamedResponse#close() closed}.
+     *
+     * <p>Failures before the head is known behave as for {@link #execute}: admission and deadline
+     * failures give a 503 or 504 problem response, and handler exceptions are thrown. Failures
+     * after it surface through {@link StreamedResponse#completion()}.
+     *
+     * @param request request to execute
+     * @return the response head and a reader for its body
+     * @throws Exception if the handler fails before the head is known
+     * @throws IllegalStateException if the response headers cannot be sent by the transport
+     */
+    public StreamedResponse stream(Request request) throws Exception {
+        Objects.requireNonNull(request, "request");
+        var context = ExecutionContext.create(application.requestTimeout());
+        var route = application.resolve(request);
+        var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
+        var head = new CompletableFuture<StreamedResponse>();
+        RequestDispatcher.Task<Response> task;
+        try {
+            task = dispatcher.submit(route.<Object>map(value -> value).orElse(UNMATCHED), policy, context, () -> {
+                var response = application.handle(request, context);
+                checkSerializable(response);
+                if (!response.isStreaming()) {
+                    head.complete(answered(response));
+                    return response;
+                }
+                var stream = new StreamedResponse(response.status(), response.headers(), response.streamLimit(), context);
+                head.complete(stream);
+                response.streamBody().writeTo(stream.writer());
+                // A body that swallowed the abort did not complete: the listener would have cut the connection.
+                var reason = stream.aborted();
+                if (reason != null) { throw new StreamAbortedException(reason); }
+                return response.withoutBody();
+            }, Response::status);
+        } catch (RejectedExecutionException overloaded) {
+            return answered(Problems.response(503, context.requestId()));
+        }
+        task.result().whenComplete((response, thrown) -> {
+            var failure = unwrap(thrown);
+            if (!head.isDone()) {
+                // The head was never known: the outcome is an admission or deadline answer, or a failure.
+                var problem = failure == null ? null : problem(failure, context);
+                if (failure == null) { head.complete(answered(response)); }
+                else if (problem != null) { head.complete(answered(problem)); }
+                else { head.completeExceptionally(failure); }
+            } else {
+                // After the head, the reader learns the end and its cause; unread chunks stay readable.
+                head.join().end(failure);
+            }
+        });
+        StreamedResponse stream;
+        try {
+            stream = head.join();
+        } catch (CompletionException failure) {
+            var cause = unwrap(failure);
+            if (cause instanceof Exception exception) { throw exception; }
+            if (cause instanceof Error error) { throw error; }
+            throw failure;
+        }
+        stream.attach(task::cancel);
+        return stream;
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        while (failure instanceof CompletionException && failure.getCause() != null) { failure = failure.getCause(); }
+        return failure;
+    }
+
+    /** The response a client sees for an admission or deadline failure, or null for any other failure. */
+    private static Response problem(Throwable failure, ExecutionContext context) {
+        if (failure instanceof RequestDispatcher.DeadlineExceededException) {
+            return Problems.response(504, context.requestId());
+        }
+        if (failure instanceof RequestDispatcher.QueueTimeoutException
+                || failure instanceof RequestDispatcher.DispatchRejectedException) {
+            return Problems.response(503, context.requestId());
+        }
+        return null;
+    }
+
+    /** A response that is complete already, as a stream of one chunk that has ended. */
+    private static StreamedResponse answered(Response response) {
+        var body = ResponseSerialization.bodyBytes(response.body());
+        var stream = StreamedResponse.whole(response.status(), response.headers(), body == null ? new byte[0] : body);
+        stream.end(null);
+        return stream;
+    }
+
+    /** Runs a stream body to its end in memory, with the listener's cap and deadline rules. */
+    private static Response collect(Response response, ExecutionContext context) throws Exception {
+        var collector = new StreamedResponse.Collector(response.streamLimit(), context);
+        response.streamBody().writeTo(collector);
+        // A body that swallowed the abort did not complete: the listener would have cut the connection.
+        if (collector.aborted() != null) { throw new StreamAbortedException(collector.aborted()); }
+        var collected = Response.of(response.status(), collector.toByteArray());
+        for (var header : response.headers().entrySet()) {
+            collected = collected.withHeader(header.getKey(), header.getValue());
+        }
+        return collected;
     }
 
     /** Applies the listener's serialization rules; where it would answer 500, the call fails. */
