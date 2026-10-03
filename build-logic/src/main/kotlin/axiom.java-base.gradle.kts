@@ -1,4 +1,17 @@
-plugins { java }
+plugins {
+    java
+    checkstyle
+}
+
+// Style gate: checkstyleMain and checkstyleTest are part of `check` and fail on any violation.
+// One shared ruleset (config/checkstyle/checkstyle.xml) covers every Java module.
+val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
+checkstyle {
+    toolVersion = libs.findVersion("checkstyle").get().requiredVersion
+    configDirectory.set(rootProject.layout.projectDirectory.dir("config/checkstyle"))
+    maxWarnings = 0
+    maxErrors = 0
+}
 
 java {
     toolchain { languageVersion.set(JavaLanguageVersion.of(21)) }
