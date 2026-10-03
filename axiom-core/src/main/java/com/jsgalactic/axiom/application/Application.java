@@ -230,6 +230,8 @@ public interface Application extends RouteGroup, AutoCloseable {
      * without invoking a handler: HTTP listeners reject a declared Content-Length before reading
      * the body and stop reading a chunked body as soon as it exceeds the limit; in-memory calls
      * and the test client check the body length. Zero rejects every non-empty body.
+     * The ceiling is deliberate: bodies are held in memory, and 64 MiB equals the default listener
+     * budget for request bodies in flight, so any permitted body fits it (see the body guide).
      * @param bytes limit from zero to 64 MiB
      * @return this application
      * @throws IllegalArgumentException for a negative limit or one above 64 MiB

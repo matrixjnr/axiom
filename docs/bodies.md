@@ -24,7 +24,19 @@ codec; application code never compiles against it. See the
 `app.maxRequestBody(bytes)` sets the largest accepted body before startup. The
 default is 1 MiB; accepted values are 0 to 64 MiB, and zero rejects every non-empty
 body. Bodies are buffered completely in memory before the handler runs; there is no
-streaming API. Larger bodies receive **413** and the handler is never invoked:
+streaming API. Larger bodies receive **413** and the handler is never invoked.
+
+**Why 64 MiB is the ceiling, and why it stays.** Every accepted body is held in memory in one
+array, at least once for the listener and once more for a codec that decodes from an array. The
+limit is therefore a heap-safety bound, not only a policy: 64 MiB equals the listener's default
+in-flight body budget (`maxInFlightBodyBytes`), which must be at least `maxRequestBody` for a
+listener to start, so the largest permitted body always fits the default budget. A higher limit
+would need a larger budget, `3 × L` of per-connection memory, and a heap sized for several such
+bodies at once, which defeats the purpose of bounding them. The range is kept deliberately;
+anything larger than a request body that fits in memory is an upload and belongs in a streaming
+path, which this release does not provide. Raise `maxRequestBody` only together with
+`maxInFlightBodyBytes` and the heap, as described under
+[memory per connection](#memory-per-connection):
 
 - **Content-Length**: a declared length over the limit is answered before any body
   byte is read, and the connection closes.

@@ -338,6 +338,35 @@ Accepted paths are matched verbatim. No decoding, case folding, or redirects occ
 `/users` and `/users/` are distinct, `%20` and a raw space are different spellings
 (the latter is rejected), and `/a%20b` does not match `/a%2520b`. Unicode is preserved.
 
+### Path policy
+
+This is the long-term contract, not a stopgap, and it will not be relaxed by a
+configuration switch. A path that two components could read as different resources
+(`//`, dot segments, a backslash, NUL, encoded separators) is the raw material of
+traversal, authorization-bypass and cache-poisoning attacks, so Axiom rejects it with 400
+before routing instead of guessing which reading the client meant. Matching is exact for
+the same reason: a router that folds case, trims slashes or redirects makes the set of
+URLs that reach a handler larger than the set the application's authorization rules and
+cache keys were written for. Routes that want more say so explicitly (see the migration
+notes below), which keeps each leniency visible in the code that owns it.
+
+Migrating from a router that normalized paths (or from an earlier Axiom build whose
+wildcard saw the raw remainder):
+
+| Previously | Now | What to do |
+| --- | --- | --- |
+| `/files//a`, `/a/./b`, `/a/../b` reached a wildcard with the remainder as sent | 400 before routing | Fix the client or proxy to send the canonical path. Never "normalize and continue" on the server: a wildcard remainder never contains an empty or dot segment, so containment checks on `ctx.pathDecoded("path")` can rely on that. |
+| `%2F`, `%5C`, `%00`, `%2E` inside a segment decoded to `/`, `\`, NUL or `.` in the capture | 400 before routing | Use a query parameter or a request body for values that may contain these characters, and encode `/` inside a value in the body rather than the path. |
+| `/users/` served by the `/users` handler | 404 (the paths are distinct) | Register both templates with one handler, for example `app.get("/users", h); app.get("/users/", h);`, or redirect explicitly from one to the other. |
+| `/Users` served by the `/users` handler | 404 (matching is case-sensitive) | Register the other spelling, or fix the link. |
+| Automatic redirect from `/users` to `/users/` or the reverse | None | Add the redirect on purpose: `app.get("/users/", ctx -> ctx.redirect(301, "/users"))`. |
+| A wildcard `*path` receiving `""` for a bare directory | Unchanged: `/files/` captures `""`, while `/files` does not match | Register `/files` too if it must be served. |
+
+Absolute-form targets, which carry the host in the request line, are accepted but reduced to their
+path first (see [absolute-form targets](#absolute-form-targets)); the same policy applies to
+the path they carry. The policy is covered by `PathPolicyTest` for matching and by
+`HttpPathDecodingTest` and `HttpMethodsTest` for what listeners answer.
+
 `ctx.path()` returns the request path. `ctx.route()` returns the stable route
 identity with its template. `ctx.path(name)` returns the raw capture and rejects
 undeclared names. `ctx.pathDecoded(name)` percent-decodes a capture once as strict
