@@ -5,7 +5,6 @@ import com.jsgalactic.axiom.context.ErrorHandler;
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.error.AxiomException;
-import com.jsgalactic.axiom.error.NotAcceptableException;
 import com.jsgalactic.axiom.error.PayloadTooLargeException;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.ExecutionContext;
