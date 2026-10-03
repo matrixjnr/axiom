@@ -8,12 +8,16 @@ import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
+import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.server.internal.Problems;
 import com.jsgalactic.axiom.server.internal.ResponseSerialization;
+import com.jsgalactic.axiom.server.internal.StreamRun;
+import com.jsgalactic.axiom.server.internal.execution.EndpointTag;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DispatchRejectedException;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.QueueTimeoutException;
+import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -159,6 +163,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private ChannelBodyWriter stream;
     private boolean streamKeepAlive;
     private final StreamMetrics streamMetrics;
+    private final ListenerMetrics listenerMetrics;
     private ScheduledFuture<?> headTimer;
     // Body of the request being received, copied out of each Netty buffer as it arrives. Its array
     // grows by doubling as bytes arrive, capped at the declared Content-Length or, for chunked
@@ -193,7 +198,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** Production uses {@link TransportSettings#DEFAULTS}; tests may vary single bounds. */
     HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
             ConnectionSlots.Slot slot, BooleanSupplier listenerClosing, BodyBudget budget) {
+        this(application, executor, settings, slot, listenerClosing, budget, new StreamMetrics(application.metrics()),
+                ListenerMetrics.DISABLED);
+    }
+
+    /** Production: stream measurements are shared by all connections of the listener. */
+    HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
+            ConnectionSlots.Slot slot, BooleanSupplier listenerClosing, BodyBudget budget,
+            StreamMetrics streamMetrics, ListenerMetrics listenerMetrics) {
         this.budget = budget;
+        this.listenerMetrics = listenerMetrics;
         this.slot = slot;
         this.listenerClosing = listenerClosing;
         this.application = application;
@@ -206,7 +220,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         this.maxPipelined = settings.options().maxPipelinedRequests();
         this.maxDiscardedInput = settings.options().maxDiscardedInput();
         this.rejections = settings.options().rejectionObserver().orElse(null);
-        this.streamMetrics = new StreamMetrics(application.metrics());
+        this.streamMetrics = streamMetrics;
     }
 
     /**
@@ -255,10 +269,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (closing || draining) { return; }
         draining = true;
         if (stream != null) {
-            // A stream may never end by itself, so it is cancelled, not drained. The client sees the
-            // body cut off, never a normal end, which is what a truncated download must look like.
-            stream.abort(StreamAbortedException.Reason.SHUTDOWN);
-            abort(context);
+            // A stream keeps the grace period: the body is told that shutdown began, so it can end
+            // normally with a final chunk (the connection then closes), and the listener cuts what
+            // is still running when the grace period ends.
+            stream.beginShutdown();
             return;
         }
         if (!busy) { abort(context); }
@@ -465,11 +479,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             if (application.state() != Application.State.RUNNING) { throw new RejectedExecutionException("Application closed"); }
             var route = application.resolve(exchange.request());
             var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
+            var tag = executor.endpointTag(route.<Object>map(value -> value).orElse(UNMATCHED));
             active = executor.submit(route.<Object>map(value -> value).orElse(UNMATCHED),
                     policy, exchange.execution(), () -> {
                         try {
                             var response = application.handle(exchange.request(), exchange.execution());
-                            return response.isStreaming() ? stream(ctx, exchange, response) : prepare(response, exchange);
+                            return response.isStreaming() ? stream(ctx, exchange, response, tag) : prepare(response, exchange);
                         } catch (Exception | Error failure) {
                             logFailure(exchange, failure);
                             throw failure;
@@ -500,7 +515,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         } catch (RuntimeException unavailable) {
             if (!(unavailable instanceof RejectedExecutionException)) {
                 LOG.log(System.Logger.Level.WARNING,
-                        "HTTP request " + exchange.execution().requestId() + " could not be dispatched", unavailable);
+                        "HTTP request " + correlation(exchange) + " could not be dispatched", unavailable);
             }
             if (active != null) { active.cancel(); active = null; }
             exchange.release();
@@ -604,15 +619,20 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
     }
 
+    /** The request ID for a log line, with the caller's trace id when it sent a valid traceparent. */
+    private static String correlation(Exchange exchange) {
+        return TraceContext.correlation(exchange.execution().requestId(), exchange.request());
+    }
+
     private static void logFailure(Exchange exchange, Throwable failure) {
         if (failure instanceof StreamAbortedException aborted) {
             // Expected outcomes of a stream: a client leaving or shutdown is not an error. The cap is
             // the application's mistake, so it is worth a warning.
             var level = aborted.reason() == StreamAbortedException.Reason.LIMIT_EXCEEDED
                     ? System.Logger.Level.WARNING : System.Logger.Level.DEBUG;
-            LOG.log(level, "HTTP request " + exchange.execution().requestId() + " stream aborted: " + aborted.reason());
+            LOG.log(level, "HTTP request " + correlation(exchange) + " stream aborted: " + aborted.reason());
         } else if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
-            LOG.log(System.Logger.Level.ERROR, "HTTP request " + exchange.execution().requestId() + " failed", failure);
+            LOG.log(System.Logger.Level.ERROR, "HTTP request " + correlation(exchange) + " failed", failure);
         }
     }
 
@@ -623,11 +643,13 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * ends in failure, or whose writer was aborted even if the body swallowed that, fails the task:
      * the head is out, so the only honest ending is closing the connection.
      */
-    private WireResponse stream(ChannelHandlerContext ctx, Exchange exchange, Response response) throws Exception {
+    private WireResponse stream(ChannelHandlerContext ctx, Exchange exchange, Response response,
+            EndpointTag tag) throws Exception {
         if (!ResponseSerialization.headersSendable(response.headers())) { return error(500, exchange); }
         boolean close = closeRequested(response.headers());
+        var scope = streamMetrics.scope(tag);
         var writer = new ChannelBodyWriter(ctx.channel(), exchange.execution(), response.streamLimit(),
-                responseNanos, streamMetrics);
+                responseNanos, scope);
         boolean started;
         try {
             started = ctx.executor().submit(() -> beginStream(ctx, exchange, response, close, writer)).get();
@@ -636,7 +658,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         }
         // Nothing was sent yet, so a refusal can still be an ordinary response.
         if (!started) { return error(503, exchange); }
-        streamMetrics.started();
+        var run = StreamRun.begin(response, exchange.execution(), scope);
         Throwable failure = null;
         try {
             response.streamBody().writeTo(writer);
@@ -645,10 +667,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             throw thrown;
         } finally {
             writer.end();
-            var reason = writer.aborted();
-            streamMetrics.finished(reason != null ? StreamMetrics.Outcome.of(reason)
-                    : failure != null ? (exchange.execution().isExpired() ? StreamMetrics.Outcome.TIMEOUT
-                            : StreamMetrics.Outcome.FAILED) : StreamMetrics.Outcome.COMPLETED, writer.bytesWritten());
+            run.end(writer.bytesWritten(), writer.aborted(), failure);
         }
         var reason = writer.aborted();
         if (reason != null) { throw new StreamAbortedException(reason); }
@@ -690,7 +709,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         stream = null;
         if (closing || !ctx.channel().isActive()) { return; }
         if (failure != null || finished.aborted() != null) { abort(ctx); return; }
-        boolean keepAlive = streamKeepAlive;
+        boolean keepAlive = streamKeepAlive && !draining && !listenerClosing.getAsBoolean();
         if (!keepAlive) { closing = true; dropPending(); releaseBody(); }
         finishWrite(ctx, ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT), keepAlive);
     }
@@ -801,6 +820,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Sends a listener error; for a HEAD request the problem body is omitted as for any HEAD response. */
     private void sendError(ChannelHandlerContext ctx, int status, boolean head) {
+        listenerMetrics.answered(status);
         var exchange = new Exchange(new Request(head ? "HEAD" : "GET", "/"), false, false,
                 ExecutionContext.create(application.requestTimeout()));
         send(ctx, exchange, error(status, exchange));
@@ -832,7 +852,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         receiving = null;
         dropPending();
         // The stream learns why before the cancellation interrupts its thread, so the reason is the disconnect.
-        if (stream != null) { stream.abort(StreamAbortedException.Reason.CLIENT_DISCONNECTED); stream = null; }
+        if (stream != null) {
+            stream.abort(draining || listenerClosing.getAsBoolean()
+                    ? StreamAbortedException.Reason.SHUTDOWN : StreamAbortedException.Reason.CLIENT_DISCONNECTED);
+            stream = null;
+        }
         if (active != null) { active.cancel(); active = null; }
     }
 

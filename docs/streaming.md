@@ -67,8 +67,9 @@ separate flush, and each call is at least one chunk on the wire. Writes of more 
   The handler is blocked inside `write` meanwhile, on its virtual thread, which costs no platform
   thread.
 - **Deadline.** A wait ends at the request deadline (the writer then aborts with `TIMEOUT`), and the
-  deadline also interrupts a handler that is blocked on something else. Streams therefore live at
-  most as long as `app.requestTimeout(...)`, ten seconds by default.
+  deadline also interrupts a handler that is blocked on something else. A stream therefore lives at
+  most as long as `app.requestTimeout(...)` (ten seconds by default) unless its response gives it
+  a [lifetime of its own](#stream-lifetime).
 - **Stalled clients.** A client that takes no data for the listener's response write bound
   (`responseTimeout`, 30 seconds by default; see [listener options](http.md#listener-options)
   and [resource limits](http.md#resource-limits)) is dropped (`CLIENT_DISCONNECTED`), as the same bound drops
@@ -105,15 +106,86 @@ handler should let it propagate, or return. Either way the runtime then:
 A body that returns normally after swallowing an abort is treated as failed in the same way. A
 writer is valid only until `writeTo` returns; using it afterwards throws `IllegalStateException`.
 
+## Stream lifetime
+
+`Response.withStreamLifetime(Duration)` lets one stream outlive the request deadline without
+loosening the deadline of any other request:
+
+```java
+app.get("/events", ctx -> Response.sse(events -> { /* ... */ })
+        .withStreamLifetime(Duration.ofHours(1)));
+```
+
+Once the head is sent, the request's deadline moves to the lifetime from that moment, if that is
+later. The stream then ends with `TIMEOUT` when the lifetime passes (and a handler blocked elsewhere
+is interrupted then), and it holds its admission slot all that time. The lifetime is explicit and
+bounded: positive, at most one day (`Response.MAX_STREAM_LIFETIME`). It never shortens a deadline,
+so a lifetime below what remains of the request deadline changes nothing. A stream without one keeps
+the request deadline as before. Until the head is sent, the ordinary deadline applies.
+
+## Observing and wrapping a stream
+
+Middleware and error handlers finish before the body runs, so what happens to the body is told to
+callbacks the response carries:
+
+```java
+app.use((ctx, next) -> {
+    var response = next.run();
+    if (!response.isStreaming()) { return response; }
+    return response
+            .mapStream(body -> out -> { timer.start(); body.writeTo(out); })      // wrap the body
+            .onStreamEnd(outcome -> accessLog.stream(ctx.request().path(), outcome)); // learn the end
+});
+```
+
+- `onStreamEnd(Consumer<StreamOutcome>)` is called once when the body is over, on the handler's
+  thread, with a `StreamOutcome`: `kind` (`COMPLETED`, `CLIENT_DISCONNECTED`, `LIMIT_EXCEEDED`,
+  `TIMEOUT`, `SHUTDOWN` or `FAILED`), `bytesWritten`, `elapsed` since the head was sent, and the
+  `failure` the body threw, if any. It is called for exactly the streams that run: not for a HEAD
+  request, and not for a response refused before its head was sent. The first observer added runs
+  first, so inner middleware sees the end before outer middleware. Observers must be quick and must
+  not block: the request still holds its admission slot. One that throws is logged and ignored, and
+  the others still run. They observe; they cannot change the status or send a second response.
+- `mapStream(UnaryOperator<StreamBody>)` replaces the body with a wrapper of it, to time it, count or
+  transform what it writes. Wrap the `BodyWriter` too and delegate `shutdownRequested` and
+  `onShutdown` to the writer you wrap.
+- Error handlers cannot choose a response for a failing body because the response is already under
+  way. A handler that produced a streamed response (or any middleware) learns of such a failure,
+  including a client disconnect or an exceeded cap, from the same `onStreamEnd` callback.
+
 ## Shutdown
 
-Closing a listener (or the application) **cancels** open streams at once, with reason `SHUTDOWN`,
-and closes their connections without a final chunk, instead of waiting out the five-second grace
-period: a stream may never end by itself, and a body that is silently completed early would look
-like a finished download. Clients of a cut stream reconnect (browsers do so automatically for
-server-sent events; send `retry:` to set the delay). A stream that has not sent its head yet when
-shutdown begins is refused with 503 like a request that was still waiting. Other running requests
-keep the grace period, as described in [HTTP listeners](http.md#ownership-and-shutdown).
+Closing a listener (or the application) lets an open stream keep the **shutdown grace period**
+(five seconds by default, `ListenerOptions.shutdownGrace`), like other running requests, and tells
+the body that shutdown began:
+
+- `BodyWriter.shutdownRequested()` (and `EventSink.shutdownRequested()`) turns true, and actions
+  registered with `onShutdown(Runnable)` run once, at once if shutdown already began. An action wakes a body that is
+  blocked on something other than a write, for example by completing a future or closing a
+  subscription so a blocking `poll` returns. It runs on a server thread and must be quick and
+  non-blocking.
+- A body that sees shutdown should send what completes the stream (a last event, the rest of the
+  file) and return. The response then ends with a **final chunk** and the connection closes, so a
+  finite download finishes and an event stream ends cleanly; browsers reconnect after the
+  `retry:` delay.
+- Writes keep working during the grace period. A body still running when it ends is cut like
+  before: reason `SHUTDOWN`, the connection closed without a final chunk. A stream that never
+  ends and ignores the signal therefore holds the close for the grace period.
+- A stream whose head has not been sent yet when shutdown begins is refused with 503 like a request
+  that was still waiting. The connection never serves another request after the stream: the
+  response closes it, whatever `Connection` header the head carried.
+
+```java
+app.get("/events", ctx -> Response.sse(events -> {
+    var closing = new CountDownLatch(1);
+    events.onShutdown(closing::countDown);               // wakes the wait below
+    while (!events.shutdownRequested()) {
+        var update = subscription.poll(15, TimeUnit.SECONDS);
+        if (update != null) { events.send(update.toJson()); } else { events.keepAlive(); }
+    }
+    events.send(ServerSentEvent.data("server closing").withRetry(Duration.ofSeconds(2)));
+}));
+```
 
 ## Server-sent events
 
@@ -142,7 +214,8 @@ compresses a response. The body receives an `EventSink`:
   allowed (it resets the client's last id).
 
 The default cap is 64 MiB; pass `maxBytes` to change it. Remember the deadline: a stream that must
-outlive ten seconds needs a longer `app.requestTimeout(...)`, which applies to every route.
+outlive ten seconds needs `withStreamLifetime(...)` (see [above](#stream-lifetime)); raising
+`app.requestTimeout(...)` would change every route.
 
 ## Metrics
 
@@ -152,22 +225,24 @@ counts as `5xx` and one cut by a disconnect or shutdown as `cancelled`) and hold
 
 | Name | Kind | Tags | Meaning |
 | --- | --- | --- | --- |
-| `axiom.http.streams` | counter | `outcome` | finished streams: `completed`, `client_disconnected`, `limit_exceeded`, `timeout`, `shutdown`, `failed` |
-| `axiom.http.stream.bytes` | counter | none | body bytes written |
-| `axiom.http.streams.active` | gauge | none | streams whose head was sent and whose body is running |
-| `axiom.http.stream.backpressure` | counter | none | writes that had to wait for a slow client |
+| `axiom.http.streams` | counter | `method`, `route`, `outcome` | finished streams: `completed`, `client_disconnected`, `limit_exceeded`, `timeout`, `shutdown`, `failed` |
+| `axiom.http.stream.bytes` | counter | `method`, `route` | body bytes written |
+| `axiom.http.streams.active` | gauge | `method`, `route` | streams whose head was sent and whose body is running |
+| `axiom.http.stream.backpressure` | counter | `method`, `route` | writes that had to wait for a slow client |
 
-`outcome` is the only tag and takes one of six fixed values. No path, query, header or identity is
-ever a tag.
+`method` and `route` are the registered route's method and template, from the same bounded set as the
+request series: at most 1024 endpoints get their own series and later ones share `other`, and
+requests that match no route share `none` / `unmatched`. `outcome` takes one of six fixed values. No
+path, query, header or identity is ever a tag. The HTTP listener and `TestClient` record the same series.
 
 ## Testing
 
 `TestClient.stream(request)` returns the response head and a `StreamedResponse`: `status()`,
-`headers()`, `next()` / `nextText()` (one chunk per handler write, empty at the end), `readAll()`,
-`completion()` and `close()`. The handler's writer and the reader meet at a hand-off holding one
-chunk, so the handler is never more than one write ahead of the test: a test that does not read
-stops the handler at its next write, and one that reads sees every write in order, with no
-sleeping.
+`headers()`, `next()` / `nextText()` (one chunk per piece the handler wrote, empty at the end),
+`readAll()`, `completion()`, `beginShutdown()` and `close()`. By default the handler's writer and the
+reader meet at a hand-off holding one chunk, so the handler is never more than one write ahead of the
+test: a test that does not read stops the handler at its next write, and one that reads sees every
+write in order, with no sleeping.
 
 ```java
 try (var client = TestClient.start(app); var events = client.stream(new Request("GET", "/events"))) {
@@ -180,21 +255,26 @@ try (var client = TestClient.start(app); var events = client.stream(new Request(
 ```
 
 `close()` plays a disconnect: the handler's writes throw `StreamAbortedException` with
-`CLIENT_DISCONNECTED` and a handler that is not writing is interrupted. `completion()` completes
-normally when the body returned, and exceptionally with what ended it. `TestClient.execute` and
-`submit` run a finite stream to its end and return one response with the whole body; they apply
-the same cap and deadline and rethrow a failing body. HEAD gets no body. See
-[the programming model](programming-model.md#testing-without-ports) for the rest of the test
-client. The hand-off models ordering and backpressure; the listener's water marks, 16 KiB
-splitting and stall bound exist only over a socket.
+`CLIENT_DISCONNECTED` and a handler that is not writing is interrupted. `beginShutdown()` plays the
+start of a listener's shutdown: `shutdownRequested()` turns true and `onShutdown` actions run, while
+writes keep working, so a test can show that the body ends normally and `completion()` completes.
+`completion()` completes normally when the body returned, and exceptionally with what ended it.
+`TestClient.execute` and `submit` run a finite stream to its end and return one response with the
+whole body; they apply the same cap, lifetime and deadline and rethrow a failing body. HEAD gets no
+body. The client records the stream metrics and runs the `onStreamEnd` observers like the listener.
+See [the programming model](programming-model.md#testing-without-ports) for the rest of the test client.
+
+**Buffering.** `TestClient.start(app, StreamBuffering)` models the transport's buffer instead of the
+hand-off. `StreamBuffering.listener()` has the listener's numbers: writers wait once 128 KiB are
+unread and continue below 32 KiB, a write of more than 16 KiB arrives as 16 KiB pieces, and a reader
+that takes nothing for 30 seconds loses the stream (`CLIENT_DISCONNECTED`). `StreamBuffering.ofBytes(n)`
+sets the high water mark (low is a quarter, pieces at most 16 KiB, no stall bound);
+`withStallTimeout(Duration)` sets the stall bound, and the constructor sets every number. `next()` then
+returns one piece per call. Chunked framing is part of the wire only: the client delivers the payload
+pieces, which are what the listener's framing carries.
 
 ## Limitations
 
-- A stream lives at most as long as the request deadline, which is one application-wide setting.
-- Closing a listener cancels streams instead of draining them.
 - Open streams hold an admission slot and a virtual thread each.
-- Middleware and error handlers run before the body and cannot see or wrap it.
-- The test client models the hand-off, not the transport's buffering.
-- Stream metrics are not tagged by route.
 
 These are tracked in the limitations index, [#13](https://github.com/matrixjnr/axiom/issues/13).

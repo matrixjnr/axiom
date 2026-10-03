@@ -66,6 +66,12 @@ final class DispatchMetrics {
         return endpoints.computeIfAbsent(key, DispatchMetrics::describe);
     }
 
+    /** The tags of an endpoint key within the same bounded set as its series, or null when metrics are disabled. */
+    EndpointTag tag(Object key) {
+        var series = series(key);
+        return series == null ? null : series.tag;
+    }
+
     private static Series describe(Object key) {
         return key instanceof Route route ? new Series(route.method(), route.path()) : new Series("none", "unmatched");
     }
@@ -161,6 +167,7 @@ final class DispatchMetrics {
     static final class Series {
         private final String method;
         private final String route;
+        private final EndpointTag tag;
         private final AtomicReferenceArray<Metrics.Counter> requests = new AtomicReferenceArray<>(CLASSES.length);
         private final AtomicReferenceArray<Metrics.Counter> rejections = new AtomicReferenceArray<>(REASONS.length);
         private volatile Metrics.Timer duration;
@@ -169,6 +176,7 @@ final class DispatchMetrics {
         private Series(String method, String route) {
             this.method = method;
             this.route = route;
+            this.tag = new EndpointTag(method, route);
         }
     }
 }

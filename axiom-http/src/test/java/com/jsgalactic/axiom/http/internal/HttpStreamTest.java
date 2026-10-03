@@ -7,6 +7,8 @@ import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.ServerSentEvent;
 import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.http.StreamAbortedException.Reason;
+import com.jsgalactic.axiom.http.StreamOutcome;
+import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -166,8 +168,8 @@ class HttpStreamTest {
                 assertThat(failure.get(30, TimeUnit.SECONDS)).isEqualTo(Reason.LIMIT_EXCEEDED);
                 assertThat(again.get(30, TimeUnit.SECONDS)).isEqualTo(Reason.LIMIT_EXCEEDED);
             }
-            probe.await(v -> v == 1, StreamMetrics.STREAMS, "outcome", "limit_exceeded");
-            assertThat(probe.value(StreamMetrics.BYTES)).isEqualTo(8);
+            probe.await(v -> v == 1, StreamMetrics.STREAMS, "method", "GET", "route", "/capped", "outcome", "limit_exceeded");
+            assertThat(probe.value(StreamMetrics.BYTES, "method", "GET", "route", "/capped")).isEqualTo(8);
             // A body of exactly the cap is complete.
             try (var wire = new Wire(server)) {
                 wire.write("GET /exact HTTP/1.1\r\nHost: a\r\n\r\n");
@@ -196,11 +198,54 @@ class HttpStreamTest {
                 assertThat(wire.socket.getInputStream().readAllBytes()).isEmpty();
             }
             // The failure did not poison the listener, and the admission slot was released.
-            probe.await(v -> v == 1, StreamMetrics.STREAMS, "outcome", "failed");
+            probe.await(v -> v == 1, StreamMetrics.STREAMS, "method", "GET", "route", "/broken", "outcome", "failed");
             probe.await(v -> v == 0, ACTIVE);
             try (var wire = new Wire(server)) {
                 assertThat(wire.get("/next").text()).isEqualTo("next");
             }
+        }
+    }
+
+    @Test void errorHandlersAndAfterErrorNeverRunForABodyThatFailsAfterTheHeadWasSent() throws Exception {
+        var handled = new AtomicInteger();
+        var decorated = new AtomicInteger();
+        try (var fixture = new Fixture()) {
+            fixture.app.use(new com.jsgalactic.axiom.context.Middleware() {
+                @Override public Response handle(com.jsgalactic.axiom.context.Context ctx, Next next) throws Exception {
+                    return next.run();
+                }
+                @Override public Response afterError(com.jsgalactic.axiom.context.Context ctx, Response response) {
+                    decorated.incrementAndGet();
+                    return response.withHeader("X-Decorated", "yes");
+                }
+            });
+            fixture.app.error(Exception.class, (ctx, failure) -> { handled.incrementAndGet(); return Response.of(500, "mapped"); });
+            fixture.app.get("/broken", ctx -> Response.stream(200, "text/plain", out -> {
+                out.write("partial");
+                throw new IllegalStateException("handler bug");
+            }));
+            fixture.app.get("/before", ctx -> { throw new IllegalStateException("before the head"); });
+            var server = fixture.listen();
+            try (var wire = new Wire(server)) {
+                wire.write("GET /broken HTTP/1.1\r\nHost: a\r\n\r\n");
+                var head = wire.head();
+                assertThat(head.status()).isEqualTo(200);
+                assertThat(head.headers()).doesNotContainKey("X-Decorated");
+                assertThat(text(wire.chunk())).isEqualTo("partial");
+                // No second response: the connection is closed.
+                assertThat(wire.socket.getInputStream().readAllBytes()).isEmpty();
+            }
+            assertThat(handled).hasValue(0);
+            assertThat(decorated).hasValue(0);
+            // A failure before the head is an ordinary mapped and decorated response.
+            try (var wire = new Wire(server)) {
+                wire.write("GET /before HTTP/1.1\r\nHost: a\r\n\r\n");
+                var head = wire.head();
+                assertThat(head.status()).isEqualTo(500);
+                assertThat(head.headers()).containsEntry("X-Decorated", "yes");
+            }
+            assertThat(handled).hasValue(1);
+            assertThat(decorated).hasValue(1);
         }
     }
 
@@ -226,9 +271,9 @@ class HttpStreamTest {
                 wire.socket.setSoLinger(true, 0); // Closing resets the connection at once.
             }
             assertThat(reason.get(30, TimeUnit.SECONDS)).isEqualTo(Reason.CLIENT_DISCONNECTED);
-            probe.await(v -> v == 1, StreamMetrics.STREAMS, "outcome", "client_disconnected");
+            probe.await(v -> v == 1, StreamMetrics.STREAMS, "method", "GET", "route", "/endless", "outcome", "client_disconnected");
             probe.await(v -> v == 0, ACTIVE);
-            probe.await(v -> v == 0, STREAM_ACTIVE);
+            probe.await(v -> v == 0, STREAM_ACTIVE, "method", "GET", "route", "/endless");
         }
     }
 
@@ -252,18 +297,18 @@ class HttpStreamTest {
                 wire.write("GET /big HTTP/1.1\r\nHost: a\r\n\r\n");
                 wire.head();
                 // The client reads nothing more until the handler has had to wait for it.
-                probe.await(v -> v >= 1, StreamMetrics.BACKPRESSURE);
+                probe.await(v -> v >= 1, StreamMetrics.BACKPRESSURE, "method", "GET", "route", "/big");
                 long buffered = accepted.get();
                 assertThat(buffered).isPositive().isLessThan(2L * 1024 * 1024);
-                assertThat(probe.value(StreamMetrics.STREAMS, "outcome", "completed")).isZero();
+                assertThat(probe.value(StreamMetrics.STREAMS, "method", "GET", "route", "/big", "outcome", "completed")).isZero();
                 // Reading resumes the handler, and the whole body arrives in order.
                 var body = wire.chunkedBody();
                 assertThat(body).hasSize(total);
                 for (int at = 0; at < total; at += piece) { assertThat(body[at]).isEqualTo((byte) (at / piece)); }
             }
-            probe.await(v -> v == 1, StreamMetrics.STREAMS, "outcome", "completed");
-            assertThat(probe.value(StreamMetrics.BYTES)).isEqualTo(total);
-            probe.await(v -> v == 0, STREAM_ACTIVE);
+            probe.await(v -> v == 1, StreamMetrics.STREAMS, "method", "GET", "route", "/big", "outcome", "completed");
+            assertThat(probe.value(StreamMetrics.BYTES, "method", "GET", "route", "/big")).isEqualTo(total);
+            probe.await(v -> v == 0, STREAM_ACTIVE, "method", "GET", "route", "/big");
         }
     }
 
@@ -300,7 +345,7 @@ class HttpStreamTest {
                 // No 504 follows a response that is already under way.
                 assertThat(wire.socket.getInputStream().readAllBytes()).isEmpty();
             }
-            probe.await(v -> v == 1, StreamMetrics.STREAMS, "outcome", "timeout");
+            probe.await(v -> v == 1, StreamMetrics.STREAMS, "method", "GET", "route", "/stuck", "outcome", "timeout");
             probe.await(v -> v == 0, ACTIVE);
         }
     }
@@ -333,10 +378,12 @@ class HttpStreamTest {
         }
     }
 
-    @Test void shutdownCancelsAnOpenStreamWithinTheGracePeriod() throws Exception {
+    @Test void shutdownCutsAStreamThatIgnoresItOnceTheGracePeriodEnds() throws Exception {
         var reason = new CompletableFuture<Reason>();
+        var signalled = new CountDownLatch(1);
         try (var fixture = new Fixture()) {
             fixture.app.get("/endless", ctx -> Response.stream(200, "text/plain", out -> {
+                out.onShutdown(signalled::countDown);
                 try {
                     out.write("first");
                     for (;;) { out.write(new byte[8192]); }
@@ -345,18 +392,103 @@ class HttpStreamTest {
                     throw aborted;
                 }
             }));
-            // A long grace period: finishing within it proves the stream was cancelled, not waited for.
-            var server = serve(fixture, small().withShutdownGrace(Duration.ofSeconds(120)));
+            var server = serve(fixture, small().withShutdownGrace(Duration.ofMillis(300)));
             try (var wire = new Wire(server, 4096)) {
                 wire.write("GET /endless HTTP/1.1\r\nHost: a\r\n\r\n");
                 wire.head();
                 assertThat(text(wire.chunk())).isEqualTo("first");
                 server.close();
+                assertThat(signalled.await(30, TimeUnit.SECONDS)).isTrue();
                 assertThat(reason.get(30, TimeUnit.SECONDS)).isEqualTo(Reason.SHUTDOWN);
                 server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
                 // The body was cut off, not completed: the bytes the client got never end in a final chunk.
                 var rest = text(wire.socket.getInputStream().readAllBytes());
                 assertThat(rest).doesNotEndWith("\r\n0\r\n\r\n");
+            }
+        }
+    }
+
+    @Test void aStreamThatSeesShutdownEndsCleanlyWithAFinalChunkWithoutWaitingOutTheGracePeriod() throws Exception {
+        var outcome = new CompletableFuture<StreamOutcome>();
+        var probe = new Probe();
+        try (var fixture = new Fixture()) {
+            fixture.app.metrics(probe);
+            fixture.app.get("/events", ctx -> Response.sse(events -> {
+                var shutdown = new CountDownLatch(1);
+                events.onShutdown(shutdown::countDown);
+                events.send("first");
+                shutdown.await();
+                events.send(ServerSentEvent.named("bye", "closing"));
+            }).onStreamEnd(outcome::complete));
+            // A long grace period: the stream must end by itself, long before it.
+            var server = serve(fixture, small().withShutdownGrace(Duration.ofSeconds(120)));
+            try (var wire = new Wire(server)) {
+                wire.write("GET /events HTTP/1.1\r\nHost: a\r\n\r\n");
+                wire.head();
+                assertThat(text(wire.chunk())).isEqualTo("data: first\n\n");
+                server.close();
+                assertThat(text(wire.chunk())).isEqualTo("event: bye\ndata: closing\n\n");
+                assertThat(wire.chunk()).isNull(); // The final chunk: a clean end of the body.
+                assertThat(wire.socket.getInputStream().read()).isEqualTo(-1); // Then the connection closes.
+                server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+            }
+            assertThat(outcome.get(30, TimeUnit.SECONDS).kind()).isEqualTo(StreamOutcome.Kind.COMPLETED);
+            probe.await(v -> v == 1, StreamMetrics.STREAMS, "method", "GET", "route", "/events", "outcome", "completed");
+        }
+    }
+
+    @Test void aFiniteDownloadFinishesDuringTheGracePeriodAfterClose() throws Exception {
+        var started = new CountDownLatch(1);
+        var closed = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/download", ctx -> Response.stream(200, "text/plain", out -> {
+                out.write("part one;");
+                started.countDown();
+                closed.await();
+                out.write("part two");
+            }));
+            var server = serve(fixture, TransportSettings.DEFAULTS.withShutdownGrace(Duration.ofSeconds(120)));
+            try (var wire = new Wire(server)) {
+                wire.write("GET /download HTTP/1.1\r\nHost: a\r\n\r\n");
+                wire.head();
+                assertThat(text(wire.chunk())).isEqualTo("part one;");
+                assertThat(started.await(30, TimeUnit.SECONDS)).isTrue();
+                server.close();
+                closed.countDown();
+                assertThat(text(wire.chunkedBody())).isEqualTo("part two");
+                server.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    @Test void aStreamGetsItsOwnLifetimeLongerThanTheRequestDeadline() throws Exception {
+        var remaining = new CompletableFuture<Duration>();
+        var passed = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.requestTimeout(Duration.ofMillis(150));
+            fixture.app.get("/long", ctx -> Response.stream(200, "text/plain", out -> {
+                out.write("a");
+                remaining.complete(ctx.execution().remainingTime());
+                // Outlive the original deadline: the dispatcher's timer has to wait for the new one.
+                passed.await(400, TimeUnit.MILLISECONDS);
+                out.write("b");
+            }).withStreamLifetime(Duration.ofMinutes(5)));
+            fixture.app.get("/short", ctx -> Response.stream(200, "text/plain", out -> {
+                out.write("x");
+                new CountDownLatch(1).await();
+            }));
+            var server = fixture.listen();
+            try (var wire = new Wire(server)) {
+                wire.write("GET /long HTTP/1.1\r\nHost: a\r\n\r\n");
+                wire.head();
+                assertThat(text(wire.chunkedBody())).isEqualTo("ab");
+                assertThat(remaining.get(30, TimeUnit.SECONDS)).isGreaterThan(Duration.ofMinutes(4));
+            }
+            try (var wire = new Wire(server)) {
+                wire.write("GET /short HTTP/1.1\r\nHost: a\r\n\r\n");
+                wire.head();
+                assertThat(text(wire.chunk())).isEqualTo("x");
+                assertThat(wire.socket.getInputStream().readAllBytes()).isEmpty(); // Cut at the ordinary deadline.
             }
         }
     }
@@ -384,11 +516,12 @@ class HttpStreamTest {
         }
     }
 
-    @Test void streamMetricsUseOnlyAFixedOutcomeTag() throws Exception {
+    @Test void streamMetricsCarryTheRouteTemplateAndAFixedOutcomeTagOnly() throws Exception {
         var probe = new Probe();
         try (var fixture = new Fixture()) {
             fixture.app.metrics(probe);
             fixture.app.get("/files/:name", ctx -> Response.stream(200, "text/plain", out -> out.write(ctx.path("name"))));
+            fixture.app.get("/logs/:name", ctx -> Response.stream(200, "text/plain", out -> out.write("log")));
             var server = fixture.listen();
             try (var wire = new Wire(server)) {
                 for (var name : new String[] {"alpha", "beta", "gamma"}) {
@@ -396,17 +529,28 @@ class HttpStreamTest {
                     wire.head();
                     assertThat(text(wire.chunkedBody())).isEqualTo(name);
                 }
+                wire.write("GET /logs/one HTTP/1.1\r\nHost: a\r\n\r\n");
+                wire.head();
+                assertThat(text(wire.chunkedBody())).isEqualTo("log");
             }
-            probe.await(v -> v == 3, StreamMetrics.STREAMS, "outcome", "completed");
-            assertThat(probe.value(StreamMetrics.BYTES)).isEqualTo("alpha".length() + "beta".length() + "gamma".length());
+            var files = new String[] {"method", "GET", "route", "/files/:name"};
+            probe.await(v -> v == 3, StreamMetrics.STREAMS, "method", "GET", "route", "/files/:name", "outcome", "completed");
+            probe.await(v -> v == 1, StreamMetrics.STREAMS, "method", "GET", "route", "/logs/:name", "outcome", "completed");
+            assertThat(probe.value(StreamMetrics.BYTES, files)).isEqualTo("alpha".length() + "beta".length() + "gamma".length());
+            assertThat(probe.value(StreamMetrics.BYTES, "method", "GET", "route", "/logs/:name")).isEqualTo(3);
             // The request counter still carries the route template, never the concrete path.
             probe.await(v -> v == 3, "axiom.http.requests", "method", "GET", "route", "/files/:name", "status_class", "2xx");
+            probe.await(v -> v == 0, STREAM_ACTIVE, files);
             var streamTags = probe.tagKeys().stream().filter(key -> key.startsWith("axiom.http.stream")).toList();
-            assertThat(streamTags).containsExactly("axiom.http.streams:outcome");
-            assertThat(probe.tagValues().stream().filter(value -> value.startsWith("axiom.http.stream")))
+            assertThat(streamTags).containsExactlyInAnyOrder("axiom.http.streams:method", "axiom.http.streams:route",
+                    "axiom.http.streams:outcome", "axiom.http.stream.bytes:method", "axiom.http.stream.bytes:route",
+                    "axiom.http.streams.active:method", "axiom.http.streams.active:route");
+            assertThat(probe.tagValues().stream().filter(value -> value.startsWith("axiom.http.streams:outcome=")))
                     .isSubsetOf(Set.of("axiom.http.streams:outcome=completed", "axiom.http.streams:outcome=failed",
                             "axiom.http.streams:outcome=client_disconnected", "axiom.http.streams:outcome=limit_exceeded",
                             "axiom.http.streams:outcome=timeout", "axiom.http.streams:outcome=shutdown"));
+            assertThat(probe.tagValues().stream().filter(value -> value.contains(":route=")))
+                    .noneMatch(value -> value.contains("alpha") || value.contains("beta") || value.contains("one"));
         }
     }
 }

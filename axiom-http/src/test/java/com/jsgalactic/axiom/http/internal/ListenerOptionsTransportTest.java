@@ -175,8 +175,8 @@ class ListenerOptionsTransportTest {
                 // Both pools are full: 3 + 2 open sockets, and the next connection is closed unanswered.
                 assertThat(server.connections()).isEqualTo(3);
                 assertThat(server.lingering()).isEqualTo(2);
-                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isEqualTo(3);
-                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isEqualTo(2);
+                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open")).isEqualTo(3);
+                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering")).isEqualTo(2);
                 var refused = new DuplexEmbeddedChannel();
                 server.accept(refused, app);
                 assertThat(refused.isActive()).isFalse();
@@ -187,14 +187,14 @@ class ListenerOptionsTransportTest {
                 // Closing a lingering connection frees its pool slot, and the gauges follow.
                 accepted.get(0).close();
                 assertThat(server.lingering()).isEqualTo(1);
-                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isEqualTo(1);
+                assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering")).isEqualTo(1);
             } finally {
                 for (var channel : accepted) { channel.finishAndReleaseAll(); }
                 server.close();
                 server.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
             }
-            assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isZero();
-            assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isZero();
+            assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open")).isZero();
+            assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering")).isZero();
         }
     }
 

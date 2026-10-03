@@ -58,18 +58,20 @@ requests finish and are answered with `Connection: close`, waiting requests get 
 left is interrupted after the grace period. The wait is bounded by the longest `shutdownGrace` of
 the application's listeners plus five seconds, so a handler that ignores interruption cannot keep the
 JVM from exiting. Closing makes the application not `RUNNING`, so a `Health` readiness probe
-reports DOWN from then on; if a load balancer needs time to notice, call `health.beginDrain()` and
-wait before the JVM exits (see [observability](observability.md#health-and-readiness)). The grace
+reports DOWN from then on. If a load balancer needs time to notice, use
+`closeOnJvmShutdown(Duration drainDelay)`: the hook first runs the drain actions (a `Health` registers
+`beginDrain()` itself, so readiness turns DOWN), waits the delay, and only then closes (see
+[observability](observability.md#health-and-readiness)). The grace
 period must fit inside the platform's own kill timeout (Kubernetes
 `terminationGracePeriodSeconds`, 30 seconds by default). Calling it twice registers one hook,
 an explicit `app.close()` unregisters it, and it throws `IllegalStateException` on a closed
 application or when the JVM is already shutting down. Hooks of different libraries run concurrently
 and in no defined order.
 
-Open [streams](streaming.md#shutdown) are the exception to the grace period: they are cancelled
-as soon as `close()` begins, because they may never end by themselves. Their handlers' writes
-fail with `SHUTDOWN`, and their connections close without a final chunk, so the client sees the
-body cut off rather than completed.
+Open [streams](streaming.md#shutdown) keep the grace period too, and are told that shutdown began
+(`BodyWriter.shutdownRequested()`, `onShutdown`) so that a body can end normally with a final chunk;
+a body still running when the period ends is cut with `SHUTDOWN`, and its connection closes without
+a final chunk, so the client sees the body cut off rather than completed.
 
 A failed bind releases its resources before reporting `IOException`. The
 application remains running, so binding another address is safe. Missing or
@@ -326,6 +328,7 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `maxHeaderBytes` | 8192 | 256 to 1 MiB | Largest header section in bytes (431 beyond) |
 | `ioThreads` | processors, at least 2 | 1 to 1024 | I/O threads of the listener; handlers never run on them |
 | `rejectionObserver` | none | a `RejectionObserver` | Called with status, problem code and request ID for each error response the listener generates itself; see [observing rejections](errors.md#observing-listener-rejections) |
+| `name` | `default` | lowercase letters, digits, `_`; at most 32 | The `listener` tag of the listener's [metrics](observability.md#listeners-bytes-and-codecs) |
 
 Choosing values:
 

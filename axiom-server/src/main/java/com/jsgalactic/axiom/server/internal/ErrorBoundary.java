@@ -76,10 +76,10 @@ final class ErrorBoundary implements Handler {
             if (!(failure instanceof AxiomException axiom)) {
                 if (!development || cancelled) { throw failure; }
                 // Development errors only: the listener would otherwise answer an opaque 500.
-                log.failure("Request " + requestId + " failed with an unexpected exception", failure);
+                log.failure("Request " + context.correlation() + " failed with an unexpected exception", failure);
                 return described(genericFailure(requestId), failure);
             }
-            if (axiom.status() >= 500) { logMapped(requestId, failure, axiom.status(), false); }
+            if (axiom.status() >= 500) { logMapped(context, failure, axiom.status(), false); }
             return described(Problems.response(axiom, requestId), failure);
         }
         context.resetStatus();
@@ -90,15 +90,15 @@ final class ErrorBoundary implements Handler {
             }
             // Error responses are sent whatever the client accepts, like problem responses.
             var encoded = encode(context.codecs(), context.request(), response, false);
-            logMapped(requestId, failure, encoded.status(), true);
+            logMapped(context, failure, encoded.status(), true);
             return encoded;
         } catch (AxiomException translated) {
-            logMapped(requestId, failure, translated.status(), true);
+            logMapped(context, failure, translated.status(), true);
             return Problems.response(translated, requestId);
         } catch (Exception broken) {
             if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
             broken.addSuppressed(failure);
-            log.defect("Request " + requestId + " failed and its error handler failed too", broken);
+            log.defect("Request " + context.correlation() + " failed and its error handler failed too", broken);
             return described(genericFailure(requestId), broken);
         }
     }
@@ -125,12 +125,12 @@ final class ErrorBoundary implements Handler {
      * handler is logged only when it is a 5xx AxiomException; one an error handler mapped is also
      * logged when it was unexpected, unless it is an AxiomException below 500 answered below 500.
      */
-    private void logMapped(String requestId, Exception failure, int status, boolean handled) {
+    private void logMapped(DefaultContext context, Exception failure, int status, boolean handled) {
         boolean clientError = failure instanceof AxiomException axiom && axiom.status() < 500;
         if (status >= 500 || (handled && !clientError)) {
             var message = handled
-                    ? "Request " + requestId + " failed; its error handler answered " + status
-                    : "Request " + requestId + " failed with " + status + " "
+                    ? "Request " + context.correlation() + " failed; its error handler answered " + status
+                    : "Request " + context.correlation() + " failed with " + status + " "
                             + ((AxiomException) failure).code();
             log.failure(message, failure);
         }

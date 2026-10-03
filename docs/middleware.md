@@ -84,7 +84,8 @@ for every middleware that was entered when the failure happened, innermost first
 - **Not called** for responses that come back through `next.run()`, including ones
   a handler or middleware builds itself with an error status, and for the router's
   404, 405 and 501 answers, which already flow through global middleware as
-  ordinary responses. An exception thrown by a custom `notFound` handler is an
+  ordinary responses. A stream body that fails after its head was sent never reaches error
+  handlers or `afterError`: the connection is closed without a second response. An exception thrown by a custom `notFound` handler is an
   ordinary handler exception.
 - It runs on the request's thread under the deadline and must not throw: an
   `AxiomException` from it answers with its own undecorated problem response, `null`

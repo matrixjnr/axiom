@@ -8,7 +8,9 @@ import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.server.internal.Problems;
 import com.jsgalactic.axiom.server.internal.ResponseSerialization;
+import com.jsgalactic.axiom.server.internal.StreamRun;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
+import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
@@ -46,11 +48,15 @@ public final class TestClient implements AutoCloseable {
     private static final System.Logger LOG = System.getLogger(TestClient.class.getName());
     private final RequestDispatcher dispatcher;
     private final boolean mapFailures;
+    private final StreamMetrics streamMetrics;
+    private final StreamBuffering buffering;
 
-    private TestClient(Application application, boolean mapFailures) {
+    private TestClient(Application application, StreamBuffering buffering, boolean mapFailures) {
         this.mapFailures = mapFailures;
+        this.buffering = Objects.requireNonNull(buffering, "buffering");
         this.application = Objects.requireNonNull(application, "application").start();
         this.dispatcher = new RequestDispatcher(application.admissionPolicy(), application.metrics());
+        this.streamMetrics = new StreamMetrics(application.metrics());
     }
 
     /**
@@ -59,7 +65,7 @@ public final class TestClient implements AutoCloseable {
      * @return a client to use with try-with-resources
      */
     public static TestClient start(Application application) {
-        return new TestClient(application, false);
+        return new TestClient(application, StreamBuffering.HAND_OFF, false);
     }
 
     /**
@@ -76,7 +82,20 @@ public final class TestClient implements AutoCloseable {
      * @return a client to use with try-with-resources
      */
     public static TestClient startMappingFailures(Application application) {
-        return new TestClient(application, true);
+        return new TestClient(application, StreamBuffering.HAND_OFF, true);
+    }
+
+    /**
+     * Freezes registration and takes responsibility for closing the application, with streamed
+     * responses (see {@link #stream}) buffered like a connection instead of handed over one write
+     * at a time.
+     * @param application configured application
+     * @param buffering water marks, piece size and stall bound of streams; {@link StreamBuffering#listener()}
+     *        uses the HTTP listener's
+     * @return a client to use with try-with-resources
+     */
+    public static TestClient start(Application application, StreamBuffering buffering) {
+        return new TestClient(application, buffering, false);
     }
 
     /**
@@ -215,7 +234,7 @@ public final class TestClient implements AutoCloseable {
             task = dispatcher.submit(route.<Object>map(value -> value).orElse(UNMATCHED), policy, context, () -> {
                 var response = application.handle(request, context);
                 checkSerializable(response);
-                return response.isStreaming() ? collect(response, context) : response;
+                return response.isStreaming() ? collect(response, context, streamScope(route)) : response;
             }, Response::status);
         } catch (RejectedExecutionException overloaded) {
             return CompletableFuture.completedFuture(Problems.response(503, context.requestId()));
@@ -260,9 +279,20 @@ public final class TestClient implements AutoCloseable {
                     head.complete(answered(response));
                     return response;
                 }
-                var stream = new StreamedResponse(response.status(), response.headers(), response.streamLimit(), context);
+                var scope = streamScope(route);
+                var stream = new StreamedResponse(response.status(), response.headers(), response.streamLimit(),
+                        context, buffering, scope);
+                var run = StreamRun.begin(response, context, scope);
                 head.complete(stream);
-                response.streamBody().writeTo(stream.writer());
+                Throwable failure = null;
+                try {
+                    response.streamBody().writeTo(stream.writer());
+                } catch (Exception | Error thrown) {
+                    failure = thrown;
+                    throw thrown;
+                } finally {
+                    run.end(stream.writer().bytesWritten(), stream.aborted(), failure);
+                }
                 // A body that swallowed the abort did not complete: the listener would have cut the connection.
                 var reason = stream.aborted();
                 if (reason != null) { throw new StreamAbortedException(reason); }
@@ -333,9 +363,19 @@ public final class TestClient implements AutoCloseable {
     }
 
     /** Runs a stream body to its end in memory, with the listener's cap and deadline rules. */
-    private static Response collect(Response response, ExecutionContext context) throws Exception {
+    private static Response collect(Response response, ExecutionContext context, StreamMetrics.Scope scope)
+            throws Exception {
         var collector = new StreamedResponse.Collector(response.streamLimit(), context);
-        response.streamBody().writeTo(collector);
+        var run = StreamRun.begin(response, context, scope);
+        Throwable failure = null;
+        try {
+            response.streamBody().writeTo(collector);
+        } catch (Exception | Error thrown) {
+            failure = thrown;
+            throw thrown;
+        } finally {
+            run.end(collector.bytesWritten(), collector.aborted(), failure);
+        }
         // A body that swallowed the abort did not complete: the listener would have cut the connection.
         if (collector.aborted() != null) { throw new StreamAbortedException(collector.aborted()); }
         var collected = Response.of(response.status(), collector.toByteArray());
@@ -343,6 +383,11 @@ public final class TestClient implements AutoCloseable {
             collected = collected.withHeader(header.getKey(), header.getValue());
         }
         return collected;
+    }
+
+    /** The recorder of the stream measurements of a route's endpoint. */
+    private StreamMetrics.Scope streamScope(java.util.Optional<? extends Object> route) {
+        return streamMetrics.scope(dispatcher.endpointTag(route.<Object>map(value -> value).orElse(UNMATCHED)));
     }
 
     /** Applies the listener's serialization rules; where it would answer 500, the call fails. */
