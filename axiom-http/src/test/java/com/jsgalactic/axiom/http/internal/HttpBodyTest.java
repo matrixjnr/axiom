@@ -66,6 +66,8 @@ class HttpBodyTest {
             fixture.servers.add(server);
             var wire = new Wire(server);
             wire.socket.setSendBufferSize(64 * 1024);
+            // The premise, checked: the client's effective buffer holds a small part of the upload.
+            assertThat(wire.socket.getSendBufferSize()).as("effective client send buffer").isLessThan(1024 * 1024);
             // Below the discard cap, so the server never needs to cut the upload short.
             int length = 8 * 1024 * 1024;
             var piece = new byte[16 * 1024];

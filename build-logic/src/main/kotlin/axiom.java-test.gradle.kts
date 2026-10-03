@@ -4,9 +4,21 @@ plugins {
 }
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
-// Every Test task (test and integrationTest) runs with the JaCoCo agent and writes
-// build/jacoco/<task>.exec. No class is excluded from coverage.
+// The JaCoCo agent is attached to every Test task (test and integrationTest, which then write
+// build/jacoco/<task>.exec) only when the requested build contains a JaCoCo report task, for
+// example coverageReport or :axiom-http:jacocoTestReport. Plain test and check runs carry no
+// agent, so timing- and allocation-sensitive tests run uninstrumented. No class is excluded.
 jacoco { toolVersion = libs.findVersion("jacoco").get().requiredVersion }
+tasks.withType<Test>().configureEach {
+    extensions.getByType<JacocoTaskExtension>().isEnabled = false
+}
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it is JacocoReport }) {
+        tasks.withType<Test>().configureEach {
+            extensions.getByType<JacocoTaskExtension>().isEnabled = true
+        }
+    }
+}
 dependencies {
     "testImplementation"(platform(libs.findLibrary("junit-bom").get()))
     "testImplementation"(libs.findLibrary("junit-jupiter").get())

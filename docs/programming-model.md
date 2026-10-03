@@ -185,3 +185,24 @@ limits) fail with `IllegalStateException` where a listener would answer 500; the
 client and the listener read these rules from one shared definition.
 Sockets, HTTP parsing and connection behavior (414, 431, Expect, pipelining)
 are not simulated.
+
+### What needs a live listener
+
+`TestClient` has no connection mode: every request is independent, so behavior that
+belongs to a connection or to the wire cannot be observed through it. Test these against
+a live listener instead (`app.listen(0)` for an ephemeral port, then a raw `Socket` or
+`java.net.http.HttpClient`):
+
+- keep-alive reuse, pipelining and response ordering on one connection;
+- closing after an error, lingering to drain an unread request body, and the connection cap;
+- request line and header limits (414, 431), `Expect: 100-continue`, malformed or
+  oversized framing, and the idle, head, response and linger timeouts;
+- the bytes of a response: `Content-Length` and chunked framing, the headers the transport
+  adds, HEAD sending the head only, and a client that disconnects or stops reading
+  during a stream.
+
+The recommended path is the `integration-tests` module (see
+[Integration tests](build.md#integration-tests)): its contract runs once through
+`TestClient` and once over a socket. Test classes that open a socket carry
+`@Tag("integration")` so they run in `integrationTest` and keep `test` socket-free
+(see [Unit and integration tests](build.md#unit-and-integration-tests)).
