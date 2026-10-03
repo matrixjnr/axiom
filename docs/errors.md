@@ -113,6 +113,10 @@ app.error(QuotaExceededException.class, (ctx, failure) -> ctx.status(429).json(n
 - Router answers (404, 405, 501, automatic OPTIONS) are responses, not exceptions,
   and are never offered; customize them with global middleware. Requests rejected
   before routing (413, CONNECT) and listener errors are not offered either.
+- A mapped failure is logged at WARNING with the request ID and the exception,
+  server-side only, unless it is an `AxiomException` below 500 answered below
+  500 (an expected client error). Translations by throwing an `AxiomException`
+  log the original exception the same way.
 - Only `Exception` subclasses can be mapped; `Error`s keep failing the request.
 - Error handlers never run for a request that was cancelled or whose deadline
   expired (its outcome is discarded anyway), and `InterruptedException` and

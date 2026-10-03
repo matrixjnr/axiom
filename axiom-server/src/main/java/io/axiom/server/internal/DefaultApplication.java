@@ -466,8 +466,11 @@ final class DefaultApplication implements Application {
                 throw new IllegalStateException("Error handler for " + failure.getClass().getName() + " returned null");
             }
             // Error responses are sent whatever the client accepts, like problem responses.
-            return encode(published.codecs(), context.request(), response, false);
+            var encoded = encode(published.codecs(), context.request(), response, false);
+            logMapped(context, failure, encoded.status());
+            return encoded;
         } catch (AxiomException translated) {
+            logMapped(context, failure, translated.status());
             throw translated;
         } catch (Exception broken) {
             if (broken instanceof InterruptedException) { Thread.currentThread().interrupt(); }
@@ -475,6 +478,18 @@ final class DefaultApplication implements Application {
             LOG.log(System.Logger.Level.ERROR, "Request " + context.execution().requestId()
                     + " failed and its error handler failed too", broken);
             return Problems.response(500, context.execution().requestId());
+        }
+    }
+
+    /**
+     * Logs a failure an error handler mapped, server-side only, unless it is an expected client
+     * error: an AxiomException below 500 answered below 500.
+     */
+    private static void logMapped(DefaultContext context, Exception failure, int status) {
+        boolean clientError = failure instanceof AxiomException axiom && axiom.status() < 500;
+        if (status >= 500 || !clientError) {
+            LOG.log(System.Logger.Level.WARNING, "Request " + context.execution().requestId() + " failed; its error handler"
+                    + " answered " + status, failure);
         }
     }
 
