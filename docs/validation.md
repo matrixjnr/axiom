@@ -139,6 +139,16 @@ Behavior of `Rules`:
 - Exceptions thrown by accessors, predicates or nested validators propagate
   unchanged and become a generic 500 over HTTP.
 
+### Describing a rule set
+
+`Rule.constraint()` returns a `Constraint` (kind, bounds, pattern, allowed values) for the
+built-in rules and is empty for rules made with `check`/`checkNullable`, whose predicates cannot
+be described. `Rules.constraints()` collects them by property (`name`, or `name[]` for `each`
+rules) in declaration order. Steps added with `nested`, `eachNested`, `check` and `include` are
+not part of the description; describe the nested validator itself. A constraint carries rule
+parameters only, never a value. `axiom-openapi` uses this to emit schema constraints (see
+[OpenAPI](openapi.md)).
+
 ## Jakarta Validation adapter
 
 ```java

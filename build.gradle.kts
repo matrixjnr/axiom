@@ -20,8 +20,19 @@ val checkReadmeSnippets = tasks.register<CheckReadmeSnippets>("checkReadmeSnippe
     readme = layout.projectDirectory.file("README.md")
     root = layout.projectDirectory
     sources.from(fileTree("examples/readme/src") { include("**/*.java") })
+    sources.from(fileTree("examples/openapi/src") { include("**/*.java") })
 }
 tasks.named("check") { dependsOn(checkReadmeSnippets) }
+
+// The same guarantee for the OpenAPI guide, whose examples are compiled and tested in examples/openapi.
+val checkOpenApiGuideSnippets = tasks.register<CheckReadmeSnippets>("checkOpenApiGuideSnippets") {
+    group = "verification"
+    description = "Fails when a code block of docs/openapi.md differs from the compiled example source it quotes."
+    readme = layout.projectDirectory.file("docs/openapi.md")
+    root = layout.projectDirectory
+    sources.from(fileTree("examples/openapi/src") { include("**/*.java") })
+}
+tasks.named("check") { dependsOn(checkOpenApiGuideSnippets) }
 
 // Test split (see docs/build.md): `unitTest` runs every module's `test` (no real sockets),
 // `integrationTest` every module's `integrationTest` (tests tagged integration, plus the whole
@@ -69,7 +80,7 @@ tasks.register("unitTestMatrix") {
 jacoco { toolVersion = libs.versions.jacoco.get() }
 val coverageModules = listOf("axiom-core", "axiom-server", "axiom-http", "axiom-json", "axiom-test",
     "axiom-starter", "axiom-validation", "axiom-validation-jakarta", "axiom-security", "axiom-security-jwt",
-    "axiom-metrics", "integration-tests")
+    "axiom-metrics", "axiom-openapi", "axiom-openapi-ui", "integration-tests")
 dependencies { coverageModules.forEach { jacocoAggregation(project(":$it")) } }
 reporting {
     reports {

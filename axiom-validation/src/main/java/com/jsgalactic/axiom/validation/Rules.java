@@ -2,8 +2,10 @@ package com.jsgalactic.axiom.validation;
 
 import com.jsgalactic.axiom.error.Violation;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -37,6 +39,9 @@ import java.util.function.Predicate;
  */
 public final class Rules<T> implements Validator<T> {
     private final List<Step<T>> steps;
+
+    /** One declared step; {@code key} and {@code rules} describe a field or element step, else null. */
+    private record Step<T>(StepApply<T> apply, String key, List<? extends Rule<?>> rules) { }
 
     private Rules(List<Step<T>> steps) {
         this.steps = steps;
@@ -72,7 +77,7 @@ public final class Rules<T> implements Validator<T> {
             copy.add(Objects.requireNonNull(rule, "rule"));
         }
         var checks = List.copyOf(copy);
-        return add((value, out) -> out.check(path, accessor.apply(value), checks));
+        return add((value, out) -> out.check(path, accessor.apply(value), checks), name, checks);
     }
 
     /**
@@ -128,7 +133,7 @@ public final class Rules<T> implements Validator<T> {
                 }
                 out.check(path.index(index++), element, checks);
             }
-        });
+        }, name + "[]", checks);
     }
 
     /**
@@ -203,11 +208,42 @@ public final class Rules<T> implements Validator<T> {
         return add((value, out) -> out.addAll(FieldPath.root(), validator.validate(value)));
     }
 
-    private Rules<T> add(Step<T> step) {
+    private Rules<T> add(StepApply<T> apply) {
+        return add(apply, null, List.of());
+    }
+
+    private Rules<T> add(StepApply<T> apply, String key, List<? extends Rule<?>> rules) {
         var next = new ArrayList<Step<T>>(steps.size() + 1);
         next.addAll(steps);
-        next.add(step);
+        next.add(new Step<>(apply, key, rules));
         return new Rules<>(List.copyOf(next));
+    }
+
+    /**
+     * Describes the built-in rules declared with {@link #field} and {@link #each}, for tools that
+     * document the rule set, such as an OpenAPI generator. Keys are the property name, or the
+     * name followed by {@code []} for rules applied to each list element; values are the
+     * {@linkplain Rule#constraint() constraints} of the rules in declaration order, with custom
+     * rules left out. Rules of {@link #nested}, {@link #eachNested}, {@link #check} and
+     * {@link #include} steps are not part of the description; describe the nested validator
+     * itself. Properties declared more than once are merged in declaration order.
+     *
+     * @return immutable constraints by property, in declaration order
+     */
+    public Map<String, List<Constraint>> constraints() {
+        var described = new LinkedHashMap<String, List<Constraint>>();
+        for (var step : steps) {
+            if (step.key() == null) {
+                continue;
+            }
+            var list = described.computeIfAbsent(step.key(), key -> new ArrayList<>());
+            for (var rule : step.rules()) {
+                rule.constraint().ifPresent(list::add);
+            }
+        }
+        var copy = new LinkedHashMap<String, List<Constraint>>();
+        described.forEach((key, list) -> copy.put(key, List.copyOf(list)));
+        return java.util.Collections.unmodifiableMap(copy);
     }
 
     /**
@@ -226,13 +262,13 @@ public final class Rules<T> implements Validator<T> {
             if (out.isFull()) {
                 break;
             }
-            step.apply(value, out);
+            step.apply().apply(value, out);
         }
         return out.toList();
     }
 
     @FunctionalInterface
-    private interface Step<T> {
+    private interface StepApply<T> {
         void apply(T value, Collector out);
     }
 
