@@ -135,8 +135,11 @@ public interface RouteGroup {
 
     /**
      * Creates a nested group and configures it immediately on the calling thread. Its prefix is
-     * appended to this scope's prefix. If {@code configure} throws, routes it already registered
-     * remain registered.
+     * appended to this scope's prefix. Registration is atomic: if {@code configure} throws,
+     * everything it registered (routes and their admission policies, nested groups, middleware)
+     * is removed before the exception propagates, so a partly configured group never serves
+     * routes without middleware a later statement would have added. While the callback runs,
+     * {@code start()} fails with {@link IllegalStateException}.
      *
      * @param prefix empty, or a template prefix starting with {@code /} that does not end with
      *        {@code /} and has no wildcard; it may declare parameters such as {@code /users/:id}

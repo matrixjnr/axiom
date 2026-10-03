@@ -94,8 +94,16 @@ app.group("/api/v1", api -> {
 - `use` applies to every route of its scope, wherever it is called in the
   configuration callback; middleware of one scope run in `use` order.
 - `configure` runs immediately on the calling thread. Calls on a group after its
-  callback returned fail with `IllegalStateException`. If the callback throws,
-  routes it already registered stay registered, as separate `route` calls would.
+  callback returned fail with `IllegalStateException`.
+- A group is atomic: if its callback throws, everything it registered (routes,
+  their route admission policies, nested groups, middleware) is removed before the
+  exception propagates. A partly configured group could otherwise serve routes
+  without middleware, such as authentication, that a later statement would have
+  added. A nested group that fails is removed on its own; whether the enclosing
+  group survives depends on whether its callback catches the exception.
+- `start()` fails with `IllegalStateException` while any group callback is still
+  running, on any thread, so a route is never compiled without the middleware of
+  its enclosing groups.
 - Registration of any kind after `start()` fails with `IllegalStateException`.
 
 Execution order for a matched route: global middleware, then group middleware

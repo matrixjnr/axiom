@@ -360,7 +360,7 @@ class MiddlewareTest {
                 g.get("/kept", ctx -> "kept");
                 throw new IllegalStateException("configuration failed");
             }));
-            assertThat(app.routes()).extracting(Route::path).containsExactly("/fails/kept");
+            assertThat(app.routes()).isEmpty();
             app.start();
             assertThatIllegalStateException().isThrownBy(() -> app.use(record("late")));
             assertThatIllegalStateException().isThrownBy(() -> app.group("/late", g -> { }));

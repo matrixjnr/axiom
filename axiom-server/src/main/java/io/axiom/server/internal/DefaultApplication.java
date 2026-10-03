@@ -58,6 +58,8 @@ final class DefaultApplication implements Application {
     private final Map<Class<?>, ErrorHandler<?>> errorHandlers = new LinkedHashMap<>();
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
+    /** Group callbacks currently running; startup is refused while any is open. */
+    private int openGroups;
     private final List<Server> listeners = new ArrayList<>();
     private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
@@ -205,14 +207,30 @@ final class DefaultApplication implements Application {
                 requireState(State.CONFIGURING);
                 requireOpen();
                 child = new Scope(this, groupPrefix(prefix, childPrefix));
+                openGroups++;
             }
             // User code runs outside the lifecycle lock; each registration takes it again.
             try {
                 configure.accept(child);
+            } catch (Throwable failure) {
+                // A partly configured group may lack middleware (authentication, for example) that
+                // a later statement would have added, so nothing it registered may be served.
+                synchronized (DefaultApplication.this) { rollBack(child); }
+                throw failure;
             } finally {
-                synchronized (DefaultApplication.this) { child.open = false; }
+                synchronized (DefaultApplication.this) {
+                    child.open = false;
+                    openGroups--;
+                }
             }
             return this;
+        }
+
+        private boolean within(Scope ancestor) {
+            for (var scope = this; scope != null; scope = scope.parent) {
+                if (scope == ancestor) { return true; }
+            }
+            return false;
         }
 
         private void requireOpen() {
@@ -225,6 +243,20 @@ final class DefaultApplication implements Application {
             parent.collectGroupMiddleware(into);
             into.addAll(middleware);
         }
+    }
+
+    /** Removes every route registered in a scope or its nested groups, with its shape and policy. */
+    private void rollBack(Scope scope) {
+        var removed = registrations.entrySet().iterator();
+        while (removed.hasNext()) {
+            var entry = removed.next();
+            if (!entry.getValue().scope().within(scope)) { continue; }
+            var route = entry.getKey();
+            shapes.remove(route.method() + " " + shape(route.path()), route);
+            routePolicies.remove(route);
+            removed.remove();
+        }
+        scope.middleware.clear();
     }
 
     /** Template shape with capture names erased; templates of equal shape match the same paths. */
@@ -251,6 +283,10 @@ final class DefaultApplication implements Application {
             return this;
         }
         requireState(State.CONFIGURING);
+        if (openGroups > 0) {
+            // A route of an open group could be compiled without the middleware its callback adds later.
+            throw new IllegalStateException("Cannot start while a route group is being configured");
+        }
         var codecs = Codecs.discover();
         var global = List.copyOf(root.middleware);
         var chains = new LinkedHashMap<Route, Handler>();
