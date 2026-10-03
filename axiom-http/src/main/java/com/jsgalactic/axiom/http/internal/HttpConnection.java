@@ -116,6 +116,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final BooleanSupplier listenerClosing;
     /** The listener's slot for this connection, or null outside a listener; released by the listener. */
     private final ConnectionSlots.Slot slot;
+    /** The listener's budget of request body bytes held at once, across all its connections. */
+    private final BodyBudget budget;
     private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
     private Exchange receiving;
     private boolean busy;
@@ -141,6 +143,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private long lastInput;
     /** Bounds the response write in progress; at most one response is written at a time. */
     private ScheduledFuture<?> responseTimer;
+    /**
+     * Bounds the write of the interim {@code 100 Continue}. Separate from {@link #responseTimer}
+     * because the client may send the body, and the final response may start, while it is pending.
+     */
+    private ScheduledFuture<?> continueTimer;
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
     /**
@@ -162,6 +169,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private int bodyLimit;
     /** Body bytes of requests buffered in {@code pending}, bounded by twice the body limit. */
     private long queuedBodyBytes;
+    /** What the body being received holds of the listener's budget; null when no body is expected. */
+    private BodyBudget.Reservation receivingReservation;
     /** An accepted {@code Expect: 100-continue} whose interim response is not yet written. */
     private boolean continuePending;
     private ScheduledFuture<?> bodyTimer;
@@ -173,9 +182,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         this(application, executor, TransportSettings.DEFAULTS, null, () -> false);
     }
 
-    /** Production uses {@link TransportSettings#DEFAULTS}; tests may vary single bounds. */
+    /** A connection within a listener that has no body budget of its own; for tests of other bounds. */
     HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
             ConnectionSlots.Slot slot, BooleanSupplier listenerClosing) {
+        this(application, executor, settings, slot, listenerClosing, BodyBudget.unlimited());
+    }
+
+    /** Production uses {@link TransportSettings#DEFAULTS}; tests may vary single bounds. */
+    HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
+            ConnectionSlots.Slot slot, BooleanSupplier listenerClosing, BodyBudget budget) {
+        this.budget = budget;
         this.slot = slot;
         this.listenerClosing = listenerClosing;
         this.application = application;
@@ -215,6 +231,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (bodyTimer != null) { bodyTimer.cancel(false); bodyTimer = null; }
         bodyLength = 0;
         continuePending = false;
+        if (receivingReservation != null) { receivingReservation.release(); receivingReservation = null; }
     }
 
     @Override public void handlerAdded(ChannelHandlerContext ctx) { context = ctx; }
@@ -319,6 +336,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             declaredLength = length;
             // Declared bodies are reserved in full against the per-connection bound up front.
             if (!chunked && queuedBodyBytes + length > 2L * bodyLimit) { fail(ctx, 503); return false; }
+            // The listener's budget covers this body from now until its response is final; a
+            // declared length is taken in full, a chunked body grows its share as bytes arrive.
+            receivingReservation = budget.reservation();
+            if (!chunked && !receivingReservation.grow(length)) { fail(ctx, 503); return false; }
             var exchange = receiving;
             // A slow body counts against the request deadline that started with the head.
             bodyTimer = ctx.executor().schedule(() -> {
@@ -345,10 +366,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         long cap = bodyChunked ? bodyLimit : declaredLength;
         if (total > cap) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
         if (bodyBytes == null) {
-            bodyBytes = new byte[(int) Math.min(cap, Math.max(INITIAL_BODY_CAPACITY, total))];
+            int capacity = (int) Math.min(cap, Math.max(INITIAL_BODY_CAPACITY, total));
+            if (bodyChunked && !receivingReservation.grow(capacity)) { fail(ctx, 503); return false; }
+            bodyBytes = new byte[capacity];
         } else if (total > bodyBytes.length) {
             // Doubling keeps the copying linear in the body size.
-            bodyBytes = Arrays.copyOf(bodyBytes, (int) Math.min(cap, Math.max(total, 2L * bodyBytes.length)));
+            int capacity = (int) Math.min(cap, Math.max(total, 2L * bodyBytes.length));
+            if (bodyChunked && !receivingReservation.grow(capacity - bodyBytes.length)) { fail(ctx, 503); return false; }
+            bodyBytes = Arrays.copyOf(bodyBytes, capacity);
         }
         content.readBytes(bodyBytes, bodyLength, readable);
         bodyLength = (int) total;
@@ -365,9 +390,17 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 bodyBytes = null;
                 var body = OwnedBodies.adopt(exchange.request().header("Content-Type").orElse(null), bytes);
                 exchange = new Exchange(exchange.request().withBody(body), exchange.keepAlive(),
-                        exchange.http10(), exchange.execution());
+                        exchange.http10(), exchange.execution(), null);
             } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
             queuedBodyBytes += bodyLength;
+        }
+        // The exchange takes over the reservation, trimmed to the bytes the body really holds, and
+        // returns it when its response is final.
+        var reservation = receivingReservation;
+        if (reservation != null) {
+            reservation.shrinkTo(bodyLength);
+            exchange = exchange.withReservation(reservation);
+            receivingReservation = null;
         }
         releaseBody();
         pending.addLast(exchange);
@@ -383,8 +416,18 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private void sendContinue(ChannelHandlerContext ctx) {
         if (!continuePending || busy || !pending.isEmpty() || closing || deferredStatus != 0) { return; }
         continuePending = false;
-        ctx.writeAndFlush(new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE,
-                Unpooled.EMPTY_BUFFER)).addListener(future -> { if (!future.isSuccess()) { abort(ctx); } });
+        var written = ctx.writeAndFlush(new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
+                HttpResponseStatus.CONTINUE, Unpooled.EMPTY_BUFFER));
+        // The interim response is a response write like any other: a client that never reads loses
+        // the connection after the response timeout instead of holding it for the inactivity timeout.
+        if (!written.isDone()) {
+            continueTimer = ctx.executor().schedule(() -> { continueTimer = null; abort(ctx); },
+                    responseNanos, TimeUnit.NANOSECONDS);
+        }
+        written.addListener(future -> {
+            if (continueTimer != null) { continueTimer.cancel(false); continueTimer = null; }
+            if (!future.isSuccess()) { abort(ctx); }
+        });
     }
 
     /** HTTP/1.1 requires exactly one Host; HTTP/1.0 may omit it but must not send an invalid one. */
@@ -413,7 +456,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         busy = true;
         var exchange = pending.removeFirst();
         queuedBodyBytes -= exchange.request().body().length();
-        if (exchange.execution().isExpired()) { send(ctx, exchange, error(504, exchange)); return; }
+        if (exchange.execution().isExpired()) { exchange.release(); send(ctx, exchange, error(504, exchange)); return; }
         try {
             // A closed application or dispatcher cannot run the request; answer instead of
             // leaving the connection busy. This also runs from a write listener, where an
@@ -432,6 +475,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 }
             }, WireResponse::status);
             active.result().whenComplete((response, thrown) -> {
+                // The outcome is final: the request body no longer counts against the listener.
+                exchange.release();
                 var failure = unwrap(thrown);
                 try {
                     ctx.executor().execute(() -> {
@@ -457,6 +502,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                         "HTTP request " + exchange.execution().requestId() + " could not be dispatched", unavailable);
             }
             if (active != null) { active.cancel(); active = null; }
+            exchange.release();
             send(ctx, exchange, error(503, exchange));
         }
     }
@@ -508,7 +554,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             HttpUtil.setKeepAlive(message, keepAlive);
             // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
             if (keepAlive && exchange.http10()) { message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive"); }
-            if (!keepAlive) { closing = true; pending.clear(); queuedBodyBytes = 0; releaseBody(); }
+            if (!keepAlive) { closing = true; dropPending(); releaseBody(); }
             owned = null;
             finishWrite(ctx, ctx.writeAndFlush(message), keepAlive && !ending);
         } catch (RuntimeException failure) {
@@ -631,7 +677,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (closing || !ctx.channel().isActive()) { return; }
         if (failure != null || finished.aborted() != null) { abort(ctx); return; }
         boolean keepAlive = streamKeepAlive;
-        if (!keepAlive) { closing = true; pending.clear(); queuedBodyBytes = 0; releaseBody(); }
+        if (!keepAlive) { closing = true; dropPending(); releaseBody(); }
         finishWrite(ctx, ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT), keepAlive);
     }
 
@@ -744,17 +790,24 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         return 400;
     }
 
+    /** Forgets requests that were received but not started, returning their share of the body budget. */
+    private void dropPending() {
+        for (var queued : pending) { queued.release(); }
+        pending.clear();
+        queuedBodyBytes = 0;
+    }
+
     private void abort(ChannelHandlerContext ctx) { closing = true; releaseBody(); ctx.close(); }
 
     @Override public void channelInactive(ChannelHandlerContext ctx) {
         closing = true;
         if (lingerTimer != null) { lingerTimer.cancel(false); lingerTimer = null; }
         if (responseTimer != null) { responseTimer.cancel(false); responseTimer = null; }
+        if (continueTimer != null) { continueTimer.cancel(false); continueTimer = null; }
         headComplete();
         releaseBody();
         receiving = null;
-        pending.clear();
-        queuedBodyBytes = 0;
+        dropPending();
         // The stream learns why before the cancellation interrupts its thread, so the reason is the disconnect.
         if (stream != null) { stream.abort(StreamAbortedException.Reason.CLIENT_DISCONNECTED); stream = null; }
         if (active != null) { active.cancel(); active = null; }
@@ -781,7 +834,17 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     private record CachedDate(long second, String value) { }
     private static volatile CachedDate date = new CachedDate(Long.MIN_VALUE, "");
-    private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) { }
+    private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution,
+            BodyBudget.Reservation reservation) {
+        Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) {
+            this(request, keepAlive, http10, execution, null);
+        }
+        Exchange withReservation(BodyBudget.Reservation held) {
+            return new Exchange(request, keepAlive, http10, execution, held);
+        }
+        /** Returns the request body's share of the listener's budget; idempotent. */
+        void release() { if (reservation != null) { reservation.release(); } }
+    }
     /** A prepared response; {@code streamed} marks a stream that was already written, with no body here. */
     private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean streamed) { }
 }

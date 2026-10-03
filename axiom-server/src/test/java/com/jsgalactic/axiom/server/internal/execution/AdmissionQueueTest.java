@@ -180,6 +180,66 @@ class AdmissionQueueTest {
         }
     }
 
+    @Test void completionExpiresARequestWhoseOwnDeadlineIsShorterThanTheWaitAheadOfItWithoutItsTimer() {
+        try (var f = new Fixture(policy(2, 4))) {
+            var route = policy(1, 3);
+            f.dispatcher.submit("a", route, context(), () -> "a1");
+            // The head of endpoint a waits up to the queue budget of five seconds, with an hour of
+            // deadline. The request behind it can only wait one second before its own deadline.
+            var head = f.dispatcher.submit("a", route, context(), () -> { throw new AssertionError("must not run"); });
+            var shortLived = f.dispatcher.submit("a", route, ExecutionContext.create(Duration.ofSeconds(1)),
+                    () -> { throw new AssertionError("must not run"); });
+            f.dispatcher.submit("b", route, context(), () -> "b1");
+            f.clock.set(Duration.ofSeconds(2).toNanos());
+            // No timer fires. A completion finds the short request although the head is still live.
+            f.workers.run(1);
+            assertThat(shortLived.result().toCompletableFuture()).isCompletedExceptionally();
+            assertThatThrownBy(() -> shortLived.result().toCompletableFuture().join())
+                    .hasCauseInstanceOf(RequestDispatcher.DeadlineExceededException.class);
+            assertThat(head.result().toCompletableFuture()).isNotDone();
+            assertThat(f.dispatcher.snapshot().queued()).isEqualTo(1);
+            assertThat(f.dispatcher.snapshot().queueTimeouts()).isZero();
+        }
+    }
+
+    @Test void submissionRefusedForAFullQueueReclaimsASlotHeldByAShortLivedRequestBehindALiveHead() {
+        try (var f = new Fixture(policy(1, 2))) {
+            f.dispatcher.submit(context(), () -> null);
+            var head = f.dispatcher.submit(context(), () -> { throw new AssertionError("must not run"); });
+            var shortLived = f.dispatcher.submit(ExecutionContext.create(Duration.ofSeconds(1)),
+                    () -> { throw new AssertionError("must not run"); });
+            f.clock.set(Duration.ofSeconds(2).toNanos());
+            var next = f.dispatcher.submit(context(), () -> "next");
+            assertThatThrownBy(() -> shortLived.result().toCompletableFuture().join())
+                    .hasCauseInstanceOf(RequestDispatcher.DeadlineExceededException.class);
+            assertThat(head.result().toCompletableFuture()).isNotDone();
+            assertThat(next.result().toCompletableFuture()).isNotDone();
+            assertThat(f.dispatcher.snapshot().rejected()).isZero();
+            assertThat(f.dispatcher.snapshot().queued()).isEqualTo(2);
+        }
+    }
+
+    @Test void expiringManyShortLivedRequestsKeepsLiveWaitsInOrderOfArrival() {
+        try (var f = new Fixture(policy(1, 40))) {
+            var order = new ArrayList<Integer>();
+            f.dispatcher.submit(context(), () -> order.add(0));
+            var doomed = new ArrayList<RequestDispatcher.Task<Boolean>>();
+            for (int i = 1; i <= 10; i++) {
+                int id = i;
+                // Live and short-lived requests alternate in the queue.
+                f.dispatcher.submit(context(), () -> order.add(id));
+                doomed.add(f.dispatcher.submit(ExecutionContext.create(Duration.ofSeconds(1)),
+                        () -> { throw new AssertionError("must not run"); }));
+            }
+            f.clock.set(Duration.ofSeconds(2).toNanos());
+            f.workers.run(0);
+            for (var task : doomed) { assertThat(task.result().toCompletableFuture()).isCompletedExceptionally(); }
+            assertThat(f.dispatcher.snapshot().queued()).isEqualTo(10 - 1);
+            while (!f.workers.tasks.isEmpty()) { f.workers.run(0); }
+            assertThat(order).containsExactly(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+        }
+    }
+
     @Test void submissionReclaimsQueueSlotsHeldByExpiredWaits() {
         try (var f = new Fixture(policy(1, 1))) {
             f.dispatcher.submit(context(), () -> null);

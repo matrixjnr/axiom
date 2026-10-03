@@ -9,6 +9,35 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class ConnectionSlotsTest {
+    @Test void gaugesFollowBothPoolsAndAFailingMetricsImplementationNeverFailsAConnection() {
+        var probe = new Probe();
+        var slots = new ConnectionSlots(2, 1, probe);
+        var first = slots.acquire();
+        var second = slots.acquire();
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isEqualTo(2);
+        first.linger();
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isEqualTo(1);
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isEqualTo(1);
+        first.release();
+        second.release();
+        second.release();
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "open")).isZero();
+        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "state", "lingering")).isZero();
+        assertThat(probe.tagValues()).containsExactlyInAnyOrder(ConnectionSlots.CONNECTIONS + ":state=open",
+                ConnectionSlots.CONNECTIONS + ":state=lingering");
+
+        var failing = new com.jsgalactic.axiom.observability.Metrics() {
+            @Override public Counter counter(String name, String... tags) { throw new IllegalStateException(); }
+            @Override public Gauge gauge(String name, String... tags) { return delta -> { throw new IllegalStateException(); }; }
+            @Override public Timer timer(String name, String... tags) { throw new IllegalStateException(); }
+        };
+        var broken = new ConnectionSlots(1, 1, failing);
+        var slot = broken.acquire();
+        assertThat(slot.linger()).isTrue();
+        slot.release();
+        assertThat(broken.lingering()).isZero();
+    }
+
     @Test void releaseIsIdempotentAndAReleasedSlotCannotLinger() {
         var slots = new ConnectionSlots(2, 1);
         var first = slots.acquire();

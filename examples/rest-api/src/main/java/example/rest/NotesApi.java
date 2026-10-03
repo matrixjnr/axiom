@@ -89,9 +89,8 @@ public final class NotesApi {
      * @throws Exception if the listener cannot start
      */
     public static void main(String[] args) throws Exception {
-        var app = create();
+        var app = create().closeOnJvmShutdown();
         var server = app.listen(8080);
-        Runtime.getRuntime().addShutdownHook(new Thread(app::close, "notes-shutdown"));
         System.out.println("Listening on http://127.0.0.1:" + server.localAddress().getPort() + "/ ");
         server.termination().toCompletableFuture().join();
     }

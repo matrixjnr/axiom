@@ -78,11 +78,25 @@ copy, but a codec that implements only the array method receives one copy (up to
 `L`); the decoded value lives until the handler drops it, and `Body.bytes()` copies
 on every call.
 
-These bounds are **per connection, not global**. A listener accepts up to `maxConnections` (128 by default, see
-[listener options](http.md#listener-options)), so its worst case is about
-`128 × 3 × L` (384 MiB at the default),
-and each additional listener has its own connections. There is no
-process-wide body budget; size `L`, the request timeout and the heap together.
+On top of the per-connection bounds, each listener has a **budget of request body bytes held at
+once across all its connections**: `maxInFlightBodyBytes` in the [listener options](http.md#listener-options),
+64 MiB by default. A request reserves its body when its head is accepted (a declared
+Content-Length in full, so a slow uploader holds its whole announced share from the start) or, for a
+chunked body, as the array grows, and returns the reservation when its response is final or its
+connection ends. That covers the body being received, the bodies of pipelined requests waiting
+behind a running one, and the running request's body, so the number of buffered pipelined bodies is
+bounded by the budget as well as by `maxPipelinedRequests` and the `2 × L` share above. A request
+that does not fit is not executed: it is answered 503 after the earlier responses on its connection
+and the connection closes, deterministically and without waiting. With the defaults, a listener
+therefore never holds more than 64 MiB of request bodies, not the 384 MiB (`128 × 3 × L`) that the
+per-connection bounds alone would allow at 128 connections and 1 MiB bodies. The budget counts body
+array capacity; during growth the old and new arrays briefly coexist, and a handler that ignores
+cancellation after a timeout still references its body until it returns, although the reservation is
+returned when the request's outcome is final. A listener refuses to start when its budget is smaller
+than the application's `maxRequestBody` (the default budget equals the largest permitted body, 64 MiB).
+
+The budget belongs to one listener; each additional listener has its own. Size `L`, the budget, the
+request timeout and the heap together.
 
 ## Rejected bodies
 

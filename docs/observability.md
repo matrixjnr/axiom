@@ -50,6 +50,13 @@ most 1024 distinct endpoints and pools later ones under `other`.
 | `axiom.http.streams.active` | gauge | none | Streams whose head was sent and whose body is still running |
 | `axiom.http.stream.backpressure` | counter | none | Stream writes that had to wait for a slow client |
 
+The listener also reports its connections, so operators can compare open sockets with the
+descriptor limit (see [HTTP listeners](http.md#resource-limits)):
+
+| Name | Kind | Tags | Meaning |
+| --- | --- | --- | --- |
+| `axiom.http.connections` | gauge | `state` | Connections holding a regular slot (`open`) or the separate pool for connections that only linger after their last response (`lingering`). The sum over all listeners is the number of open client sockets, at most `maxConnections + maxLingeringConnections` per listener |
+
 These cover requests that pass admission: HTTP listeners and `TestClient`. (The stream series
 are recorded by HTTP listeners only.) Direct
 `app.handle(...)` calls bypass admission and are not recorded. Timeouts count as `5xx` (504) and
@@ -117,7 +124,7 @@ as a metric tag. The framework request ID (`ctx.execution().requestId()`, sent a
   responses or log records automatically.
 - The registry has fixed histogram buckets, no quantiles, exemplars or help text, and no
   per-listener view; there is no JMX, StatsD or OTLP exporter.
-- Metrics cover admitted requests only, not connections, bytes, body decoding or codec work.
+- Metrics cover admitted requests, streams and connection counts, not bytes, body decoding or codec work.
 - Health checks have no result caching, and there is no startup probe.
 
 These are tracked in the limitations index, [#13](https://github.com/matrixjnr/axiom/issues/13).

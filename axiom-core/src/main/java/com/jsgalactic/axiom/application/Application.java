@@ -381,6 +381,31 @@ public interface Application extends RouteGroup, AutoCloseable {
     State state();
 
     /**
+     * Opts in to closing this application when the JVM begins to shut down, for example on
+     * {@code SIGTERM} from a container runtime or {@code SIGINT}, or when the last non-daemon
+     * thread ends or {@code System.exit} is called. Without this call nothing closes the
+     * application on its own; Axiom never registers a hook unless asked.
+     *
+     * <p>The hook calls {@link #close()} and then waits for every listener to terminate, so the
+     * graceful drain described by {@link Server#close()} completes within each listener's
+     * shutdown grace period (see {@link ListenerOptions#shutdownGrace()}): queued requests are
+     * answered 503, running handlers finish, and the remaining ones are interrupted afterwards.
+     * The wait is bounded by the longest grace period of any listener plus five seconds, so a
+     * handler that ignores interruption cannot keep the JVM from exiting. Because the application
+     * is no longer {@link State#RUNNING} from the moment it closes, a
+     * {@link com.jsgalactic.axiom.observability.Health} readiness probe reports DOWN; call
+     * {@code Health.beginDrain()} from your own hook earlier if load balancers need time to notice.
+     *
+     * <p>Idempotent: the hook is registered once. An explicit {@link #close()} unregisters it. The
+     * hook runs alongside other shutdown hooks, in no defined order, and the JVM's logging may
+     * already be winding down.
+     *
+     * @return this application
+     * @throws IllegalStateException if the application is closed or the JVM is already shutting down
+     */
+    Application closeOnJvmShutdown();
+
+    /**
      * Permanently rejects new requests. Already accepted requests may finish.
      * Idempotent and nonblocking. Each owned listener starts the graceful drain described by
      * {@link Server#close()}: queued requests are answered 503, running network handlers get a
