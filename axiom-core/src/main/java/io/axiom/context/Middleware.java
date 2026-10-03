@@ -14,6 +14,14 @@ import io.axiom.http.Response;
  * that returns without calling it short-circuits: the handler does not run and the returned
  * response is used.
  *
+ * <p><b>Error responses are not decorated.</b> When the handler or an inner middleware throws,
+ * the exception passes through every middleware and is mapped to a response only afterwards, so
+ * headers a middleware adds after {@code next.run()} are <em>missing</em> on problem responses
+ * and error handler responses. Security-header middleware must not rely on running for error
+ * responses: also register a global {@link ErrorHandler} (for {@code Exception}, and for
+ * {@code AxiomException} if those responses need the headers too, which replaces their built-in
+ * problem body) that adds the headers, or catch the exception in the middleware.
+ *
  * <p><b>Lifecycle and ownership.</b> Middleware are registered before startup with
  * {@code use} or as route-level arguments, and the application holds the instance until it
  * closes. Startup composes the chain of every route once; no chain is built per request.

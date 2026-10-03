@@ -30,6 +30,16 @@ before admission or for errors the listener produces itself.
 
 ## Middleware
 
+> **Middleware do not decorate error responses.** When a handler or middleware
+> throws, the exception passes through every middleware and becomes a response
+> only afterwards (problem response or error handler). Headers a middleware adds
+> after `next.run()`, such as security headers, are therefore missing on those
+> responses. Do not rely on middleware for headers that every response must
+> carry. Workaround: register a global error handler for `Exception` that adds the
+> headers, and one for `AxiomException` if problem responses need them too (it
+> replaces their built-in body, so it must build its own), or catch exceptions in
+> the middleware and turn them into responses there.
+
 ```java
 @FunctionalInterface
 public interface Middleware {
@@ -106,6 +116,13 @@ app.group("/api/v1", api -> {
   running, on any thread, so a route is never compiled without the middleware of
   its enclosing groups.
 - Registration of any kind after `start()` fails with `IllegalStateException`.
+- `group(prefix, ...)` with a `null` prefix fails with `NullPointerException`; an
+  empty prefix creates a group that only scopes middleware, its routes keeping the
+  enclosing prefix.
+- Compatibility: the registration methods moved from `Application` to
+  `RouteGroup` and gained trailing `Middleware...` parameters. This is source
+  compatible but not binary compatible; code compiled against an earlier
+  snapshot must be recompiled (the project is unreleased).
 
 Execution order for a matched route: global middleware, then group middleware
 from the outermost to the innermost group, then route middleware, then the

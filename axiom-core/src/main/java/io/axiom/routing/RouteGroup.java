@@ -142,10 +142,13 @@ public interface RouteGroup {
      * routes without middleware a later statement would have added. While the callback runs,
      * {@code start()} fails with {@link IllegalStateException}.
      *
-     * @param prefix empty, or a template prefix starting with {@code /} that does not end with
-     *        {@code /} and has no wildcard; it may declare parameters such as {@code /users/:id}
+     * @param prefix appended to this scope's prefix: empty for a group that only scopes middleware
+     *        (its routes keep this scope's prefix), or a template prefix starting with {@code /}
+     *        that does not end with {@code /} and has no wildcard; it may declare parameters such
+     *        as {@code /users/:id}, whose names must not repeat those of enclosing prefixes
      * @param configure registers the group's routes, middleware and nested groups
      * @return this scope
+     * @throws NullPointerException if {@code prefix} or {@code configure} is null
      * @throws IllegalArgumentException for an invalid prefix
      * @throws IllegalStateException if configuration has ended
      */

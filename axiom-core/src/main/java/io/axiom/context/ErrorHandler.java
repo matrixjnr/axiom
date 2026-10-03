@@ -21,6 +21,10 @@ import io.axiom.http.Response;
  * Error handlers never run for a cancelled or expired request, and are never offered
  * {@link InterruptedException} or {@link java.util.concurrent.CancellationException}.
  *
+ * <p>Middleware have already unwound when an error handler runs, so headers they add after
+ * {@code next.run()} (security headers, for example) are not on its response; an error handler
+ * that must carry them adds them itself.
+ *
  * <p>Everything the returned response contains reaches the client: never copy exception
  * messages, class names or stack traces into it.
  *
