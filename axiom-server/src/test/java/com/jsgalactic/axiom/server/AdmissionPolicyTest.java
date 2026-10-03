@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.http.Request;
