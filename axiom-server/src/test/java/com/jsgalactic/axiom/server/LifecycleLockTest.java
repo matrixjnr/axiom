@@ -129,7 +129,8 @@ class LifecycleLockTest {
         }
 
         @Override
-        public Server bind(Application application, InetSocketAddress address) throws IOException {
+        public Server bind(Application application, InetSocketAddress address,
+                com.jsgalactic.axiom.lifecycle.ListenerOptions options) throws IOException {
             binding.countDown();
             try {
                 if (!release.await(5, TimeUnit.SECONDS)) { throw new IOException("Bind was not released"); }

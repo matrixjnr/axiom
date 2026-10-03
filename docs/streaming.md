@@ -63,8 +63,9 @@ separate flush, and each call is at least one chunk on the wire. Writes of more 
 - **Deadline.** A wait ends at the request deadline (the writer then aborts with `TIMEOUT`), and the
   deadline also interrupts a handler that is blocked on something else. Streams therefore live at
   most as long as `app.requestTimeout(...)`, ten seconds by default.
-- **Stalled clients.** A client that takes no data for 30 seconds, the response write bound of the
-  [listener](http.md#resource-limits), is dropped (`CLIENT_DISCONNECTED`), as the same bound drops
+- **Stalled clients.** A client that takes no data for the listener's response write bound
+  (`responseTimeout`, 30 seconds by default; see [listener options](http.md#listener-options)
+  and [resource limits](http.md#resource-limits)) is dropped (`CLIENT_DISCONNECTED`), as the same bound drops
   a client that reads a buffered response too slowly.
 - **Byte cap.** Every stream has a cap on the bytes it may write: 64 MiB
   (`Response.DEFAULT_STREAM_LIMIT`) unless the response sets another. A write that would cross the

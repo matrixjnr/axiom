@@ -78,8 +78,10 @@ its timer, or when it reaches the head.
 Application-thrown rejection or timeout exceptions remain 500 application failures.
 The per-connection pipeline buffer is separate: only its front request is eligible
 for admission. Pipeline order and the eight-request connection bound still apply.
-The 128-connection limit can cap useful HTTP admission capacity below configured
-values. The network inactivity timeout does not close a connection whose request
+The connection limit (128 by default, `ListenerOptions.maxConnections`; see
+[listener options](http.md#listener-options)) can cap useful HTTP admission capacity below configured
+values: a connection over the cap is closed without a response, never answered 503, so set it at or
+above active plus queued capacity plus headroom for idle keep-alive connections. The network inactivity timeout does not close a connection whose request
 is waiting; the queue wait and execution deadline bound it instead.
 
 ## Ownership and shutdown
