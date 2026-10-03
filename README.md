@@ -28,7 +28,7 @@ Install JDK 21, then run:
 ./gradlew :examples:rest-api:run
 ```
 
-On Windows, use `./gradlew.bat`. The wrapper downloads Gradle 9.8.0 on first use.
+On Windows, use `./gradlew.bat`. The wrapper downloads Gradle 9.5.1 on first use.
 `check` includes unit tests, module dependency checks, and public API signature
 checks. Build and configuration caches are enabled. The example listens at
 `http://127.0.0.1:8080/` until stopped. For a finite network smoke test, run

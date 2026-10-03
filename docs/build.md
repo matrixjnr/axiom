@@ -1,7 +1,7 @@
 # Build decisions
 
 Axiom uses Gradle Kotlin DSL with Java 21 toolchains and `--release 21`, without
-preview features. The wrapper pins Gradle 9.8.0 and verifies its distribution
+preview features. The wrapper pins Gradle 9.5.1 and verifies its distribution
 checksum. Convention plugins share compilation, JUnit Platform, sources/Javadoc
 archives, and reproducible archive settings.
 
