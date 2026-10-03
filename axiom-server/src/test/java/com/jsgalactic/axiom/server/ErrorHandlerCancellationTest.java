@@ -100,7 +100,7 @@ class ErrorHandlerCancellationTest {
     @Test
     void interruptionAndCancellationAreNeverOffered() throws Exception {
         try (var interrupted = app(ctx -> { throw new InterruptedException(); });
-             var cancelled = app(ctx -> { throw new CancellationException(); })) {
+                var cancelled = app(ctx -> { throw new CancellationException(); })) {
             assertThatThrownBy(() -> interrupted.handle(Request.get("/work"))).isInstanceOf(InterruptedException.class);
             assertThatThrownBy(() -> cancelled.handle(Request.get("/work"))).isInstanceOf(CancellationException.class);
             assertThat(mapped).hasValue(0);

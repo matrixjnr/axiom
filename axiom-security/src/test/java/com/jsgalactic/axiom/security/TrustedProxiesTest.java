@@ -8,9 +8,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.Map;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.jupiter.api.Test;
 
 class TrustedProxiesTest {
     private static final TrustedProxies PROXIES = TrustedProxies.of("10.0.0.0/8", "2001:db8:1::/48", "192.0.2.1");
