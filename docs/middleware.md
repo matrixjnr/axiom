@@ -1,3 +1,9 @@
+---
+title: Middleware
+parent: Guides
+nav_order: 2
+---
+
 # Middleware, route groups and error handlers
 
 Middleware run code around handlers, route groups share a path prefix and

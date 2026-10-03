@@ -1,3 +1,9 @@
+---
+title: Errors
+parent: Guides
+nav_order: 5
+---
+
 # Errors
 
 ## Never-leak rule

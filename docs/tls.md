@@ -1,3 +1,9 @@
+---
+title: TLS
+parent: Guides
+nav_order: 7
+---
+
 # TLS
 
 An HTTP listener serves HTTPS when its `ListenerOptions` carry `TlsOptions`. TLS is configured per
