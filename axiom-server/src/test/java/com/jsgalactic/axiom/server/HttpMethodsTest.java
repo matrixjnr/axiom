@@ -123,6 +123,47 @@ class HttpMethodsTest {
     }
 
     @Test
+    void aWildcardOptionsRouteCanDeferToTheAutomaticAllowAnswer() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/users", ctx -> "list");
+            app.post("/users", ctx -> "create");
+            app.delete("/users/:id", ctx -> "delete");
+            app.options("/*any", ctx -> ctx.header("Access-Control-Request-Method").isPresent()
+                    ? ctx.status(200).text("preflight " + ctx.path("any")) : ctx.automaticOptions());
+            app.start();
+            // The wildcard's own OPTIONS is part of the list, and so are the other templates' methods.
+            var users = app.handle(new Request("OPTIONS", "/users"));
+            assertThat(users.status()).isEqualTo(204);
+            assertThat(users.body()).isNull();
+            assertThat(users.headers()).containsExactly(Map.entry("Allow", "GET, HEAD, OPTIONS, POST"));
+            assertThat(app.handle(new Request("OPTIONS", "/users/7")).headers())
+                    .containsEntry("Allow", "DELETE, OPTIONS");
+            // A path only the wildcard matches lists just OPTIONS.
+            var other = app.handle(new Request("OPTIONS", "/anything/at/all"));
+            assertThat(other.status()).isEqualTo(204);
+            assertThat(other.headers()).containsEntry("Allow", "OPTIONS");
+            // The route still serves the requests it handles itself.
+            var preflight = app.handle(new Request("OPTIONS", "/users",
+                    Map.of("Access-Control-Request-Method", "POST"), Body.empty()));
+            assertThat(preflight.status()).isEqualTo(200);
+            assertThat(preflight.body()).isEqualTo("preflight users");
+            // The 405 lists are unchanged by the wildcard.
+            assertThat(app.handle(new Request("PUT", "/users")).headers())
+                    .containsEntry("Allow", "GET, HEAD, OPTIONS, POST");
+        }
+    }
+
+    @Test
+    void optionsAsteriskIsNeverRoutedToAWildcardOptionsRoute() throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/a", ctx -> "a");
+            app.options("/*any", ctx -> ctx.automaticOptions());
+            app.start();
+            assertThat(app.handle(new Request("OPTIONS", "*")).headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
+        }
+    }
+
+    @Test
     void readsAndLimitsAnOptionsBodyLikeAnyOther() throws Exception {
         try (var app = Axiom.create()) {
             app.maxRequestBody(4);

@@ -130,20 +130,47 @@ final class CompiledRouter {
                 }
                 continue;
             }
-            // Push in reverse precedence. Backtrack only when a branch cannot match the whole path.
-            if (node.wildcard() != null) {
-                pending.push(new Step(node.wildcard(), segments.size()));
-            }
-            if (node.parameter() != null && segments.starts[index] != segments.ends[index]) {
-                pending.push(new Step(node.parameter(), index + 1));
-            }
-            if (!node.literals().isEmpty()) {
-                var literal = node.literals().get(segments.value(index));
-                if (literal != null) { pending.push(new Step(literal, index + 1)); }
-            }
+            descend(pending, node, index, segments);
         }
         if (mismatch == null) { return null; }
         return new Match(null, allowed == null ? mismatch.allow() : String.join(", ", allowed), null);
+    }
+
+    /** Pushes the branches of a node in reverse precedence. Backtrack only when a branch cannot match the path. */
+    private static void descend(ArrayDeque<Step> pending, Node node, int index, Segments segments) {
+        if (node.wildcard() != null) {
+            pending.push(new Step(node.wildcard(), segments.size()));
+        }
+        if (node.parameter() != null && segments.starts[index] != segments.ends[index]) {
+            pending.push(new Step(node.parameter(), index + 1));
+        }
+        if (!node.literals().isEmpty()) {
+            var literal = node.literals().get(segments.value(index));
+            if (literal != null) { pending.push(new Step(literal, index + 1)); }
+        }
+    }
+
+    /**
+     * The Allow value of the automatic OPTIONS answer for a request path: the union of the methods
+     * of every complete match, whether or not one of them serves OPTIONS itself, with HEAD wherever
+     * GET is and OPTIONS. {@code *} gives the server-wide list. Empty when no template matches.
+     */
+    String allowFor(Request request) {
+        if (request.path().equals("*")) { return serverAllow; }
+        var segments = new Segments(request.path());
+        var pending = new ArrayDeque<Step>();
+        pending.push(new Step(root, 0));
+        var allowed = new TreeSet<String>();
+        while (!pending.isEmpty()) {
+            var step = pending.pop();
+            var node = step.node();
+            if (step.index() == segments.size()) {
+                if (!node.endpoints().isEmpty()) { allowed.addAll(node.methods()); }
+                continue;
+            }
+            descend(pending, node, step.index(), segments);
+        }
+        return String.join(", ", allowed);
     }
 
     /**

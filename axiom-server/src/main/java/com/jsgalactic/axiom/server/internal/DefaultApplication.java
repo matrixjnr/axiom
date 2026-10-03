@@ -444,11 +444,11 @@ final class DefaultApplication implements Application {
         DefaultContext context;
         Handler chain;
         if (match != null && match.methodAllowed()) {
-            context = new DefaultContext(request, match, execution, published.codecs(), null);
+            context = new DefaultContext(request, match, execution, published.codecs(), null, published.router());
             chain = match.handler();
         } else {
             context = new DefaultContext(request, null, execution, published.codecs(),
-                    frameworkAnswer(published.router(), request, match, execution));
+                    frameworkAnswer(published.router(), request, match, execution), published.router());
             chain = published.unmatched();
         }
         try {

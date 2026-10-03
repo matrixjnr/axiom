@@ -294,6 +294,30 @@ public interface Context {
     Map<String, String> pathParameters();
 
     /**
+     * Returns the answer the application gives an OPTIONS request that no route serves: 204 with
+     * no body and an {@code Allow} header listing every method registered on any template that
+     * matches the request path, {@code HEAD} wherever {@code GET} is, and {@code OPTIONS}, sorted
+     * alphabetically (for {@code OPTIONS *}, every registered method). It ignores the status set on
+     * this context.
+     * <p>
+     * An explicit OPTIONS route replaces the automatic answer for every path it matches, so a
+     * wildcard route such as {@code /*any} would hide the accurate list of the paths it shares
+     * with other templates. A handler of such a route returns this answer for the requests it does
+     * not handle itself:
+     * <pre>{@code
+     * app.options("/*any", ctx -> isPreflight(ctx) ? preflightAnswer(ctx) : ctx.automaticOptions());
+     * }</pre>
+     * Call it for OPTIONS requests; for another method the list is still the path's.
+     *
+     * @return 204 response with the Allow header
+     * @throws UnsupportedOperationException if this context cannot compute it (the runtime's
+     *         contexts can; this default exists for application test doubles)
+     */
+    default Response automaticOptions() {
+        throw new UnsupportedOperationException("This context cannot compute the automatic OPTIONS answer");
+    }
+
+    /**
      * Maps a body using the current status (200 by default).
      * Strings use UTF-8 text and byte arrays use application/octet-stream.
      * Other objects are retained without a Content-Type and are not encoded; use

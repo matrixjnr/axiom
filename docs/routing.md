@@ -115,7 +115,27 @@ alphabetically: with `GET /users` and `POST /users`, `OPTIONS /users` gets
 An explicit OPTIONS route is selected like any other method, so it wins on its own
 template and also serves paths whose more specific templates lack OPTIONS: with
 `GET /users/me` and `OPTIONS /users/:id`, `OPTIONS /users/me` runs the OPTIONS route.
-An unknown path is still 404. `resolve` returns empty for an automatic answer, so
+An unknown path is still 404.
+
+A wildcard OPTIONS route such as `/*any` (a CORS preflight handler, for example)
+serves every path, so it would hide the accurate `Allow` list of paths whose other
+templates have different methods. The precedence rule stays as it is; instead the
+route's handler returns `ctx.automaticOptions()` for the requests it does not handle
+itself:
+
+```java
+app.options("/*any", ctx -> ctx.header("Access-Control-Request-Method").isPresent()
+        ? preflight(ctx) : ctx.automaticOptions());
+```
+
+`automaticOptions()` is the same 204 answer with the same `Allow` list as above: the
+union over every template matching the path, including the OPTIONS route that is
+running, so `Allow` lists `OPTIONS` even where it is the only method. With
+`GET /users` and `POST /users` beside the wildcard, `OPTIONS /users` gets
+`Allow: GET, HEAD, OPTIONS, POST` and `OPTIONS /other` gets `Allow: OPTIONS`.
+`OPTIONS *` never reaches a route.
+
+`resolve` returns empty for an automatic answer, so
 over HTTP and through `TestClient` it is admitted in the default bucket shared with
 404 and 405 responses, under the application's default policy (see
 [admission](admission.md)); it can be refused with 503 like any request. A request
