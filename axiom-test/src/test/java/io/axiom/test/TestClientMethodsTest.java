@@ -90,6 +90,19 @@ class TestClientMethodsTest {
     }
 
     @Test
+    void ignoresMethodOverrideHeaders() throws Exception {
+        var app = Axiom.create();
+        app.post("/x", ctx -> "post");
+        app.delete("/x", ctx -> "delete");
+        try (var client = TestClient.start(app)) {
+            for (var header : new String[] {"X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override"}) {
+                var request = new Request("POST", "/x", java.util.Map.of(header, "DELETE"), io.axiom.http.Body.empty());
+                assertThat(client.execute(request).body()).as(header).isEqualTo("post");
+            }
+        }
+    }
+
+    @Test
     void admitsAutomaticOptionsUnderTheDefaultPolicy() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);

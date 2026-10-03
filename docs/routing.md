@@ -165,6 +165,17 @@ template has its method, recognized or not. With `PROPFIND /dav` registered:
 The 501 is a runtime error: over HTTP it keeps a keep-alive connection open, and its
 problem body does not repeat the method.
 
+### Method override headers
+
+`X-HTTP-Method-Override`, `X-HTTP-Method` and `X-Method-Override` are not supported.
+Routing, `resolve`, admission, automatic OPTIONS and `ctx.method()` always use the
+method of the request line; these headers reach handlers as ordinary request headers
+and change nothing. Honoring them would let any client that can send a POST, including
+a cross-site form, reach a DELETE or PUT route, and would make the method that
+proxies, logs and access rules see differ from the one the application executes. An
+application that must serve clients limited to GET and POST can register an explicit
+POST route that performs the action.
+
 ## Conflicts and startup
 
 Identical method/template pairs fail at registration. So do distinct templates

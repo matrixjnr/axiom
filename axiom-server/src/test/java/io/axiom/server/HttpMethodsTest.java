@@ -216,6 +216,32 @@ class HttpMethodsTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override", "x-http-method-override"})
+    void ignoresMethodOverrideHeaders(String header) throws Exception {
+        try (var app = Axiom.create()) {
+            app.get("/x", ctx -> "get " + ctx.method());
+            app.post("/x", ctx -> "post " + ctx.method() + " " + ctx.request().header(header).orElseThrow());
+            app.delete("/x", ctx -> "delete");
+            app.delete("/only-delete", ctx -> "delete");
+            app.start();
+            var post = app.handle(new Request("POST", "/x", Map.of(header, "DELETE"), Body.empty()));
+            assertThat(post.body()).isEqualTo("post POST DELETE");
+            assertThat(app.handle(new Request("GET", "/x", Map.of(header, "DELETE"), Body.empty())).body())
+                    .isEqualTo("get GET");
+            var mismatch = app.handle(new Request("POST", "/only-delete", Map.of(header, "DELETE"), Body.empty()));
+            assertThat(mismatch.status()).isEqualTo(405);
+            assertThat(mismatch.headers()).containsEntry("Allow", "DELETE");
+            // Not even for OPTIONS, TRACE or CONNECT, and not to escape 501.
+            assertThat(app.handle(new Request("OPTIONS", "/x", Map.of(header, "DELETE"), Body.empty())).status())
+                    .isEqualTo(204);
+            assertThat(app.handle(new Request("FOO", "/missing", Map.of(header, "GET"), Body.empty())).status())
+                    .isEqualTo(501);
+            assertThat(app.resolve(new Request("POST", "/only-delete", Map.of(header, "DELETE"), Body.empty())))
+                    .isEmpty();
+        }
+    }
+
     @Test
     void doesNotFoldTheCaseOfMethods() throws Exception {
         try (var app = Axiom.create()) {

@@ -34,7 +34,8 @@ public interface Application extends AutoCloseable {
      * The method must be an RFC 9110 token (one or more of {@code A-Z a-z 0-9} and
      * {@code !#$%&'*+-.^_`|~}); {@code get} and {@code GET} are different methods. Extension
      * methods such as {@code PROPFIND} or {@code QUERY} are registered here; there is no
-     * {@code query} shortcut while that method is still a draft.
+     * {@code query} shortcut while that method is still a draft. Only the request line's method
+     * is matched; method-override headers such as {@code X-HTTP-Method-Override} are ignored.
      * Named parameters match one non-empty segment; named terminal wildcards match the remainder.
      * Templates that differ only in capture names have the same shape and match the same paths;
      * registering a second one for the same method fails here.

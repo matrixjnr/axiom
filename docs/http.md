@@ -39,7 +39,8 @@ asterisk-form target is accepted only as `OPTIONS *` (see
 targets such as `http://host/path` receive 400.
 Responses always use HTTP/1.1. An HTTP/1.0 connection closes after each response
 unless the request sends `Connection: keep-alive`, which the response echoes.
-A method that is not an RFC 9110 token receives 400; methods are case-sensitive (see
+A method that is not an RFC 9110 token receives 400; methods are case-sensitive, and
+method-override headers such as `X-HTTP-Method-Override` are ignored (see
 [methods](routing.md#methods)). Paths that `Request` rejects (empty or dot segments, backslashes, malformed or
 encoded separators; see [routing rules](routing.md)) receive 400. Accepted raw paths
 retain their encoding. Query strings are excluded from routing, retained on the

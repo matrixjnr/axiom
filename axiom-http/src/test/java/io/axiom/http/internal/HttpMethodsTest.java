@@ -181,6 +181,24 @@ class HttpMethodsTest {
         }
     }
 
+    @Test void ignoresMethodOverrideHeaders() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.post("/x", ctx -> "post " + ctx.method());
+            fixture.app.delete("/x", ctx -> "delete");
+            fixture.app.delete("/only-delete", ctx -> "delete");
+            try (var wire = new Wire(fixture.listen())) {
+                for (var header : new String[] {"X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override"}) {
+                    wire.write("POST /x HTTP/1.1\r\nHost: a\r\n" + header + ": DELETE\r\nContent-Length: 0\r\n\r\n");
+                    assertThat(wire.read(false).text()).as(header).isEqualTo("post POST");
+                    wire.write("POST /only-delete HTTP/1.1\r\nHost: a\r\n" + header + ": DELETE\r\nContent-Length: 0\r\n\r\n");
+                    var mismatch = wire.read(false);
+                    assertThat(mismatch.status()).as(header).isEqualTo(405);
+                    assertThat(mismatch.headers()).as(header).containsEntry("Allow", "DELETE");
+                }
+            }
+        }
+    }
+
     @Test void matchesMethodTokensCaseSensitively() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.route("M-SEARCH", "/x", ctx -> ctx.method());
