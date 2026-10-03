@@ -31,6 +31,35 @@ handlers are interrupted; then execution and I/O threads stop. Await
 interruption; termination cannot complete while a handler refuses to stop.
 Direct in-memory `app.handle` calls remain the caller's responsibility.
 
+### Shutdown on SIGTERM
+
+Nothing closes an application by itself: Axiom never installs a JVM shutdown hook unless asked, so
+a library or test that embeds it is not surprised. **Closing on `SIGTERM` is opt-in.** A service
+run by a container runtime or Kubernetes, which stops it with `SIGTERM`, calls
+`app.closeOnJvmShutdown()` once at startup:
+
+```java
+var app = Axiom.create().closeOnJvmShutdown();
+app.get("/", ctx -> "ok");
+var server = app.listen(new InetSocketAddress("0.0.0.0", 8080));
+server.termination().toCompletableFuture().join(); // keeps main alive until the drain is done
+```
+
+When the JVM begins to shut down (`SIGTERM`, `SIGINT`, `System.exit` or the end of the last
+non-daemon thread) the hook closes the application and waits for every listener to terminate. The
+drain is the graceful shutdown described above, within each listener's `shutdownGrace`: running
+requests finish and are answered with `Connection: close`, waiting requests get 503, and what is
+left is interrupted after the grace period. The wait is bounded by the longest `shutdownGrace` of
+the application's listeners plus five seconds, so a handler that ignores interruption cannot keep the
+JVM from exiting. Closing makes the application not `RUNNING`, so a `Health` readiness probe
+reports DOWN from then on; if a load balancer needs time to notice, call `health.beginDrain()` and
+wait before the JVM exits (see [observability](observability.md#health-and-readiness)). The grace
+period must fit inside the platform's own kill timeout (Kubernetes
+`terminationGracePeriodSeconds`, 30 seconds by default). Calling it twice registers one hook,
+an explicit `app.close()` unregisters it, and it throws `IllegalStateException` on a closed
+application or when the JVM is already shutting down. Hooks of different libraries run concurrently
+and in no defined order.
+
 Open [streams](streaming.md#shutdown) are the exception to the grace period: they are cancelled
 as soon as `close()` begins, because they may never end by themselves. Their handlers' writes
 fail with `SHUTDOWN`, and their connections close without a final chunk, so the client sees the

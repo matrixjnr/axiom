@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add the opt-in `Application.closeOnJvmShutdown()`, which closes the application and waits for its listeners to drain, within their shutdown grace periods, when the JVM begins to shut down (for example on `SIGTERM` from a container runtime). Nothing is registered unless it is called. **Binary incompatible (pre-release):** `Application` gained this method. See `docs/http.md#shutdown-on-sigterm`; the REST example uses it.
 - Expire queued requests promptly when their own execution deadline is shorter than the queue wait of the request ahead of them. Waiting requests are now ordered by expiry, so each completion or refused submission fails every expired request at a logarithmic cost per request, without scanning the queue (`docs/admission.md`).
 - Report listener connections as the gauge `axiom.http.connections` (tag `state` = `open` or `lingering`) and document the real maximum of open sockets (`maxConnections + maxLingeringConnections`, 160 by default) with file-descriptor and load-balancer sizing guidance in `docs/http.md` and `docs/execution.md`.
 - Bound the write of the interim `100 Continue` by the listener's `responseTimeout`, so a client that never reads it loses the connection after that bound instead of holding it until the inactivity timeout. Lingering after a response keeps its configurable quiet period (`lingerQuietTimeout`); `docs/http.md` now says how to size it for slow uploaders.
