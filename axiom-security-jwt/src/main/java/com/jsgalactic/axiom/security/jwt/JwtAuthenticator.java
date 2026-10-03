@@ -88,8 +88,13 @@ import javax.crypto.spec.SecretKeySpec;
  * empty. A Bearer header with a missing or malformed token is invalid (401). Repeated
  * {@code Authorization} fields are joined by the transport and therefore rejected.
  *
- * <p><b>Lifecycle.</b> Immutable and thread-safe once built; keys are fixed at build time (there
- * is no key-set fetching or rotation). The authenticator holds HMAC secrets for its lifetime.
+ * <p><b>Key sets.</b> {@link Builder#jwks(JwksSource, JwksOptions)} adds the keys of a JSON Web Key
+ * Set fetched from a configured URL or file, cached, refreshed and rotated within bounds; keys
+ * embedded in tokens ({@code jku}, {@code jwk}, {@code x5u}, {@code x5c}) remain unused.
+ *
+ * <p><b>Lifecycle.</b> Thread-safe once built. Statically registered keys are fixed at build time;
+ * a configured key set is the only mutable state, replaced as a whole when a fetch succeeds. The
+ * authenticator holds HMAC secrets for its lifetime.
  */
 public final class JwtAuthenticator implements Authenticator {
     private static final Pattern BASE64URL = Pattern.compile("[A-Za-z0-9_-]+");
@@ -98,6 +103,7 @@ public final class JwtAuthenticator implements Authenticator {
 
     private final Map<String, Entry> keysById;
     private final Map<JwsAlgorithm, Entry> keysWithoutId;
+    private final JwksKeys jwks;
     private final Set<String> issuers;
     private final Set<String> audiences;
     private final long skewSeconds;
@@ -114,6 +120,7 @@ public final class JwtAuthenticator implements Authenticator {
     private JwtAuthenticator(Builder builder) {
         keysById = Map.copyOf(builder.keysById);
         keysWithoutId = Map.copyOf(builder.keysWithoutId);
+        jwks = builder.jwksSource == null ? null : new JwksKeys(builder.jwksSource, builder.jwksOptions, builder.clock);
         issuers = Set.copyOf(builder.issuers);
         audiences = Set.copyOf(builder.audiences);
         skewSeconds = builder.skew.toSeconds();
@@ -151,6 +158,18 @@ public final class JwtAuthenticator implements Authenticator {
     @Override
     public String challenge() {
         return challenge;
+    }
+
+    /**
+     * Fetches the configured key set now, regardless of the refresh schedule and rate limit, for
+     * example at startup to fail fast on a misconfigured URL. A failed fetch keeps the last good
+     * key set. Without a key set source this does nothing.
+     *
+     * @return true if a new key set was installed, false if the fetch or the set was unusable
+     *         (the reason is attached to the 401 of the next token that needs it)
+     */
+    public boolean refreshKeys() {
+        return jwks != null && jwks.refresh();
     }
 
     /**
@@ -193,7 +212,11 @@ public final class JwtAuthenticator implements Authenticator {
         for (var candidate : JwsAlgorithm.values()) {
             if (candidate.name().equals(name)) { algorithm = candidate; }
         }
-        if (algorithm == null || !allowed(algorithm)) { throw invalid("Algorithm is not allowed"); }
+        // With a key set, an unknown algorithm may belong to a key that has not been fetched yet;
+        // the key lookup then decides, and it still demands a key bound to exactly this algorithm.
+        if (algorithm == null || !(allowed(algorithm) || (jwks != null && header.get("kid") instanceof String))) {
+            throw invalid("Algorithm is not allowed");
+        }
         if (header.containsKey("crit")) { throw invalid("Critical header extensions are not supported"); }
         if (header.containsKey("enc")) { throw invalid("Encrypted tokens are not supported"); }
         var type = header.get("typ");
@@ -219,10 +242,15 @@ public final class JwtAuthenticator implements Authenticator {
             entry = keysWithoutId.get(algorithm);
         } else if (kid instanceof String id) {
             entry = keysById.get(id);
+            if (entry == null && jwks != null) { entry = jwks.find(id); }
         } else {
             throw invalid("kid is not a string");
         }
-        if (entry == null) { throw invalid("No key for the token's kid and algorithm"); }
+        if (entry == null) {
+            var failure = jwks == null ? null : jwks.lastFailure();
+            throw invalid("No key for the token's kid and algorithm"
+                    + (failure == null ? "" : " (the last key set fetch failed: " + failure + ")"));
+        }
         if (entry.algorithm() != algorithm) { throw invalid("The key is registered for another algorithm"); }
         return entry;
     }
@@ -293,7 +321,7 @@ public final class JwtAuthenticator implements Authenticator {
         return result;
     }
 
-    private static byte[] decode(String part, String name) {
+    static byte[] decode(String part, String name) {
         if (part.isEmpty() || !BASE64URL.matcher(part).matches() || part.length() % 4 == 1) {
             throw invalid("The " + name + " is not unpadded base64url");
         }
@@ -310,7 +338,7 @@ public final class JwtAuthenticator implements Authenticator {
     }
 
     /** A verification key bound to one algorithm. */
-    private record Entry(JwsAlgorithm algorithm, Key key) {
+    record Entry(JwsAlgorithm algorithm, Key key) {
         boolean verify(byte[] signed, byte[] signature) {
             try {
                 if (algorithm.family() == JwsAlgorithm.Family.HMAC) {
@@ -367,6 +395,8 @@ public final class JwtAuthenticator implements Authenticator {
         private final List<TokenCheck> checks = new ArrayList<>();
         private Clock clock = Clock.systemUTC();
         private String realm = "api";
+        private JwksSource jwksSource;
+        private JwksOptions jwksOptions = JwksOptions.defaults();
 
         private Builder() {}
 
@@ -424,6 +454,47 @@ public final class JwtAuthenticator implements Authenticator {
          */
         public Builder publicKey(String keyId, JwsAlgorithm algorithm, PublicKey key) {
             return add(Objects.requireNonNull(keyId, "keyId"), algorithm, asymmetric(algorithm, key));
+        }
+
+        /**
+         * Takes further verification keys from the issuer's JSON Web Key Set, with
+         * {@linkplain JwksOptions#defaults() default options}. See {@link #jwks(JwksSource, JwksOptions)}.
+         *
+         * @param source where the key set comes from, for example {@link JwksSource#url(java.net.URI)}
+         * @return this builder
+         * @throws IllegalStateException if a key set source was already configured
+         */
+        public Builder jwks(JwksSource source) {
+            return jwks(source, JwksOptions.defaults());
+        }
+
+        /**
+         * Takes further verification keys from the issuer's JSON Web Key Set, which the
+         * application configures and the token cannot influence. The set is fetched on first use,
+         * refreshed when older than {@link JwksOptions#refreshInterval(java.time.Duration)}, and
+         * refetched when a token names an unknown {@code kid}, at most once per
+         * {@link JwksOptions#minRefreshInterval(java.time.Duration)}, so key rotation needs no
+         * restart and unknown key IDs cannot make the server fetch in a loop. A failed fetch keeps
+         * the last good set until {@link JwksOptions#maxStale(java.time.Duration)} has passed.
+         *
+         * <p>Keys of the set are bound to their declared {@code alg} exactly like statically
+         * registered keys and pass the same size and curve checks. Statically registered keys with
+         * the same key ID win over keys of the set. Tokens without a {@code kid} are verified only
+         * with statically registered keys.
+         *
+         * @param source where the key set comes from
+         * @param options bounds and timings
+         * @return this builder
+         * @throws IllegalStateException if a key set source was already configured
+         * @throws IllegalArgumentException if the options contradict each other
+         */
+        public Builder jwks(JwksSource source, JwksOptions options) {
+            if (jwksSource != null) { throw new IllegalStateException("A key set source is already configured"); }
+            Objects.requireNonNull(source, "source");
+            Objects.requireNonNull(options, "options").validate();
+            jwksSource = source;
+            jwksOptions = options;
+            return this;
         }
 
         /**
@@ -576,7 +647,9 @@ public final class JwtAuthenticator implements Authenticator {
          * @throws IllegalStateException without a key, an issuer or an audience
          */
         public JwtAuthenticator build() {
-            if (keysById.isEmpty() && keysWithoutId.isEmpty()) { throw new IllegalStateException("At least one key is required"); }
+            if (keysById.isEmpty() && keysWithoutId.isEmpty() && jwksSource == null) {
+                throw new IllegalStateException("At least one key or a key set source is required");
+            }
             if (issuers.isEmpty()) { throw new IllegalStateException("At least one issuer is required"); }
             if (audiences.isEmpty()) { throw new IllegalStateException("At least one audience is required"); }
             return new JwtAuthenticator(this);
@@ -606,7 +679,7 @@ public final class JwtAuthenticator implements Authenticator {
             return new SecretKeySpec(secret.clone(), algorithm.jcaName());
         }
 
-        private static Key asymmetric(JwsAlgorithm algorithm, PublicKey key) {
+        static Key asymmetric(JwsAlgorithm algorithm, PublicKey key) {
             Objects.requireNonNull(algorithm, "algorithm");
             Objects.requireNonNull(key, "key");
             switch (algorithm.family()) {
@@ -630,7 +703,7 @@ public final class JwtAuthenticator implements Authenticator {
             return key;
         }
 
-        private static String curve(JwsAlgorithm algorithm) {
+        static String curve(JwsAlgorithm algorithm) {
             return switch (algorithm) {
                 case ES256 -> "secp256r1";
                 case ES384 -> "secp384r1";
@@ -638,7 +711,7 @@ public final class JwtAuthenticator implements Authenticator {
             };
         }
 
-        private static boolean sameCurve(ECParameterSpec actual, String name) {
+        static boolean sameCurve(ECParameterSpec actual, String name) {
             try {
                 var parameters = AlgorithmParameters.getInstance("EC");
                 parameters.init(new ECGenParameterSpec(name));

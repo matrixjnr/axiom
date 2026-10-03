@@ -144,6 +144,57 @@ principal is `sub`; roles come from `roles` and permissions from `scope` (config
 with `rolesClaim` and `permissionsClaim`), each a space-separated string or an array of
 strings, at most 256 entries. `clock(Clock)` makes time checks deterministic in tests.
 
+### Key sets (JWKS)
+
+```java
+var jwt = JwtAuthenticator.builder()
+        .jwks(JwksSource.url(URI.create("https://login.example.com/.well-known/jwks.json")),
+              JwksOptions.defaults().refreshInterval(Duration.ofMinutes(15)))
+        .issuer("https://login.example.com").audience("notes-api")
+        .build();
+jwt.refreshKeys();   // optional: fetch now, e.g. at startup; false if the endpoint or set is unusable
+```
+
+The **application** configures the source (a URL, a file, or any `JwksSource`, which is also
+how tests inject a key set without a network); a token can never choose it. Keys embedded
+in tokens (`jku`, `x5u`, `jwk`, `x5c`) stay unused.
+
+| Option (`JwksOptions`) | Default | Meaning |
+| --- | --- | --- |
+| `maxBytes` | 64 KiB (1 KiB to 1 MiB) | longest accepted document; at most 100 keys |
+| `refreshInterval` | 10 min (1 s to 24 h) | the next token after this age triggers a refetch; the old set keeps serving meanwhile |
+| `minRefreshInterval` | 30 s (1 s up to the refresh interval) | shortest time between fetch attempts, successful or not |
+| `maxStale` | 24 h (refresh interval to 7 days) | after this long without a successful fetch no key of the set is used (fail closed) |
+| `defaultAlgorithm` | none | algorithm for keys that declare no `alg` |
+
+- **Fetching.** `JwksSource.url` uses `java.net.http`: `https` only (`http` only to
+  loopback, for development), no user information, **redirects are never followed** (any
+  3xx is a failure), status 200 with `application/json` or `application/jwk-set+json`
+  only. The body is read incrementally and abandoned beyond `maxBytes`; a 5 s default
+  timeout (100 ms to 60 s) covers connecting, the head and the whole body. No credentials or
+  cookies are sent. `JwksSource.file` reads a regular file with the same size bound.
+- **Caching and rotation.** The first token fetches the set (nothing is fetched at build
+  time); concurrent first requests wait for one fetch. A token whose `kid` is unknown
+  triggers a refetch, but never more often than `minRefreshInterval`, so a stream of random
+  key IDs causes one fetch per interval, and a failing endpoint is retried at that rate. A
+  retired key stops verifying once a fetch returns a set without it.
+- **Failure handling.** A fetch that fails, times out, is oversized or malformed, repeats
+  a key ID, or yields no usable key keeps the last good set (until `maxStale`). Rejected
+  tokens carry the fetch failure as the exception's cause for logs; clients only see
+  `invalid_token`.
+- **Keys are bound to their algorithm** exactly like static ones. A JWK must have a `kid`
+  and `kty` `RSA`, `EC` or `OKP`; its `alg` names the one algorithm it verifies (a PS256 key
+  cannot verify RS256, and no key of a set is ever an HMAC secret: `oct` keys are skipped).
+  Keys without `alg` are skipped unless `defaultAlgorithm` applies and fits the key type.
+  `use` must be `sig` and `key_ops` must contain `verify` when present. RSA keys need at
+  least 2048 (at most 8192) bits and an odd exponent, EC keys full-length coordinates on
+  the algorithm's curve and on the curve (invalid-curve points are rejected), OKP keys are
+  Ed25519 only. Individual unusable keys are skipped without discarding the others.
+- A statically registered key with the same key ID wins over the set's. Tokens without a
+  `kid` are verified only with static keys.
+- The document is fetched on the request thread that needs it (a virtual thread over
+  HTTP), at most one at a time per authenticator.
+
 ### Further claims, revocation and replay
 
 Only `sub`, the roles claim and the permissions claim reach the identity by default.
@@ -175,8 +226,8 @@ JwtAuthenticator.builder()
   and its pruning (drop a `jti` after `claims.expiresAt()` plus the clock skew), and
   shares it between instances if it runs more than one.
 
-The authenticator is immutable and thread-safe; it holds its keys (including HMAC
-secrets) for its lifetime. `verify(token)` is public for tokens that do not arrive in
+The authenticator is thread-safe; statically registered keys (including HMAC secrets) are
+fixed for its lifetime. A configured key set is its only mutable state. `verify(token)` is public for tokens that do not arrive in
 `Authorization`.
 
 ### Encrypted tokens (JWE) are a non-goal
@@ -311,8 +362,6 @@ app.use(Cors.builder()
 
 ## Limitations
 
-- Keys are configured statically: no JWKS fetching or rotation
-  ([#118](https://github.com/matrixjnr/axiom/issues/118)).
 - Security headers and other middleware headers are missing on problem responses
   ([#96](https://github.com/matrixjnr/axiom/issues/96)).
 - No sessions, cookies, CSRF protection or OAuth flows; authentication is
