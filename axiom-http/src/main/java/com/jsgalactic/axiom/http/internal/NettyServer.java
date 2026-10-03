@@ -4,7 +4,6 @@ import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
 import com.jsgalactic.axiom.lifecycle.Server;
-import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -60,9 +59,9 @@ final class NettyServer implements Server {
     Channel listener;
     private InetSocketAddress address;
 
-    private NettyServer(AdmissionPolicy policy, Metrics metrics, TransportSettings settings) {
+    private NettyServer(AdmissionPolicy policy, TransportSettings settings) {
         this.settings = settings;
-        handlers = new RequestDispatcher(policy, metrics);
+        handlers = new RequestDispatcher(policy);
         stopped = CompletableFuture.allOf(handlers.termination().toCompletableFuture(),
                 completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
     }
@@ -74,7 +73,7 @@ final class NettyServer implements Server {
     /** Binds with non-default bounds; for tests that must tolerate a slow machine or observe one bound. */
     static NettyServer bind(Application application, InetSocketAddress address, TransportSettings settings)
             throws IOException {
-        var server = new NettyServer(application.admissionPolicy(), application.metrics(), settings);
+        var server = new NettyServer(application.admissionPolicy(), settings);
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
                     .channel(NioServerSocketChannel.class)

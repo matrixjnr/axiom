@@ -13,7 +13,6 @@ import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.spi.HttpTransportProvider;
 import com.jsgalactic.axiom.lifecycle.Server;
-import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteGroup;
 import java.io.IOException;
@@ -63,7 +62,6 @@ final class DefaultApplication implements Application {
     private int openGroups;
     private final List<Server> listeners = new ArrayList<>();
     private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
-    private volatile Metrics metrics = Metrics.NOOP;
     private volatile Duration requestTimeout = Duration.ofSeconds(10);
     private volatile int maxRequestBody = 1024 * 1024;
     private volatile State state = State.CONFIGURING;
@@ -370,14 +368,6 @@ final class DefaultApplication implements Application {
         if (!published.routeSet().contains(route)) { throw notRegistered(route); }
         return published.routePolicies().getOrDefault(route, published.defaultPolicy());
     }
-
-    @Override public synchronized Application metrics(Metrics metrics) {
-        requireState(State.CONFIGURING);
-        this.metrics = Objects.requireNonNull(metrics, "metrics");
-        return this;
-    }
-
-    @Override public Metrics metrics() { return metrics; }
 
     @Override public Optional<Route> resolve(Request request) {
         Objects.requireNonNull(request, "request");

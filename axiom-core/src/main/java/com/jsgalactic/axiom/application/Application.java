@@ -8,7 +8,6 @@ import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.lifecycle.Server;
-import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteGroup;
 import java.io.IOException;
@@ -212,22 +211,6 @@ public interface Application extends RouteGroup, AutoCloseable {
      * @throws IllegalArgumentException if the route is not registered
      */
     AdmissionPolicy admissionPolicy(Route route);
-
-    /**
-     * Sets where listeners and the test client record request, latency and admission metrics, before
-     * startup. The default is {@link Metrics#NOOP}. Metrics cover requests that pass through
-     * admission; direct {@link #handle(Request)} calls bypass admission and are not recorded.
-     * @param metrics thread-safe metrics implementation
-     * @return this application
-     * @throws IllegalStateException after configuration has ended
-     */
-    Application metrics(Metrics metrics);
-
-    /**
-     * Returns the configured metrics.
-     * @return metrics receiving the runtime's measurements
-     */
-    Metrics metrics();
 
     /**
      * Resolves a route identity without executing user code. Requires a running application.

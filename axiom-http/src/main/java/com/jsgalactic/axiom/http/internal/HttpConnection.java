@@ -408,7 +408,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                     }
                     throw failure;
                 }
-            }, WireResponse::status);
+            });
             active.result().whenComplete((response, thrown) -> {
                 var failure = unwrap(thrown);
                 try {
