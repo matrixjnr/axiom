@@ -1,3 +1,9 @@
+---
+title: Routing
+parent: Guides
+nav_order: 1
+---
+
 # Routing rules
 
 ## Templates

@@ -1,69 +1,125 @@
+---
+title: Documentation site
+parent: Operations
+nav_order: 6
+---
+
 # Documentation site
 
-The documentation site is built from the Markdown in this repository: `README.md` is the
-landing page, every `docs/NAME.md` is a page, and the API reference is the aggregated Javadoc of
-the published modules. There are no copies: edit the Markdown and the site follows.
+The documentation site is built from the Markdown in this repository with
+[Jekyll](https://jekyllrb.com/) and the [just-the-docs](https://just-the-docs.com/) theme:
+`README.md` is the home page, every `docs/NAME.md` is a page, and the API reference is the
+aggregated Javadoc of the published modules. There are no copies: edit the Markdown and the site
+follows. The theme gives the site a navigation tree, search (the index is built at build time and
+served from the site), light and dark colour schemes that follow the reader's setting, callouts,
+copy buttons on code blocks and a layout for phones. All of the theme's scripts and styles are
+served from the site itself; the only third-party requests a page makes are the status badges at
+the top of the home page, which are images.
 
 ## Preview locally
 
-```sh
-./gradlew docsSite
-```
-
-writes the site to `build/site` and fails on a broken link or anchor. Open
-`build/site/index.html` in a browser; the pages use only relative links, so they also work from
-a `file:` URL. To see them under a project path like the one GitHub Pages uses:
+Jekyll needs Ruby 3.3 and Bundler (no Docker). Once:
 
 ```sh
-mkdir -p build/preview && ln -sfn "$PWD/build/site" build/preview/axiom
-python3 -m http.server --directory build/preview 8000
+cd site
+bundle config set --local path vendor/bundle
+bundle install
+cd ..
 ```
 
-and open `http://localhost:8000/axiom/`. For a faster loop while editing text, run
-`./gradlew docsPages checkDocsLinks`, which skips the Javadoc (`build/docs-pages`).
+Then, from the repository root:
+
+```sh
+./gradlew jekyllSource aggregateJavadoc    # build/jekyll (the Jekyll source) and build/docs-api
+site/build.sh                              # build/site, with the Javadoc in build/site/api
+./gradlew checkSiteLinks                   # the same link check CI runs on the built site
+```
+
+`site/build.sh` is also what CI runs. To serve it with live reload while editing text (rerun
+`./gradlew jekyllSource` after each change to a document; the Javadoc is not part of the served
+site) and open `http://localhost:4000/axiom/`:
+
+```sh
+BUNDLE_GEMFILE=site/Gemfile bundle exec jekyll serve --source build/jekyll \
+  --config build/jekyll/_config.yml,build/jekyll/_config.generated.yml
+```
 
 ## How it is built
 
-| Task | What it does |
+| Part | What it does |
 | --- | --- |
-| `docsPages` | Converts `README.md` and `docs/*.md` to HTML with the dependency-free converter in `build-logic` and adds `site.css`. Fails when a document links to a page or repository file that does not exist. |
+| `site/` | The Jekyll configuration (`_config.yml`), the three menu group pages, the footer and head includes, `Gemfile` and `Gemfile.lock`, `build.sh`. |
+| `jekyllSource` | Assembles `build/jekyll` from `site/`, `docs/*.md` and `README.md` (as `index.md`, with the home page's front matter). Rewrites links between documents for the flat page layout, links to other repository files (`../examples/rest-api`) to GitHub, and fails on a link, anchor or front matter problem. Writes `_config.generated.yml` with the version, the commit when `GITHUB_SHA` is set, and the logo, dark logo and favicon when `branding/` has them (the directory is copied to the site as `branding/`, which the README's logo needs). |
 | `aggregateJavadoc` | One Javadoc for the main sources of every published module, without the `internal` packages (`build/docs-api`). |
-| `docsSite` | Assembles `build/site` (pages in the root, Javadoc under `api/`) and runs `checkSiteLinks` on it. |
-| `checkDocsLinks` | Checks the pages for broken file links, broken `#anchor`s, duplicate ids and site-absolute paths. It is part of `./gradlew check`, so a broken link in a document fails the normal build. |
-| `checkSiteLinks` | The same check on the assembled site, which also verifies links into `api/`. |
+| `site/build.sh` | Runs `jekyll build` on `build/jekyll` into `build/site` and copies the Javadoc to `build/site/api` afterwards, so Jekyll never scans it. The menu entry "API reference" links to it. |
+| `checkDocsLinks` | Checks the Markdown sources for broken file links, broken `#anchor`s, site-absolute paths and missing front matter. It needs no Ruby and is part of `./gradlew check`, so a broken link in a document fails the normal build. |
+| `checkSiteLinks` | Checks the built site (all pages, the theme assets, and that every link into `api/` resolves to a file), including each `#anchor`. CI runs it after Jekyll; it is not part of `check` because it needs the Ruby build. |
 
-`README.md` becomes `index.html` and `docs/NAME.md` becomes `NAME.html`, all in one directory
-next to `site.css`. Every link between pages is therefore a plain relative file name that works
-under `/axiom/`, at the root of a custom domain and from disk. Site-absolute links (starting with
-`/`) are rejected for that reason.
-
-Links in the Markdown are written as for GitHub and rewritten by the converter:
+Links in the Markdown are written as for GitHub and stay valid there:
 
 - `other.md`, `../README.md` and `other.md#section` point at pages and stay on the site;
 - a link to any other file or directory in the repository (`LICENSE`, `../examples/rest-api`)
   becomes a link to it on GitHub, and the build fails if it does not exist;
-- `#section` anchors use GitHub's heading ids, so the same link works on both.
+- `#section` anchors use GitHub's heading ids (`kramdown.input: GFM`), so the same link works on
+  both, and the build fails when one does not exist.
 
-The converter supports the Markdown the documents use: headings, paragraphs, bullet and numbered
-lists (nested), fenced code blocks, block quotes, tables, rules, inline code, emphasis, links and
-images. Raw HTML is escaped, not passed through. Reference-style links, setext headings,
-indented code blocks and strikethrough are not supported; use the plain forms.
+All pages sit in one flat directory under the site's base path (`/axiom`). A site-absolute link
+(starting with `/`) in a document is rejected, because it would break on GitHub or under the base
+path.
 
 ## Add a page
 
-1. Create `docs/NAME.md` with a single `# Title` heading; the title is the menu label.
-2. Link to it from related pages with `[text](NAME.md)`.
-3. To place it in the menu, add `"Group/NAME.md"` to `siteNavigation` in
-   `build-logic/src/main/kotlin/axiom.docs-site.gradle.kts`. A page that is not listed is still
-   published, under "More", so it cannot go missing by accident. Listing a page that does not
-   exist yet is allowed and the entry is skipped until the file appears.
-4. Run `./gradlew docsSite`.
+1. Create `docs/NAME.md` with a single `# Title` heading.
+2. Add the front matter, which GitHub shows as a small table; keep it to these three fields:
+
+   ```text
+   ---
+   title: Menu label
+   parent: Guides
+   nav_order: 3
+   ---
+   ```
+
+   `parent` is one of the group pages in `site/`: `Getting started`, `Guides` or `Operations`.
+   `nav_order` orders the page inside its group. `checkDocsLinks` fails when one is missing, so a
+   page cannot disappear from the menu.
+3. Link to it from related pages with `[text](NAME.md)`.
+4. Run `./gradlew checkDocsLinks`, or build the site as above.
+
+To add a group, add a page to `site/` with `has_children: true` and a `nav_order`. The README has
+no front matter of its own; the home page's is added by `jekyllSource`.
+
+Callouts are available through the theme (`{: .warning }` after a block quote, defined in
+`site/_config.yml`). The documents do not use them because that line would show on GitHub as text.
+
+## Supply chain
+
+The site is built with `ruby/setup-ruby` and Bundler, not with `actions/jekyll-build-pages`, and
+the theme is the `just-the-docs` gem rather than a `remote_theme`:
+
+- `site/Gemfile.lock` pins every gem to an exact version and records the SHA-256 of each gem file
+  from RubyGems (`CHECKSUMS`). `ruby/setup-ruby` installs with the lock frozen, so a gem whose
+  content differs from the recorded hash fails the build. The theme is `just-the-docs` 0.12.0 at
+  an exact hash, and Ruby is `3.3.6`.
+- `jekyll-build-pages` runs the fixed set of gems of the `github-pages` bundle, accepts only the
+  themes that bundle allows, and loads any other theme with `jekyll-remote-theme`, which downloads
+  it from GitHub while the site builds. Pinning that download to a commit leaves the content of
+  the plugin and of the rest of the bundle outside the repository's lock file.
+- Nothing is fetched while Jekyll runs: no remote theme, no CDN. The search index is generated
+  from the pages, and the theme's JavaScript (including `lunr`) ships in the gem and is copied
+  into the site. Mermaid and analytics, which the theme can load from third parties, are not
+  enabled.
+- Every action in the workflow is pinned to a full commit SHA with a version comment.
+
+To update the theme or Jekyll, change the version in `site/Gemfile`, run
+`bundle lock --update --add-checksums` in `site/`, rebuild locally, and review the diff of
+`Gemfile.lock` in the pull request.
 
 ## Deployment
 
 `.github/workflows/docs.yml` is separate from the Build workflow; the required `check` job does
-not depend on it. A pull request that touches `docs/**`, `README.md`, Java sources, the build
-logic or the workflow builds the site, runs the link check and keeps the result as the
+not depend on it. A pull request that touches `docs/**`, `README.md`, `site/**`, Java sources, the
+build logic or the workflow builds the site, runs both link checks and keeps the result as the
 `github-pages` artifact for seven days; nothing is deployed. A push to `main` builds the same
 site and deploys it with `actions/configure-pages` and `actions/deploy-pages` in a second job
 that alone has `pages: write` and `id-token: write`. Deployments are serialized in the `pages`
@@ -97,5 +153,9 @@ To serve the site at `axiom.jsgalactic.com`:
    to the site root. With the Actions deployment the setting in step 2 is what counts, so the
    file only documents the choice in the repository.
 
-The site contains only relative links, so no content changes when the domain is added; the old
-`https://matrixjnr.github.io/axiom/` address redirects to the custom domain.
+6. Serve the site from the root of the domain: in `site/_config.yml` set `url` to
+   `https://axiom.jsgalactic.com` and `baseurl` to `""`, and in
+   `build-logic/src/main/kotlin/axiom.docs-site.gradle.kts` set `siteUrl` and `baseUrl` of
+   `checkSiteLinks` to match (`https://axiom.jsgalactic.com` and `""`). The Markdown does not
+   change, because it contains no site addresses. The old `https://matrixjnr.github.io/axiom/`
+   address redirects to the custom domain.

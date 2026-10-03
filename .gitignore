@@ -8,3 +8,5 @@
 .settings/
 .DS_Store
 .kotlin/
+site/.bundle/
+site/vendor/

@@ -1,3 +1,9 @@
+---
+title: Security
+parent: Guides
+nav_order: 6
+---
+
 # Security
 
 Two opt-in modules add authentication and HTTP security helpers. Both use only the JDK and
