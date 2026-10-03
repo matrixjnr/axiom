@@ -183,10 +183,25 @@ reported.
 
 Codes are chosen from exception types and document structure, never from Jackson's
 message text. Trailing content is found by reading one more token after the value.
-When a syntax, encoding or duplicate-key failure surfaces (possibly wrapped by the
-data binder), the codec reads the rejected document's tokens again with its own
-duplicate tracking and reports the first token-level problem; this second pass runs
-only for rejected bodies and is bounded by the same limits.
+
+### Which problem is reported
+
+A rejected document reports **the first problem in document order**, whatever kind it
+is. The decoder stops at the first failure, so an integer overflow at `quantity`
+followed later by a duplicate key is `type_mismatch` with field `quantity`, and the
+same two problems in the other order are `duplicate_field`. Details that follow from
+this rule:
+
+- A constructor rejection (`invalid_value`) is positioned where its object ends, and
+  `trailing_content` after the value.
+- Invalid UTF-8 is positioned at the offending byte: an earlier syntax or type
+  problem is reported instead of `invalid_encoding`, and an earlier valid document
+  is not affected by bytes that follow a failure.
+- When a failure surfaces from the parser (syntax, encoding, limits, duplicate keys),
+  possibly wrapped by the data binder, the codec reads the document's tokens again
+  with its own duplicate tracking, up to the position where the first failure was
+  detected, and reports the first token-level problem found there. This second pass
+  runs only for rejected bodies and is bounded by the same limits.
 
 ### Supported types
 
@@ -221,6 +236,32 @@ default typing is not enabled, so `{"@class": ...}` is an ordinary property.
 `BigDecimal` and `BigInteger` values are bounded to 256 characters, but a short
 literal such as `1e999999999` has a huge exponent; check scale or magnitude before
 arithmetic that expands it (`toBigInteger()`, `toPlainString()`).
+
+### Migrating from lenient JSON
+
+The codec is stricter than a default Jackson `ObjectMapper`, and the rules are fixed:
+there is no switch to relax them. Code and clients moving from a default mapper
+(or from hand-written JSON that happens to work there) meet these changes. Each is
+rejected with `400` and the code shown.
+
+| Input | Default Jackson | Axiom |
+| --- | --- | --- |
+| `{"name": 42}` (or `true`) into a `String` field | `"42"` / `"true"` | `type_mismatch`, field `name` |
+| `{"count": "7"}` or `1.5` into an `int` field | `7` / `1` | `type_mismatch`, field `count` |
+| `{"status": 0}` or `"0"` for an enum | the first constant | only the exact constant name, such as `"ACTIVE"`; numbers and numeric strings are `type_mismatch` |
+| A shortened or unhyphenated string for a `UUID` | accepted in several forms | only `8-4-4-4-12` hexadecimal; otherwise `type_mismatch` |
+| `{"data": [1, 2, 3]}` for `byte[]` | accepted as a byte list | base64 string only |
+| `{"at": 1700000000}`, `[2024,2,29]` or `""` for a `java.time` type | a timestamp, an array or `null` | ISO-8601 string only, else `type_mismatch` |
+| `1.10` or `1e400` into an `Object`, `List` or `Map` | `Double` (infinity for `1e400`) | `BigDecimal`, exact; a `double` or `float` field rejects values that overflow |
+| The same key twice in an object | the last value wins | `duplicate_field` |
+| Content after the value | ignored | `trailing_content` |
+| UTF-16 or UTF-32 bytes | detected and decoded | `invalid_encoding` or `malformed_json`; a non-UTF-8 `charset` is `415 unsupported_charset` |
+
+Responses follow the same rules in the other direction: dates are ISO-8601 strings
+with the offset kept as sent, `BigDecimal` is written with `toString()`, and an
+`Optional.empty()` is `null`. The type table above states the strict rule for every
+supported type. To accept a lenient shape for one field, declare it as `String` or
+`Object` and convert it in the handler.
 
 ## Encoding
 
