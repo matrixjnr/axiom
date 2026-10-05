@@ -2,6 +2,20 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class DocsLinksTest {
+    @Test
+    fun frontMatterAcceptsWindowsLineEndingsWithoutChangingTheBody() {
+        for (newline in listOf("\n", "\r\n")) {
+            val front = listOf("---", "title: T", "parent: G", "nav_order: 1", "---", "").joinToString(newline)
+            val body = "${newline}# T${newline}"
+            val problems = mutableListOf<String>()
+            DocsLinks.validate("docs/a.md", front + body, problems)
+            assertThat(problems).isEmpty()
+            assertThat(DocsLinks.splitFrontMatter(front + body)).isEqualTo(front to body)
+            val unclosed = "---${newline}title: T${newline}"
+            assertThat(DocsLinks.splitFrontMatter(unclosed)).isEqualTo("" to unclosed)
+        }
+    }
+
     private val repo = "https://github.com/o/r"
     private val files = mapOf("LICENSE" to 1, "examples/app" to 2)
 

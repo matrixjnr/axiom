@@ -1,15 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="t">
-  <title id="t">Axiom</title>
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#4f46e5"/>
-      <stop offset="1" stop-color="#0ea5a4"/>
-    </linearGradient>
-  </defs>
-  <rect width="128" height="128" rx="28" fill="url(#g)"/>
-  <!-- the A: two strokes meeting at an apex -->
-  <path d="M30 98 L64 24 L98 98" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- the axis: a horizontal line through the A, with a dot at the point it crosses the apex axis -->
-  <path d="M44 74 H84" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity=".92"/>
-  <circle cx="64" cy="24" r="7" fill="#fde68a"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Axiom</title>
+  <rect width="128" height="128" rx="28" fill="#102A43"/>
+  <path d="M24 100 58 28h12l34 72H85L64 53l-21 47Z" fill="#F0F7FA"/>
+  <path d="m49 77-8 17h46l-8-17Z" fill="#32D6BC"/>
 </svg>

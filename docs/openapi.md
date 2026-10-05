@@ -307,6 +307,13 @@ only to routes that declare none, and responses and parameters are added where t
 entry with the same status or name. Defaults apply in the order added. In the example, every
 `/books` route also documents a 500 response and every `/readers` route gets the tag `people`.
 
+The example deliberately gives `PUT /readers/{name}` two tags: its own `readers` tag and
+the inherited `people` tag. Both generated documents contain one `put` operation with
+`tags: ["readers", "people"]`. Swagger UI displays that same operation under both headings;
+it does not register or generate a second endpoint. To show it under only one heading,
+use a single tag by removing either `.tags("readers")` from the route description or
+the `.defaults("/readers", RouteDoc.empty().tags("people"))` entry.
+
 ## Step 7: errors at build time
 
 Generation fails with `IllegalArgumentException` naming the route and the part of it that is

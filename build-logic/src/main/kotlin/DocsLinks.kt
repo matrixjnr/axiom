@@ -24,9 +24,11 @@ object DocsLinks {
 
     /** A leading front matter block (delimiters included, or empty) and the rest of [markdown]. */
     fun splitFrontMatter(markdown: String): Pair<String, String> {
-        if (!markdown.startsWith("---\n")) return "" to markdown
-        val end = markdown.indexOf("\n---\n", 3)
-        return if (end < 0) "" to markdown else markdown.substring(0, end + 5) to markdown.substring(end + 5)
+        val opening = Regex("\\A---\\r?\\n").find(markdown) ?: return "" to markdown
+        val closing = Regex("(?m)^---(?:\\r?\\n|\\z)").find(markdown, opening.range.last + 1)
+            ?: return "" to markdown
+        val end = closing.range.last + 1
+        return markdown.substring(0, end) to markdown.substring(end)
     }
 
     /** The `key: value` lines of [markdown]'s front matter. */
