@@ -10,6 +10,46 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class RequestTest {
+    @Test
+    void requestIsAnImmutableClassWithNamedAccessors() {
+        assertThat(Request.class.isRecord()).isFalse();
+        assertThat(java.lang.reflect.Modifier.isFinal(Request.class.getModifiers())).isTrue();
+        var headers = new java.util.HashMap<String, String>();
+        headers.put("Accept", "application/json");
+        var body = Body.of("text/plain", new byte[] {65});
+        var peer = new java.net.InetSocketAddress("127.0.0.1", 1234);
+        var request = new Request("POST", "/notes", "sort=new", headers, body, peer, true);
+        headers.clear();
+        assertThat(request.method()).isEqualTo("POST");
+        assertThat(request.path()).isEqualTo("/notes");
+        assertThat(request.query()).isEqualTo("sort=new");
+        assertThat(request.headers()).containsEntry("Accept", "application/json");
+        assertThat(request.body()).isSameAs(body);
+        assertThat(request.remoteAddress()).isEqualTo(peer);
+        assertThat(request.tls()).isTrue();
+    }
+
+    @Test
+    void equalityAndHashingAgreeForCaseInsensitiveHeaders() {
+        var body = Body.of("text/plain", new byte[] {65});
+        var first = new Request("POST", "/notes", "q=1", java.util.Map.of("Accept", "text/plain"), body);
+        var same = new Request("POST", "/notes", "q=1", java.util.Map.of("accept", "text/plain"), body);
+        assertThat(first).isEqualTo(same).hasSameHashCodeAs(same);
+        assertThat(same).isEqualTo(first);
+        assertThat(new java.util.HashSet<>(java.util.List.of(first, same))).hasSize(1);
+        assertThat(first).isEqualTo(first).isNotEqualTo(null).isNotEqualTo("request");
+        assertThat(first).isNotEqualTo(new Request("GET", "/notes", "q=1", first.headers(), body));
+        assertThat(first).isNotEqualTo(new Request("POST", "/other", "q=1", first.headers(), body));
+        assertThat(first).isNotEqualTo(new Request("POST", "/notes", "q=2", first.headers(), body));
+        assertThat(first).isNotEqualTo(first.withHeaders(java.util.Map.of("Accept", "application/json")));
+        assertThat(first).isEqualTo(first.withBody(Body.of("text/plain", new byte[] {65})))
+                .hasSameHashCodeAs(first.withBody(Body.of("text/plain", new byte[] {65})));
+        assertThat(first).isNotEqualTo(first.withBody(Body.of("text/plain", new byte[] {66})));
+        assertThat(first).isNotEqualTo(first.withBody(Body.of("application/octet-stream", new byte[] {65})));
+        assertThat(first).isNotEqualTo(first.withRemoteAddress(new java.net.InetSocketAddress("127.0.0.1", 1234)));
+        assertThat(first).isNotEqualTo(first.withTls(true));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"", "users", "/users?x=1", "/users#top", "/bad path", "/bad%", "/bad%zz", "/bad%2",
             "/a\\b", "/a\r\nb", "/a\u0000b", "//", "//users", "/a//b", "/users//", "/.", "/..", "/a/./b",

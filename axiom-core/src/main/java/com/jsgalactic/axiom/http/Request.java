@@ -5,6 +5,7 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -33,16 +34,19 @@ import java.util.regex.Pattern;
  * forwarded client addresses are headers and must only be believed from trusted proxies.
  * <p>The {@code tls} flag is true when the transport received the request over a TLS connection,
  * set by the HTTP listener and never derived from a header; see {@link #isSecure()}.
- * @param method case-sensitive HTTP method token
- * @param path absolute raw path without query or fragment, or {@code *} for {@code OPTIONS *}
- * @param query raw query without the leading {@code ?}; {@code ""} when absent
- * @param headers request header fields; copied into an immutable case-insensitive map
- * @param body request content; never null, {@link Body#empty()} when absent
- * @param remoteAddress resolved transport peer address, or {@code null} when unknown
- * @param tls whether the connection that carried the request uses TLS
+ * <p>This is a final class so that adding metadata does not change a record pattern's shape.
+ * Use the named accessors and withers. Equality compares all current metadata and the body's
+ * content type and bytes. Header names compare case-insensitively, as they do during lookup.
  */
-public record Request(String method, String path, String query, Map<String, String> headers, Body body,
-                      InetSocketAddress remoteAddress, boolean tls) {
+public final class Request {
+    private final String method;
+    private final String path;
+    private final String query;
+    private final Map<String, String> headers;
+    private final Body body;
+    private final InetSocketAddress remoteAddress;
+    private final boolean tls;
+
     private static final Pattern TOKEN = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
     /** Longest accepted raw query, in characters. */
     public static final int MAX_QUERY_LENGTH = 4096;
@@ -147,7 +151,8 @@ public record Request(String method, String path, String query, Map<String, Stri
      *         remote address
      * @throws InvalidRequestPathException for a rejected path
      */
-    public Request {
+    public Request(String method, String path, String query, Map<String, String> headers, Body body,
+                   InetSocketAddress remoteAddress, boolean tls) {
         Objects.requireNonNull(method, "method");
         Objects.requireNonNull(path, "path");
         Objects.requireNonNull(query, "query");
@@ -183,6 +188,84 @@ public record Request(String method, String path, String query, Map<String, Stri
             });
             headers = Collections.unmodifiableMap(copy);
         }
+        this.method = method;
+        this.path = path;
+        this.query = query;
+        this.headers = headers;
+        this.body = body;
+        this.remoteAddress = remoteAddress;
+        this.tls = tls;
+    }
+
+    /**
+     * Returns the HTTP method.
+     *
+     * @return the case-sensitive method token
+     */
+    public String method() { return method; }
+
+    /**
+     * Returns the request path.
+     *
+     * @return the raw absolute path, or {@code *} for {@code OPTIONS *}
+     */
+    public String path() { return path; }
+
+    /**
+     * Returns the raw query.
+     *
+     * @return the query without {@code ?}, or an empty string
+     */
+    public String query() { return query; }
+
+    /**
+     * Returns the request headers.
+     *
+     * @return an immutable, case-insensitive map
+     */
+    public Map<String, String> headers() { return headers; }
+
+    /**
+     * Returns the request body.
+     *
+     * @return immutable request content, never null
+     */
+    public Body body() { return body; }
+
+    /**
+     * Returns the transport peer.
+     *
+     * @return the resolved address, or null for an unknown peer
+     */
+    public InetSocketAddress remoteAddress() { return remoteAddress; }
+
+    /**
+     * Returns the transport TLS flag.
+     *
+     * @return whether this request arrived over TLS
+     */
+    public boolean tls() { return tls; }
+
+    @Override public boolean equals(Object other) {
+        if (this == other) { return true; }
+        if (!(other instanceof Request that)) { return false; }
+        return tls == that.tls && method.equals(that.method) && path.equals(that.path)
+                && query.equals(that.query) && headers.equals(that.headers) && body.equals(that.body)
+                && Objects.equals(remoteAddress, that.remoteAddress);
+    }
+
+    @Override public int hashCode() {
+        int result = method.hashCode();
+        result = 31 * result + path.hashCode();
+        result = 31 * result + query.hashCode();
+        int headersHash = 0;
+        for (var entry : headers.entrySet()) {
+            headersHash += entry.getKey().toLowerCase(Locale.ROOT).hashCode() ^ entry.getValue().hashCode();
+        }
+        result = 31 * result + headersHash;
+        result = 31 * result + body.hashCode();
+        result = 31 * result + Objects.hashCode(remoteAddress);
+        return 31 * result + Boolean.hashCode(tls);
     }
 
     /**

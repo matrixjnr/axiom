@@ -19,6 +19,24 @@ Both expose core contracts at compile time and include the server provider at
 runtime. Add `axiom-json` with `runtimeOnly` for the JSON codec. HTTP keeps Netty
 and JSON keeps Jackson in their implementation dependencies; core uses only the JDK.
 
+## Request API stability
+
+`Request` is an immutable final class. Read metadata through `method()`, `path()`, `query()`,
+`headers()`, `body()`, `remoteAddress()` and `tls()`; use its factories and `with...` methods
+to create modified requests. Existing two-, four-, five-, six- and seven-argument constructors
+remain available. Headers are copied at construction and cannot be mutated through the accessor.
+
+This pre-release change replaces the earlier record so future metadata can be added without
+changing record deconstruction patterns. Code using a `Request(...)` record pattern, assigning
+a request to `java.lang.Record`, inspecting record components, or relying on record-based
+serialization must migrate to named accessors or explicit DTOs and recompile. Ordinary
+constructor and accessor call sites keep their signatures.
+
+Equality includes method, path, raw query, headers, body, transport peer and TLS state. Header
+names compare case-insensitively; values compare exactly. Bodies compare by content type and
+bytes. Hashing follows those rules, including header-name casing. Do not persist
+hash codes. `toString()` continues to omit query contents, header values, body and peer address.
+
 ## Registration and matching
 
 ```java
