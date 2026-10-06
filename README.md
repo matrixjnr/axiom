@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="branding/logo.svg" alt="Axiom" height="96">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/logo-dark.svg">
+    <img src="branding/logo.svg" alt="Axiom" height="96">
+  </picture>
 </p>
 
 # Axiom

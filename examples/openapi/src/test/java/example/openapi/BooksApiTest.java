@@ -2,16 +2,39 @@ package example.openapi;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jsgalactic.axiom.codec.spi.BodyCodec;
 import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.test.TestClient;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
+import java.util.ServiceLoader;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class BooksApiTest {
+    @Test void bothDocumentsDescribeOneReaderOperationUnderTwoTags() throws Exception {
+        var codec = ServiceLoader.load(BodyCodec.class).stream().map(ServiceLoader.Provider::get)
+                .filter(candidate -> candidate.supports("application/json")).findFirst().orElseThrow();
+        var password = UUID.randomUUID().toString();
+        try (var client = TestClient.start(BooksApi.create(DocsAccess.requirePassword(password)))) {
+            for (var path : List.of("/openapi.json", "/swagger.json")) {
+                var response = get(client, path, basic("docs", password));
+                assertThat(response.status()).as(path).isEqualTo(200);
+                var document = codec.decode(ByteBuffer.wrap((byte[]) response.body()), Map.class);
+                var paths = (Map<?, ?>) document.get("paths");
+                var reader = (Map<?, ?>) paths.get("/readers/{name}");
+                assertThat(reader.keySet()).as(path).hasSize(1);
+                var operation = (Map<?, ?>) reader.get("put");
+                assertThat(operation.get("operationId")).isEqualTo("saveReader");
+                assertThat(operation.get("tags")).isEqualTo(List.of("readers", "people"));
+            }
+        }
+    }
+
     private static String text(Response response) {
         return new String((byte[]) response.body(), StandardCharsets.UTF_8);
     }
