@@ -1,11 +1,15 @@
 package consumer;
 
 import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.http.Body;
+import com.jsgalactic.axiom.http.Request;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /** Starts an application from published artifacts and checks a plain and a JSON response. */
@@ -24,6 +28,7 @@ public final class Smoke {
      * @throws Exception if the application misbehaves
      */
     public static void main(String[] args) throws Exception {
+        checkRequestContract();
         var app = Axiom.create();
         try {
             app.get("/", ctx -> "Hello, world!");
@@ -46,6 +51,24 @@ public final class Smoke {
             server.termination().toCompletableFuture().get(10, TimeUnit.SECONDS);
             System.out.println("SMOKE OK");
         } finally { app.close(); }
+    }
+
+    private static void checkRequestContract() {
+        var body = Body.empty();
+        var headers = Map.of("Accept", "text/plain");
+        var peer = new InetSocketAddress("127.0.0.1", 1234);
+        var request = new Request("GET", "/", "q=1", headers, body, peer, true);
+        expect(!Request.class.isRecord() && java.lang.reflect.Modifier.isFinal(Request.class.getModifiers()), "Request shape");
+        expect(request.method().equals("GET") && request.path().equals("/") && request.query().equals("q=1"), "request target");
+        expect(request.headers().equals(headers) && request.body() == body, "request content");
+        expect(request.remoteAddress().equals(peer) && request.tls() && request.isSecure(), "request transport");
+        expect(new Request("GET", "/").equals(Request.get("/")), "two-argument constructor");
+        expect(new Request("GET", "/", headers, body).equals(Request.get("/").withHeaders(headers)), "four-argument constructor");
+        expect(new Request("GET", "/", "q=1", headers, body)
+                .equals(Request.fromTarget("GET", "/?q=1").withHeaders(headers).withBody(body)), "five-argument constructor");
+        expect(new Request("GET", "/", "q=1", headers, body, peer).withTls(true).equals(request), "six-argument constructor");
+        var equal = request.withHeaders(Map.of("accept", "text/plain"));
+        expect(request.equals(equal) && request.hashCode() == equal.hashCode(), "request equality and hash code");
     }
 
     private static void expect(boolean condition, String message) {

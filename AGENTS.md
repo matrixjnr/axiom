@@ -9,6 +9,7 @@
   coordination instead of sleeps. Run `./gradlew clean check` and relevant examples.
 - Keep core independent of server, transport, and serialization implementations.
 - Use feature branches and PRs. Main is protected; do not weaken its protection or rewrite history.
+  Name branches for their purpose without a `codex/` or `feature/` prefix.
 - Track limitations as issues. List every material limitation of a change in the PR description
   and file one issue per limitation (label `limitation`) in the same change; link each from the
   limitations index issue (#13) and from the PR. A PR that fixes a limitation closes its issue
