@@ -3,6 +3,9 @@ plugins {
     signing
 }
 
+// Every published Java module has a reviewed API baseline, including modules with no exports.
+pluginManager.withPlugin("java") { pluginManager.apply("axiom.api-signatures") }
+
 val descriptions = mapOf(
     "axiom" to "Axiom starter: the core API, HTTP server and JSON codec in one dependency.",
     "axiom-core" to "Axiom application contracts, HTTP request/response values and bootstrap SPI.",

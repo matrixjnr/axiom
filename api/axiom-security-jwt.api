@@ -1,0 +1,143 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.security.jwt.JwksOptions {
+  public com.jsgalactic.axiom.security.jwt.JwksOptions defaultAlgorithm(com.jsgalactic.axiom.security.jwt.JwsAlgorithm);
+    descriptor: (Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;)Lcom/jsgalactic/axiom/security/jwt/JwksOptions;
+  public com.jsgalactic.axiom.security.jwt.JwksOptions maxBytes(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/security/jwt/JwksOptions;
+  public com.jsgalactic.axiom.security.jwt.JwksOptions maxStale(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/jwt/JwksOptions;
+  public com.jsgalactic.axiom.security.jwt.JwksOptions minRefreshInterval(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/jwt/JwksOptions;
+  public com.jsgalactic.axiom.security.jwt.JwksOptions refreshInterval(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/jwt/JwksOptions;
+  public static com.jsgalactic.axiom.security.jwt.JwksOptions defaults();
+    descriptor: ()Lcom/jsgalactic/axiom/security/jwt/JwksOptions;
+}
+
+public interface com.jsgalactic.axiom.security.jwt.JwksSource {
+  public abstract byte[] fetch(int) throws java.io.IOException;
+    descriptor: (I)[B
+  public static com.jsgalactic.axiom.security.jwt.JwksSource file(java.nio.file.Path);
+    descriptor: (Ljava/nio/file/Path;)Lcom/jsgalactic/axiom/security/jwt/JwksSource;
+  public static com.jsgalactic.axiom.security.jwt.JwksSource url(java.net.URI);
+    descriptor: (Ljava/net/URI;)Lcom/jsgalactic/axiom/security/jwt/JwksSource;
+  public static com.jsgalactic.axiom.security.jwt.JwksSource url(java.net.URI, java.time.Duration);
+    descriptor: (Ljava/net/URI;Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/jwt/JwksSource;
+}
+
+public final class com.jsgalactic.axiom.security.jwt.JwsAlgorithm extends java.lang.Enum<com.jsgalactic.axiom.security.jwt.JwsAlgorithm> {
+  public static com.jsgalactic.axiom.security.jwt.JwsAlgorithm valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static com.jsgalactic.axiom.security.jwt.JwsAlgorithm[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm ES256;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm ES384;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm ES512;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm EdDSA;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm HS256;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm HS384;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm HS512;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm PS256;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm PS384;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm PS512;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm RS256;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm RS384;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+  public static final com.jsgalactic.axiom.security.jwt.JwsAlgorithm RS512;
+    descriptor: Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;
+}
+
+public final class com.jsgalactic.axiom.security.jwt.JwtAuthenticator implements com.jsgalactic.axiom.security.Authenticator {
+  public boolean refreshKeys();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.context.SecurityIdentity verify(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/context/SecurityIdentity;
+  public java.lang.String challenge();
+    descriptor: ()Ljava/lang/String;
+  public java.util.Optional<com.jsgalactic.axiom.context.SecurityIdentity> authenticate(com.jsgalactic.axiom.http.Request);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Ljava/util/Optional;
+  public static com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+}
+
+public static final class com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder {
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator build();
+    descriptor: ()Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder attributes(java.util.function.Function<com.jsgalactic.axiom.security.jwt.JwtClaims, java.util.Map<java.lang.String, java.lang.String>>);
+    descriptor: (Ljava/util/function/Function;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder audience(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder clock(java.time.Clock);
+    descriptor: (Ljava/time/Clock;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder clockSkew(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder exposeClaims(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder hmacKey(com.jsgalactic.axiom.security.jwt.JwsAlgorithm, byte[]);
+    descriptor: (Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;[B)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder hmacKey(java.lang.String, com.jsgalactic.axiom.security.jwt.JwsAlgorithm, byte[]);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;[B)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder issuer(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder jwks(com.jsgalactic.axiom.security.jwt.JwksSource);
+    descriptor: (Lcom/jsgalactic/axiom/security/jwt/JwksSource;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder jwks(com.jsgalactic.axiom.security.jwt.JwksSource, com.jsgalactic.axiom.security.jwt.JwksOptions);
+    descriptor: (Lcom/jsgalactic/axiom/security/jwt/JwksSource;Lcom/jsgalactic/axiom/security/jwt/JwksOptions;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder maxTokenLength(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder permissionsClaim(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder publicKey(com.jsgalactic.axiom.security.jwt.JwsAlgorithm, java.security.PublicKey);
+    descriptor: (Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;Ljava/security/PublicKey;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder publicKey(java.lang.String, com.jsgalactic.axiom.security.jwt.JwsAlgorithm, java.security.PublicKey);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/security/jwt/JwsAlgorithm;Ljava/security/PublicKey;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder realm(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder rolesClaim(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+  public com.jsgalactic.axiom.security.jwt.JwtAuthenticator$Builder tokenCheck(com.jsgalactic.axiom.security.jwt.TokenCheck);
+    descriptor: (Lcom/jsgalactic/axiom/security/jwt/TokenCheck;)Lcom/jsgalactic/axiom/security/jwt/JwtAuthenticator$Builder;
+}
+
+public final class com.jsgalactic.axiom.security.jwt.JwtClaims {
+  public boolean has(java.lang.String);
+    descriptor: (Ljava/lang/String;)Z
+  public java.lang.String issuer();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String subject();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Instant expiresAt();
+    descriptor: ()Ljava/time/Instant;
+  public java.util.List<java.lang.String> strings(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/List;
+  public java.util.Optional<java.lang.Boolean> bool(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> id();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> string(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> text(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public java.util.OptionalLong number(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/OptionalLong;
+  public java.util.Set<java.lang.String> names();
+    descriptor: ()Ljava/util/Set;
+}
+
+public interface com.jsgalactic.axiom.security.jwt.TokenCheck {
+  public abstract boolean accept(com.jsgalactic.axiom.security.jwt.JwtClaims);
+    descriptor: (Lcom/jsgalactic/axiom/security/jwt/JwtClaims;)Z
+}

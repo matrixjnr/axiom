@@ -1,0 +1,78 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.metrics.MetricsRegistry implements com.jsgalactic.axiom.observability.Metrics {
+  public com.jsgalactic.axiom.metrics.MetricsRegistry$TimerSnapshot timerSnapshot(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/metrics/MetricsRegistry$TimerSnapshot;
+  public com.jsgalactic.axiom.observability.Metrics$Counter counter(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Counter;
+  public com.jsgalactic.axiom.observability.Metrics$Gauge gauge(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Gauge;
+  public com.jsgalactic.axiom.observability.Metrics$Timer timer(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Timer;
+  public int seriesCount();
+    descriptor: ()I
+  public java.util.List<java.time.Duration> timerBuckets(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/List;
+  public java.util.Optional<java.lang.String> help(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public long counterValue(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)J
+  public long droppedSeries();
+    descriptor: ()J
+  public long gaugeValue(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)J
+  public static com.jsgalactic.axiom.metrics.MetricsRegistry create();
+    descriptor: ()Lcom/jsgalactic/axiom/metrics/MetricsRegistry;
+  public static com.jsgalactic.axiom.metrics.MetricsRegistry create(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/metrics/MetricsRegistry;
+  public static com.jsgalactic.axiom.metrics.MetricsRegistry$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/metrics/MetricsRegistry$Builder;
+  public static final int DEFAULT_MAX_SERIES = 4096;
+    descriptor: I
+  public static final int MAX_BUCKETS = 64;
+    descriptor: I
+  public static final int MAX_HELP_LENGTH = 512;
+    descriptor: I
+  public static final int MAX_NAME_LENGTH = 100;
+    descriptor: I
+  public static final int MAX_VALUE_LENGTH = 256;
+    descriptor: I
+  public static final java.util.List<java.time.Duration> DEFAULT_BUCKETS;
+    descriptor: Ljava/util/List;
+}
+
+public static final class com.jsgalactic.axiom.metrics.MetricsRegistry$Builder {
+  public com.jsgalactic.axiom.metrics.MetricsRegistry build();
+    descriptor: ()Lcom/jsgalactic/axiom/metrics/MetricsRegistry;
+  public com.jsgalactic.axiom.metrics.MetricsRegistry$Builder help(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/metrics/MetricsRegistry$Builder;
+  public com.jsgalactic.axiom.metrics.MetricsRegistry$Builder maxSeries(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/metrics/MetricsRegistry$Builder;
+  public com.jsgalactic.axiom.metrics.MetricsRegistry$Builder timerBuckets(java.lang.String, java.util.List<java.time.Duration>);
+    descriptor: (Ljava/lang/String;Ljava/util/List;)Lcom/jsgalactic/axiom/metrics/MetricsRegistry$Builder;
+  public com.jsgalactic.axiom.metrics.MetricsRegistry$Builder timerBuckets(java.util.List<java.time.Duration>);
+    descriptor: (Ljava/util/List;)Lcom/jsgalactic/axiom/metrics/MetricsRegistry$Builder;
+}
+
+public static final class com.jsgalactic.axiom.metrics.MetricsRegistry$TimerSnapshot extends java.lang.Record {
+  public com.jsgalactic.axiom.metrics.MetricsRegistry$TimerSnapshot(long, long);
+    descriptor: (JJ)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public long count();
+    descriptor: ()J
+  public long totalNanos();
+    descriptor: ()J
+}
+
+public final class com.jsgalactic.axiom.metrics.PrometheusText {
+  public static com.jsgalactic.axiom.context.Handler handler(com.jsgalactic.axiom.metrics.MetricsRegistry);
+    descriptor: (Lcom/jsgalactic/axiom/metrics/MetricsRegistry;)Lcom/jsgalactic/axiom/context/Handler;
+  public static final java.lang.String CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8";
+    descriptor: Ljava/lang/String;
+  public static java.lang.String render(com.jsgalactic.axiom.metrics.MetricsRegistry);
+    descriptor: (Lcom/jsgalactic/axiom/metrics/MetricsRegistry;)Ljava/lang/String;
+}

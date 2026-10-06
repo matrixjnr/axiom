@@ -1,0 +1,157 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.validation.Constraint extends java.lang.Record {
+  public com.jsgalactic.axiom.validation.Constraint$Kind kind();
+    descriptor: ()Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public com.jsgalactic.axiom.validation.Constraint(com.jsgalactic.axiom.validation.Constraint$Kind, long, long, java.lang.String, java.util.List<java.lang.String>);
+    descriptor: (Lcom/jsgalactic/axiom/validation/Constraint$Kind;JJLjava/lang/String;Ljava/util/List;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String pattern();
+    descriptor: ()Ljava/lang/String;
+  public java.util.List<java.lang.String> values();
+    descriptor: ()Ljava/util/List;
+  public long max();
+    descriptor: ()J
+  public long min();
+    descriptor: ()J
+}
+
+public static final class com.jsgalactic.axiom.validation.Constraint$Kind extends java.lang.Enum<com.jsgalactic.axiom.validation.Constraint$Kind> {
+  public static com.jsgalactic.axiom.validation.Constraint$Kind valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static com.jsgalactic.axiom.validation.Constraint$Kind[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind EMAIL;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind LENGTH;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind NOT_BLANK;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind NOT_EMPTY;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind NOT_NULL;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind ONE_OF;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind PATTERN;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind RANGE;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+  public static final com.jsgalactic.axiom.validation.Constraint$Kind SIZE;
+    descriptor: Lcom/jsgalactic/axiom/validation/Constraint$Kind;
+}
+
+public final class com.jsgalactic.axiom.validation.FieldPath {
+  public boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public boolean isRoot();
+    descriptor: ()Z
+  public boolean isTruncated();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.validation.FieldPath append(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/FieldPath;
+  public com.jsgalactic.axiom.validation.FieldPath index(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/validation/FieldPath;
+  public com.jsgalactic.axiom.validation.FieldPath property(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/FieldPath;
+  public int hashCode();
+    descriptor: ()I
+  public java.lang.String toField();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public static boolean isPropertyName(java.lang.String);
+    descriptor: (Ljava/lang/String;)Z
+  public static com.jsgalactic.axiom.validation.FieldPath root();
+    descriptor: ()Lcom/jsgalactic/axiom/validation/FieldPath;
+  public static final int MAX_LENGTH = 256;
+    descriptor: I
+  public static final java.lang.String ROOT = "";
+    descriptor: Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.validation.Rule<T> {
+  public boolean test(T);
+    descriptor: (Ljava/lang/Object;)Z
+  public com.jsgalactic.axiom.validation.Rule<T> withCode(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/Rule;
+  public java.lang.String code();
+    descriptor: ()Ljava/lang/String;
+  public java.util.Optional<com.jsgalactic.axiom.validation.Constraint> constraint();
+    descriptor: ()Ljava/util/Optional;
+  public static <T> com.jsgalactic.axiom.validation.Rule<T> check(java.util.function.Predicate<? super T>, java.lang.String);
+    descriptor: (Ljava/util/function/Predicate;Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/Rule;
+  public static <T> com.jsgalactic.axiom.validation.Rule<T> checkNullable(java.util.function.Predicate<? super T>, java.lang.String);
+    descriptor: (Ljava/util/function/Predicate;Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.CharSequence> email();
+    descriptor: ()Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.CharSequence> length(int, int);
+    descriptor: (II)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.CharSequence> maxLength(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.CharSequence> minLength(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.CharSequence> notBlank();
+    descriptor: ()Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.CharSequence> oneOf(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.CharSequence> pattern(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.CharSequence> pattern(java.lang.String, int);
+    descriptor: (Ljava/lang/String;I)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.Number> max(long);
+    descriptor: (J)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.Number> min(long);
+    descriptor: (J)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.Number> range(long, long);
+    descriptor: (JJ)Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.Object> notEmpty();
+    descriptor: ()Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.lang.Object> notNull();
+    descriptor: ()Lcom/jsgalactic/axiom/validation/Rule;
+  public static com.jsgalactic.axiom.validation.Rule<java.util.Collection<?>> size(int, int);
+    descriptor: (II)Lcom/jsgalactic/axiom/validation/Rule;
+  public static final int DEFAULT_PATTERN_INPUT_LIMIT = 1000;
+    descriptor: I
+}
+
+public final class com.jsgalactic.axiom.validation.Rules<T> implements com.jsgalactic.axiom.validation.Validator<T> {
+  public <E> com.jsgalactic.axiom.validation.Rules<T> eachNested(java.lang.String, java.util.function.Function<? super T, ? extends java.util.List<? extends E>>, com.jsgalactic.axiom.validation.Validator<? super E>);
+    descriptor: (Ljava/lang/String;Ljava/util/function/Function;Lcom/jsgalactic/axiom/validation/Validator;)Lcom/jsgalactic/axiom/validation/Rules;
+  public <V> com.jsgalactic.axiom.validation.Rules<T> nested(java.lang.String, java.util.function.Function<? super T, ? extends V>, com.jsgalactic.axiom.validation.Validator<? super V>);
+    descriptor: (Ljava/lang/String;Ljava/util/function/Function;Lcom/jsgalactic/axiom/validation/Validator;)Lcom/jsgalactic/axiom/validation/Rules;
+  public com.jsgalactic.axiom.validation.Rules<T> check(java.lang.String, java.util.function.Predicate<? super T>, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/util/function/Predicate;Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/Rules;
+  public com.jsgalactic.axiom.validation.Rules<T> check(java.util.function.Predicate<? super T>, java.lang.String);
+    descriptor: (Ljava/util/function/Predicate;Ljava/lang/String;)Lcom/jsgalactic/axiom/validation/Rules;
+  public com.jsgalactic.axiom.validation.Rules<T> include(com.jsgalactic.axiom.validation.Validator<? super T>);
+    descriptor: (Lcom/jsgalactic/axiom/validation/Validator;)Lcom/jsgalactic/axiom/validation/Rules;
+  public final <E> com.jsgalactic.axiom.validation.Rules<T> each(java.lang.String, java.util.function.Function<? super T, ? extends java.util.List<? extends E>>, com.jsgalactic.axiom.validation.Rule<? super E>...);
+    descriptor: (Ljava/lang/String;Ljava/util/function/Function;[Lcom/jsgalactic/axiom/validation/Rule;)Lcom/jsgalactic/axiom/validation/Rules;
+  public final <V> com.jsgalactic.axiom.validation.Rules<T> field(java.lang.String, java.util.function.Function<? super T, ? extends V>, com.jsgalactic.axiom.validation.Rule<? super V>...);
+    descriptor: (Ljava/lang/String;Ljava/util/function/Function;[Lcom/jsgalactic/axiom/validation/Rule;)Lcom/jsgalactic/axiom/validation/Rules;
+  public java.util.List<com.jsgalactic.axiom.error.Violation> validate(T);
+    descriptor: (Ljava/lang/Object;)Ljava/util/List;
+  public java.util.Map<java.lang.String, java.util.List<com.jsgalactic.axiom.validation.Constraint>> constraints();
+    descriptor: ()Ljava/util/Map;
+  public static <T> com.jsgalactic.axiom.validation.Rules<T> of(java.lang.Class<T>);
+    descriptor: (Ljava/lang/Class;)Lcom/jsgalactic/axiom/validation/Rules;
+}
+
+public final class com.jsgalactic.axiom.validation.Validation {
+  public static <T> T require(com.jsgalactic.axiom.validation.Validator<? super T>, T);
+    descriptor: (Lcom/jsgalactic/axiom/validation/Validator;Ljava/lang/Object;)Ljava/lang/Object;
+  public static final int MAX_VIOLATIONS = 100;
+    descriptor: I
+}
+
+public interface com.jsgalactic.axiom.validation.Validator<T> extends com.jsgalactic.axiom.context.BodyValidator<T> {
+  public abstract java.util.List<com.jsgalactic.axiom.error.Violation> validate(T);
+    descriptor: (Ljava/lang/Object;)Ljava/util/List;
+  public default com.jsgalactic.axiom.validation.Validator<T> and(com.jsgalactic.axiom.validation.Validator<? super T>);
+    descriptor: (Lcom/jsgalactic/axiom/validation/Validator;)Lcom/jsgalactic/axiom/validation/Validator;
+}

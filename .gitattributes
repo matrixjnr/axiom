@@ -3,6 +3,7 @@
 gradlew text eol=lf
 *.bat text eol=crlf
 *.jar binary
+*.api text eol=lf
 /axiom-openapi/src/test/resources/golden/*.json text eol=lf
 
 # Every change adds a bullet under "Unreleased"; keep both sides when branches merge.

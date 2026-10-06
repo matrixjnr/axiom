@@ -6,6 +6,14 @@ nav_order: 3
 
 # Build decisions
 
+## API review gate
+
+Every published Java module runs `apiCheck` during `check`. It compares compiled declarations
+and JVM descriptors against reviewed `api/*.api` baselines using the Java 21 toolchain. See
+[API compatibility](api-compatibility.md) for update commands, review policy and coverage limits.
+
+## Toolchain and dependencies
+
 Axiom uses Gradle Kotlin DSL with Java 21 toolchains and `--release 21`, without
 preview features. The wrapper pins Gradle 9.5.1 and verifies its distribution
 checksum. Convention plugins share compilation, JUnit Platform, sources/Javadoc
