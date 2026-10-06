@@ -1,0 +1,1477 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.Axiom {
+  public static com.jsgalactic.axiom.application.Application create();
+    descriptor: ()Lcom/jsgalactic/axiom/application/Application;
+}
+
+public interface com.jsgalactic.axiom.application.Application extends com.jsgalactic.axiom.routing.RouteGroup,java.lang.AutoCloseable {
+  public abstract <E extends java.lang.Exception> com.jsgalactic.axiom.application.Application error(java.lang.Class<E>, com.jsgalactic.axiom.context.ErrorHandler<? super E>);
+    descriptor: (Ljava/lang/Class;Lcom/jsgalactic/axiom/context/ErrorHandler;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application admissionPolicy(com.jsgalactic.axiom.execution.AdmissionPolicy);
+    descriptor: (Lcom/jsgalactic/axiom/execution/AdmissionPolicy;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application admissionPolicy(com.jsgalactic.axiom.routing.Route, com.jsgalactic.axiom.execution.AdmissionPolicy);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;Lcom/jsgalactic/axiom/execution/AdmissionPolicy;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application closeOnJvmShutdown();
+    descriptor: ()Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application closeOnJvmShutdown(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application describe(com.jsgalactic.axiom.routing.Route, com.jsgalactic.axiom.routing.RouteDoc);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;Lcom/jsgalactic/axiom/routing/RouteDoc;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application developmentErrors();
+    descriptor: ()Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application failureLog(java.lang.System$Logger, java.lang.System$Logger$Level);
+    descriptor: (Ljava/lang/System$Logger;Ljava/lang/System$Logger$Level;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application group(java.lang.String, java.util.function.Consumer<com.jsgalactic.axiom.routing.RouteGroup>);
+    descriptor: (Ljava/lang/String;Ljava/util/function/Consumer;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application maxRequestBody(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application methodNotAllowed(com.jsgalactic.axiom.context.Handler);
+    descriptor: (Lcom/jsgalactic/axiom/context/Handler;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application metrics(com.jsgalactic.axiom.observability.Metrics);
+    descriptor: (Lcom/jsgalactic/axiom/observability/Metrics;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application notFound(com.jsgalactic.axiom.context.Handler);
+    descriptor: (Lcom/jsgalactic/axiom/context/Handler;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application notImplemented(com.jsgalactic.axiom.context.Handler);
+    descriptor: (Lcom/jsgalactic/axiom/context/Handler;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application onDrain(java.lang.Runnable);
+    descriptor: (Ljava/lang/Runnable;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application recognizeMethods(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application requestTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application start();
+    descriptor: ()Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application use(com.jsgalactic.axiom.context.Middleware);
+    descriptor: (Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application$State state();
+    descriptor: ()Lcom/jsgalactic/axiom/application/Application$State;
+  public abstract com.jsgalactic.axiom.execution.AdmissionPolicy admissionPolicy();
+    descriptor: ()Lcom/jsgalactic/axiom/execution/AdmissionPolicy;
+  public abstract com.jsgalactic.axiom.execution.AdmissionPolicy admissionPolicy(com.jsgalactic.axiom.routing.Route);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;)Lcom/jsgalactic/axiom/execution/AdmissionPolicy;
+  public abstract com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.http.Request) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Lcom/jsgalactic/axiom/http/Response;
+  public abstract com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.http.Request, com.jsgalactic.axiom.execution.ExecutionContext) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;Lcom/jsgalactic/axiom/execution/ExecutionContext;)Lcom/jsgalactic/axiom/http/Response;
+  public abstract com.jsgalactic.axiom.lifecycle.Server listen(java.net.InetSocketAddress, com.jsgalactic.axiom.lifecycle.ListenerOptions) throws java.io.IOException;
+    descriptor: (Ljava/net/InetSocketAddress;Lcom/jsgalactic/axiom/lifecycle/ListenerOptions;)Lcom/jsgalactic/axiom/lifecycle/Server;
+  public abstract com.jsgalactic.axiom.observability.Metrics metrics();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/Metrics;
+  public abstract com.jsgalactic.axiom.routing.Route route(java.lang.String, java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public abstract int maxRequestBody();
+    descriptor: ()I
+  public abstract java.time.Duration requestTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public abstract java.util.List<com.jsgalactic.axiom.routing.Route> routes();
+    descriptor: ()Ljava/util/List;
+  public abstract java.util.Optional<com.jsgalactic.axiom.routing.Route> resolve(com.jsgalactic.axiom.http.Request);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Ljava/util/Optional;
+  public abstract java.util.Optional<com.jsgalactic.axiom.routing.RouteDoc> doc(com.jsgalactic.axiom.routing.Route);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;)Ljava/util/Optional;
+  public abstract void close();
+    descriptor: ()V
+  public default com.jsgalactic.axiom.lifecycle.Server listen(int) throws java.io.IOException;
+    descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/Server;
+  public default com.jsgalactic.axiom.lifecycle.Server listen(java.net.InetSocketAddress) throws java.io.IOException;
+    descriptor: (Ljava/net/InetSocketAddress;)Lcom/jsgalactic/axiom/lifecycle/Server;
+  public default com.jsgalactic.axiom.routing.RouteGroup error(java.lang.Class, com.jsgalactic.axiom.context.ErrorHandler);
+    descriptor: (Ljava/lang/Class;Lcom/jsgalactic/axiom/context/ErrorHandler;)Lcom/jsgalactic/axiom/routing/RouteGroup;
+  public default com.jsgalactic.axiom.routing.RouteGroup group(java.lang.String, java.util.function.Consumer);
+    descriptor: (Ljava/lang/String;Ljava/util/function/Consumer;)Lcom/jsgalactic/axiom/routing/RouteGroup;
+  public default com.jsgalactic.axiom.routing.RouteGroup use(com.jsgalactic.axiom.context.Middleware);
+    descriptor: (Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/RouteGroup;
+}
+
+public static final class com.jsgalactic.axiom.application.Application$State extends java.lang.Enum<com.jsgalactic.axiom.application.Application$State> {
+  public static com.jsgalactic.axiom.application.Application$State valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/application/Application$State;
+  public static com.jsgalactic.axiom.application.Application$State[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/application/Application$State;
+  public static final com.jsgalactic.axiom.application.Application$State CLOSED;
+    descriptor: Lcom/jsgalactic/axiom/application/Application$State;
+  public static final com.jsgalactic.axiom.application.Application$State CONFIGURING;
+    descriptor: Lcom/jsgalactic/axiom/application/Application$State;
+  public static final com.jsgalactic.axiom.application.Application$State RUNNING;
+    descriptor: Lcom/jsgalactic/axiom/application/Application$State;
+}
+
+public interface com.jsgalactic.axiom.application.spi.ApplicationProvider {
+  public abstract com.jsgalactic.axiom.application.Application create();
+    descriptor: ()Lcom/jsgalactic/axiom/application/Application;
+}
+
+public interface com.jsgalactic.axiom.codec.spi.BodyCodec {
+  public abstract <T> T decode(byte[], java.lang.Class<T>);
+    descriptor: ([BLjava/lang/Class;)Ljava/lang/Object;
+  public abstract byte[] encode(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)[B
+  public abstract java.util.Set<java.lang.String> mediaTypes();
+    descriptor: ()Ljava/util/Set;
+  public default <T> T decode(java.nio.ByteBuffer, java.lang.Class<T>);
+    descriptor: (Ljava/nio/ByteBuffer;Ljava/lang/Class;)Ljava/lang/Object;
+  public default boolean supports(java.lang.String);
+    descriptor: (Ljava/lang/String;)Z
+}
+
+public interface com.jsgalactic.axiom.context.BodyValidator<T> {
+  public abstract java.util.List<com.jsgalactic.axiom.error.Violation> validate(T);
+    descriptor: (Ljava/lang/Object;)Ljava/util/List;
+}
+
+public interface com.jsgalactic.axiom.context.Context {
+  public abstract <T> T body(java.lang.Class<T>);
+    descriptor: (Ljava/lang/Class;)Ljava/lang/Object;
+  public abstract com.jsgalactic.axiom.context.Context status(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/context/Context;
+  public abstract com.jsgalactic.axiom.execution.ExecutionContext execution();
+    descriptor: ()Lcom/jsgalactic/axiom/execution/ExecutionContext;
+  public abstract com.jsgalactic.axiom.http.Request request();
+    descriptor: ()Lcom/jsgalactic/axiom/http/Request;
+  public abstract com.jsgalactic.axiom.http.Response response(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Lcom/jsgalactic/axiom/http/Response;
+  public abstract com.jsgalactic.axiom.routing.Route route();
+    descriptor: ()Lcom/jsgalactic/axiom/routing/Route;
+  public abstract java.lang.String path(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/lang/String;
+  public abstract java.util.Map<java.lang.String, java.lang.String> pathParameters();
+    descriptor: ()Ljava/util/Map;
+  public default <T> T validatedBody(java.lang.Class<T>, com.jsgalactic.axiom.context.BodyValidator<? super T>);
+    descriptor: (Ljava/lang/Class;Lcom/jsgalactic/axiom/context/BodyValidator;)Ljava/lang/Object;
+  public default com.jsgalactic.axiom.context.Context identity(com.jsgalactic.axiom.context.SecurityIdentity);
+    descriptor: (Lcom/jsgalactic/axiom/context/SecurityIdentity;)Lcom/jsgalactic/axiom/context/Context;
+  public default com.jsgalactic.axiom.http.Response automaticOptions();
+    descriptor: ()Lcom/jsgalactic/axiom/http/Response;
+  public default com.jsgalactic.axiom.http.Response json(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Lcom/jsgalactic/axiom/http/Response;
+  public default com.jsgalactic.axiom.http.Response noContent();
+    descriptor: ()Lcom/jsgalactic/axiom/http/Response;
+  public default com.jsgalactic.axiom.http.Response problem(com.jsgalactic.axiom.error.AxiomException);
+    descriptor: (Lcom/jsgalactic/axiom/error/AxiomException;)Lcom/jsgalactic/axiom/http/Response;
+  public default com.jsgalactic.axiom.http.Response redirect(int, java.lang.String);
+    descriptor: (ILjava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public default com.jsgalactic.axiom.http.Response text(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public default int pathInt(java.lang.String);
+    descriptor: (Ljava/lang/String;)I
+  public default java.lang.String correlation();
+    descriptor: ()Ljava/lang/String;
+  public default java.lang.String method();
+    descriptor: ()Ljava/lang/String;
+  public default java.lang.String path();
+    descriptor: ()Ljava/lang/String;
+  public default java.lang.String pathDecoded(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/lang/String;
+  public default java.util.List<java.lang.String> queryAll(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/List;
+  public default java.util.Optional<com.jsgalactic.axiom.context.SecurityIdentity> identity();
+    descriptor: ()Ljava/util/Optional;
+  public default java.util.Optional<com.jsgalactic.axiom.observability.TraceContext> traceContext();
+    descriptor: ()Ljava/util/Optional;
+  public default java.util.Optional<com.jsgalactic.axiom.routing.Route> matchedRoute();
+    descriptor: ()Ljava/util/Optional;
+  public default java.util.Optional<java.lang.Integer> queryInt(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public default java.util.Optional<java.lang.Long> queryLong(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public default java.util.Optional<java.lang.String> header(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public default java.util.Optional<java.lang.String> query(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public default java.util.Optional<java.util.UUID> queryUuid(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public default java.util.UUID pathUuid(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/UUID;
+  public default long pathLong(java.lang.String);
+    descriptor: (Ljava/lang/String;)J
+}
+
+public interface com.jsgalactic.axiom.context.ErrorHandler<E extends java.lang.Exception> {
+  public abstract com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.context.Context, E) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Ljava/lang/Exception;)Lcom/jsgalactic/axiom/http/Response;
+}
+
+public interface com.jsgalactic.axiom.context.Handler {
+  public abstract java.lang.Object handle(com.jsgalactic.axiom.context.Context) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Ljava/lang/Object;
+}
+
+public interface com.jsgalactic.axiom.context.Middleware {
+  public abstract com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.context.Middleware$Next) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/context/Middleware$Next;)Lcom/jsgalactic/axiom/http/Response;
+  public default com.jsgalactic.axiom.http.Response afterError(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.http.Response);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/http/Response;)Lcom/jsgalactic/axiom/http/Response;
+}
+
+public static interface com.jsgalactic.axiom.context.Middleware$Next {
+  public abstract com.jsgalactic.axiom.http.Response run() throws java.lang.Exception;
+    descriptor: ()Lcom/jsgalactic/axiom/http/Response;
+}
+
+public final class com.jsgalactic.axiom.context.SecurityIdentity extends java.lang.Record {
+  public boolean hasPermission(java.lang.String);
+    descriptor: (Ljava/lang/String;)Z
+  public boolean hasRole(java.lang.String);
+    descriptor: (Ljava/lang/String;)Z
+  public com.jsgalactic.axiom.context.SecurityIdentity withAttributes(java.util.Map<java.lang.String, java.lang.String>);
+    descriptor: (Ljava/util/Map;)Lcom/jsgalactic/axiom/context/SecurityIdentity;
+  public com.jsgalactic.axiom.context.SecurityIdentity(java.lang.String, java.util.Set<java.lang.String>, java.util.Set<java.lang.String>);
+    descriptor: (Ljava/lang/String;Ljava/util/Set;Ljava/util/Set;)V
+  public com.jsgalactic.axiom.context.SecurityIdentity(java.lang.String, java.util.Set<java.lang.String>, java.util.Set<java.lang.String>, java.util.Map<java.lang.String, java.lang.String>);
+    descriptor: (Ljava/lang/String;Ljava/util/Set;Ljava/util/Set;Ljava/util/Map;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public java.lang.String principal();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.util.Map<java.lang.String, java.lang.String> attributes();
+    descriptor: ()Ljava/util/Map;
+  public java.util.Optional<java.lang.String> attribute(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public java.util.Set<java.lang.String> permissions();
+    descriptor: ()Ljava/util/Set;
+  public java.util.Set<java.lang.String> roles();
+    descriptor: ()Ljava/util/Set;
+  public static com.jsgalactic.axiom.context.SecurityIdentity of(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/context/SecurityIdentity;
+}
+
+public abstract class com.jsgalactic.axiom.error.AxiomException extends java.lang.RuntimeException {
+  protected com.jsgalactic.axiom.error.AxiomException(int);
+    descriptor: (I)V
+  protected com.jsgalactic.axiom.error.AxiomException(int, java.lang.String);
+    descriptor: (ILjava/lang/String;)V
+  protected com.jsgalactic.axiom.error.AxiomException(int, java.lang.String, java.util.Map<java.lang.String, java.lang.String>);
+    descriptor: (ILjava/lang/String;Ljava/util/Map;)V
+  public final int status();
+    descriptor: ()I
+  public final java.lang.String code();
+    descriptor: ()Ljava/lang/String;
+  public final java.util.Map<java.lang.String, java.lang.String> headers();
+    descriptor: ()Ljava/util/Map;
+  public java.util.List<com.jsgalactic.axiom.error.Violation> violations();
+    descriptor: ()Ljava/util/List;
+}
+
+public class com.jsgalactic.axiom.error.BadGatewayException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.BadGatewayException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.BadGatewayException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.BadRequestException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.BadRequestException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.BadRequestException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.ConflictException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.ConflictException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.ConflictException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.DecodeException extends com.jsgalactic.axiom.error.BadRequestException {
+  public com.jsgalactic.axiom.error.DecodeException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+  public com.jsgalactic.axiom.error.DecodeException(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)V
+  public java.util.List<com.jsgalactic.axiom.error.Violation> violations();
+    descriptor: ()Ljava/util/List;
+  public java.util.Optional<java.lang.String> field();
+    descriptor: ()Ljava/util/Optional;
+}
+
+public class com.jsgalactic.axiom.error.ForbiddenException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.ForbiddenException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.ForbiddenException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.GatewayTimeoutException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.GatewayTimeoutException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.GatewayTimeoutException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.GoneException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.GoneException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.GoneException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.InternalServerErrorException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.InternalServerErrorException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.InternalServerErrorException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.LengthRequiredException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.LengthRequiredException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.LengthRequiredException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.MethodNotAllowedException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.MethodNotAllowedException(java.util.Set<java.lang.String>);
+    descriptor: (Ljava/util/Set;)V
+}
+
+public class com.jsgalactic.axiom.error.NotAcceptableException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.NotAcceptableException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.NotAcceptableException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.NotFoundException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.NotFoundException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.NotFoundException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.NotImplementedException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.NotImplementedException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.NotImplementedException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.PayloadTooLargeException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.PayloadTooLargeException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.PayloadTooLargeException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.PreconditionFailedException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.PreconditionFailedException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.PreconditionFailedException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.PreconditionRequiredException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.PreconditionRequiredException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.PreconditionRequiredException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.RequestHeaderFieldsTooLargeException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.RequestHeaderFieldsTooLargeException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.RequestHeaderFieldsTooLargeException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.RequestTimeoutException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.RequestTimeoutException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.RequestTimeoutException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.ServiceUnavailableException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.ServiceUnavailableException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.ServiceUnavailableException(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)V
+  public com.jsgalactic.axiom.error.ServiceUnavailableException(java.time.Duration, java.lang.String);
+    descriptor: (Ljava/time/Duration;Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.TooManyRequestsException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.TooManyRequestsException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.TooManyRequestsException(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)V
+  public com.jsgalactic.axiom.error.TooManyRequestsException(java.time.Duration, java.lang.String);
+    descriptor: (Ljava/time/Duration;Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.UnauthorizedException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.UnauthorizedException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+  public com.jsgalactic.axiom.error.UnauthorizedException(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.UnprocessableContentException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.UnprocessableContentException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.UnprocessableContentException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.UnsupportedMediaTypeException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.UnsupportedMediaTypeException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.UnsupportedMediaTypeException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.UriTooLongException extends com.jsgalactic.axiom.error.AxiomException {
+  public com.jsgalactic.axiom.error.UriTooLongException();
+    descriptor: ()V
+  public com.jsgalactic.axiom.error.UriTooLongException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public class com.jsgalactic.axiom.error.ValidationException extends com.jsgalactic.axiom.error.UnprocessableContentException {
+  public com.jsgalactic.axiom.error.ValidationException(java.util.List<com.jsgalactic.axiom.error.Violation>);
+    descriptor: (Ljava/util/List;)V
+  public java.util.List<com.jsgalactic.axiom.error.Violation> violations();
+    descriptor: ()Ljava/util/List;
+}
+
+public final class com.jsgalactic.axiom.error.Violation extends java.lang.Record {
+  public com.jsgalactic.axiom.error.Violation(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String code();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String field();
+    descriptor: ()Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.execution.AdmissionPolicy extends java.lang.Record {
+  public com.jsgalactic.axiom.execution.AdmissionPolicy(int, int, java.time.Duration);
+    descriptor: (IILjava/time/Duration;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public int maxActive();
+    descriptor: ()I
+  public int maxQueued();
+    descriptor: ()I
+  public java.time.Duration queueTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public static com.jsgalactic.axiom.execution.AdmissionPolicy reject(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/execution/AdmissionPolicy;
+  public static final int MAX_QUEUED_LIMIT = 100000;
+    descriptor: I
+}
+
+public final class com.jsgalactic.axiom.execution.AdmissionSnapshot extends java.lang.Record {
+  public com.jsgalactic.axiom.execution.AdmissionSnapshot(int, int, long, long, long);
+    descriptor: (IIJJJ)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public int active();
+    descriptor: ()I
+  public int queued();
+    descriptor: ()I
+  public long accepted();
+    descriptor: ()J
+  public long queueTimeouts();
+    descriptor: ()J
+  public long rejected();
+    descriptor: ()J
+}
+
+public final class com.jsgalactic.axiom.execution.ExecutionContext {
+  public boolean isDeadlineExtended();
+    descriptor: ()Z
+  public boolean isExpired();
+    descriptor: ()Z
+  public java.lang.String requestId();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Duration remainingTime();
+    descriptor: ()Ljava/time/Duration;
+  public static com.jsgalactic.axiom.execution.ExecutionContext create(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/execution/ExecutionContext;
+  public void extendDeadline(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)V
+}
+
+public final class com.jsgalactic.axiom.http.Body {
+  public boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public boolean isEmpty();
+    descriptor: ()Z
+  public byte[] bytes();
+    descriptor: ()[B
+  public int hashCode();
+    descriptor: ()I
+  public int length();
+    descriptor: ()I
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.nio.ByteBuffer asReadOnlyBuffer();
+    descriptor: ()Ljava/nio/ByteBuffer;
+  public java.util.Optional<java.lang.String> charset();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> contentType();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> mediaType();
+    descriptor: ()Ljava/util/Optional;
+  public static com.jsgalactic.axiom.http.Body empty();
+    descriptor: ()Lcom/jsgalactic/axiom/http/Body;
+  public static com.jsgalactic.axiom.http.Body of(java.lang.String, byte[]);
+    descriptor: (Ljava/lang/String;[B)Lcom/jsgalactic/axiom/http/Body;
+  public static com.jsgalactic.axiom.http.Body of(java.lang.String, java.nio.ByteBuffer...);
+    descriptor: (Ljava/lang/String;[Ljava/nio/ByteBuffer;)Lcom/jsgalactic/axiom/http/Body;
+  public static com.jsgalactic.axiom.http.Body$Builder builder(java.lang.String, int);
+    descriptor: (Ljava/lang/String;I)Lcom/jsgalactic/axiom/http/Body$Builder;
+}
+
+public static final class com.jsgalactic.axiom.http.Body$Builder {
+  public com.jsgalactic.axiom.http.Body build();
+    descriptor: ()Lcom/jsgalactic/axiom/http/Body;
+  public com.jsgalactic.axiom.http.Body$Builder capacity(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/http/Body$Builder;
+  public com.jsgalactic.axiom.http.Body$Builder write(java.nio.ByteBuffer);
+    descriptor: (Ljava/nio/ByteBuffer;)Lcom/jsgalactic/axiom/http/Body$Builder;
+  public int capacity();
+    descriptor: ()I
+  public int length();
+    descriptor: ()I
+}
+
+public interface com.jsgalactic.axiom.http.BodyWriter {
+  public abstract long bytesWritten();
+    descriptor: ()J
+  public abstract void write(byte[], int, int) throws java.io.IOException;
+    descriptor: ([BII)V
+  public default boolean shutdownRequested();
+    descriptor: ()Z
+  public default void onShutdown(java.lang.Runnable);
+    descriptor: (Ljava/lang/Runnable;)V
+  public default void write(byte[]) throws java.io.IOException;
+    descriptor: ([B)V
+  public default void write(java.lang.String) throws java.io.IOException;
+    descriptor: (Ljava/lang/String;)V
+}
+
+public interface com.jsgalactic.axiom.http.EventSink {
+  public abstract long bytesWritten();
+    descriptor: ()J
+  public abstract void comment(java.lang.String) throws java.io.IOException;
+    descriptor: (Ljava/lang/String;)V
+  public abstract void send(com.jsgalactic.axiom.http.ServerSentEvent) throws java.io.IOException;
+    descriptor: (Lcom/jsgalactic/axiom/http/ServerSentEvent;)V
+  public default boolean shutdownRequested();
+    descriptor: ()Z
+  public default void keepAlive() throws java.io.IOException;
+    descriptor: ()V
+  public default void onShutdown(java.lang.Runnable);
+    descriptor: (Ljava/lang/Runnable;)V
+  public default void send(java.lang.String) throws java.io.IOException;
+    descriptor: (Ljava/lang/String;)V
+  public static com.jsgalactic.axiom.http.EventSink of(com.jsgalactic.axiom.http.BodyWriter);
+    descriptor: (Lcom/jsgalactic/axiom/http/BodyWriter;)Lcom/jsgalactic/axiom/http/EventSink;
+}
+
+public interface com.jsgalactic.axiom.http.EventStreamBody {
+  public abstract void run(com.jsgalactic.axiom.http.EventSink) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/EventSink;)V
+}
+
+public final class com.jsgalactic.axiom.http.HttpStatus {
+  public static final int ACCEPTED = 202;
+    descriptor: I
+  public static final int BAD_GATEWAY = 502;
+    descriptor: I
+  public static final int BAD_REQUEST = 400;
+    descriptor: I
+  public static final int CONFLICT = 409;
+    descriptor: I
+  public static final int CONTENT_TOO_LARGE = 413;
+    descriptor: I
+  public static final int CREATED = 201;
+    descriptor: I
+  public static final int EXPECTATION_FAILED = 417;
+    descriptor: I
+  public static final int FORBIDDEN = 403;
+    descriptor: I
+  public static final int FOUND = 302;
+    descriptor: I
+  public static final int GATEWAY_TIMEOUT = 504;
+    descriptor: I
+  public static final int GONE = 410;
+    descriptor: I
+  public static final int HTTP_VERSION_NOT_SUPPORTED = 505;
+    descriptor: I
+  public static final int INTERNAL_SERVER_ERROR = 500;
+    descriptor: I
+  public static final int LENGTH_REQUIRED = 411;
+    descriptor: I
+  public static final int METHOD_NOT_ALLOWED = 405;
+    descriptor: I
+  public static final int MOVED_PERMANENTLY = 301;
+    descriptor: I
+  public static final int NOT_ACCEPTABLE = 406;
+    descriptor: I
+  public static final int NOT_FOUND = 404;
+    descriptor: I
+  public static final int NOT_IMPLEMENTED = 501;
+    descriptor: I
+  public static final int NOT_MODIFIED = 304;
+    descriptor: I
+  public static final int NO_CONTENT = 204;
+    descriptor: I
+  public static final int OK = 200;
+    descriptor: I
+  public static final int PERMANENT_REDIRECT = 308;
+    descriptor: I
+  public static final int PRECONDITION_FAILED = 412;
+    descriptor: I
+  public static final int PRECONDITION_REQUIRED = 428;
+    descriptor: I
+  public static final int REQUEST_HEADER_FIELDS_TOO_LARGE = 431;
+    descriptor: I
+  public static final int REQUEST_TIMEOUT = 408;
+    descriptor: I
+  public static final int RESET_CONTENT = 205;
+    descriptor: I
+  public static final int SEE_OTHER = 303;
+    descriptor: I
+  public static final int SERVICE_UNAVAILABLE = 503;
+    descriptor: I
+  public static final int TEMPORARY_REDIRECT = 307;
+    descriptor: I
+  public static final int TOO_MANY_REQUESTS = 429;
+    descriptor: I
+  public static final int UNAUTHORIZED = 401;
+    descriptor: I
+  public static final int UNPROCESSABLE_CONTENT = 422;
+    descriptor: I
+  public static final int UNSUPPORTED_MEDIA_TYPE = 415;
+    descriptor: I
+  public static final int URI_TOO_LONG = 414;
+    descriptor: I
+  public static java.lang.String defaultCode(int);
+    descriptor: (I)Ljava/lang/String;
+  public static java.lang.String reasonPhrase(int);
+    descriptor: (I)Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.http.InvalidRequestPathException extends java.lang.IllegalArgumentException {
+  public com.jsgalactic.axiom.http.InvalidRequestPathException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public final class com.jsgalactic.axiom.http.Request {
+  public boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public boolean isSecure();
+    descriptor: ()Z
+  public boolean tls();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.http.Body body();
+    descriptor: ()Lcom/jsgalactic/axiom/http/Body;
+  public com.jsgalactic.axiom.http.Request withBody(com.jsgalactic.axiom.http.Body);
+    descriptor: (Lcom/jsgalactic/axiom/http/Body;)Lcom/jsgalactic/axiom/http/Request;
+  public com.jsgalactic.axiom.http.Request withHeaders(java.util.Map<java.lang.String, java.lang.String>);
+    descriptor: (Ljava/util/Map;)Lcom/jsgalactic/axiom/http/Request;
+  public com.jsgalactic.axiom.http.Request withRemoteAddress(java.net.InetSocketAddress);
+    descriptor: (Ljava/net/InetSocketAddress;)Lcom/jsgalactic/axiom/http/Request;
+  public com.jsgalactic.axiom.http.Request withTls(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/http/Request;
+  public com.jsgalactic.axiom.http.Request(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)V
+  public com.jsgalactic.axiom.http.Request(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, com.jsgalactic.axiom.http.Body);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Lcom/jsgalactic/axiom/http/Body;)V
+  public com.jsgalactic.axiom.http.Request(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, com.jsgalactic.axiom.http.Body, java.net.InetSocketAddress);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Lcom/jsgalactic/axiom/http/Body;Ljava/net/InetSocketAddress;)V
+  public com.jsgalactic.axiom.http.Request(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, com.jsgalactic.axiom.http.Body, java.net.InetSocketAddress, boolean);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Lcom/jsgalactic/axiom/http/Body;Ljava/net/InetSocketAddress;Z)V
+  public com.jsgalactic.axiom.http.Request(java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, com.jsgalactic.axiom.http.Body);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Lcom/jsgalactic/axiom/http/Body;)V
+  public int hashCode();
+    descriptor: ()I
+  public java.lang.String method();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String path();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String query();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String scheme();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.net.InetSocketAddress remoteAddress();
+    descriptor: ()Ljava/net/InetSocketAddress;
+  public java.util.List<java.lang.String> queryAll(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/List;
+  public java.util.Map<java.lang.String, java.lang.String> headers();
+    descriptor: ()Ljava/util/Map;
+  public java.util.Optional<java.lang.String> header(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> query(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public static com.jsgalactic.axiom.http.Request fromTarget(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Request;
+  public static com.jsgalactic.axiom.http.Request get(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Request;
+  public static final int MAX_QUERY_LENGTH = 4096;
+    descriptor: I
+  public static final int MAX_QUERY_PARAMETERS = 256;
+    descriptor: I
+}
+
+public final class com.jsgalactic.axiom.http.Response {
+  public boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public boolean isStreaming();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.http.Response mapStream(java.util.function.UnaryOperator<com.jsgalactic.axiom.http.StreamBody>);
+    descriptor: (Ljava/util/function/UnaryOperator;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response onStreamEnd(java.util.function.Consumer<com.jsgalactic.axiom.http.StreamOutcome>);
+    descriptor: (Ljava/util/function/Consumer;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response withHeader(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response withLocation(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response withStreamLifetime(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response withoutBody();
+    descriptor: ()Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.StreamBody streamBody();
+    descriptor: ()Lcom/jsgalactic/axiom/http/StreamBody;
+  public int hashCode();
+    descriptor: ()I
+  public int status();
+    descriptor: ()I
+  public java.lang.Object body();
+    descriptor: ()Ljava/lang/Object;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Duration streamLifetime();
+    descriptor: ()Ljava/time/Duration;
+  public java.util.Map<java.lang.String, java.lang.String> headers();
+    descriptor: ()Ljava/util/Map;
+  public java.util.function.Consumer<com.jsgalactic.axiom.http.StreamOutcome> streamEndObserver();
+    descriptor: ()Ljava/util/function/Consumer;
+  public long streamLimit();
+    descriptor: ()J
+  public static com.jsgalactic.axiom.http.Response of(int, java.lang.Object);
+    descriptor: (ILjava/lang/Object;)Lcom/jsgalactic/axiom/http/Response;
+  public static com.jsgalactic.axiom.http.Response redirect(int, java.lang.String);
+    descriptor: (ILjava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public static com.jsgalactic.axiom.http.Response sse(com.jsgalactic.axiom.http.EventStreamBody);
+    descriptor: (Lcom/jsgalactic/axiom/http/EventStreamBody;)Lcom/jsgalactic/axiom/http/Response;
+  public static com.jsgalactic.axiom.http.Response sse(long, com.jsgalactic.axiom.http.EventStreamBody);
+    descriptor: (JLcom/jsgalactic/axiom/http/EventStreamBody;)Lcom/jsgalactic/axiom/http/Response;
+  public static com.jsgalactic.axiom.http.Response stream(int, java.lang.String, com.jsgalactic.axiom.http.StreamBody);
+    descriptor: (ILjava/lang/String;Lcom/jsgalactic/axiom/http/StreamBody;)Lcom/jsgalactic/axiom/http/Response;
+  public static com.jsgalactic.axiom.http.Response stream(int, java.lang.String, long, com.jsgalactic.axiom.http.StreamBody);
+    descriptor: (ILjava/lang/String;JLcom/jsgalactic/axiom/http/StreamBody;)Lcom/jsgalactic/axiom/http/Response;
+  public static final java.time.Duration MAX_STREAM_LIFETIME;
+    descriptor: Ljava/time/Duration;
+  public static final long DEFAULT_STREAM_LIMIT = 67108864l;
+    descriptor: J
+}
+
+public final class com.jsgalactic.axiom.http.ServerSentEvent {
+  public boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public com.jsgalactic.axiom.http.ServerSentEvent withId(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/ServerSentEvent;
+  public com.jsgalactic.axiom.http.ServerSentEvent withRetry(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/http/ServerSentEvent;
+  public int hashCode();
+    descriptor: ()I
+  public java.lang.String data();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String id();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String name();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Duration retry();
+    descriptor: ()Ljava/time/Duration;
+  public static com.jsgalactic.axiom.http.ServerSentEvent data(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/ServerSentEvent;
+  public static com.jsgalactic.axiom.http.ServerSentEvent named(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/ServerSentEvent;
+}
+
+public final class com.jsgalactic.axiom.http.StreamAbortedException extends java.io.IOException {
+  public com.jsgalactic.axiom.http.StreamAbortedException$Reason reason();
+    descriptor: ()Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;
+  public com.jsgalactic.axiom.http.StreamAbortedException(com.jsgalactic.axiom.http.StreamAbortedException$Reason);
+    descriptor: (Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;)V
+}
+
+public static final class com.jsgalactic.axiom.http.StreamAbortedException$Reason extends java.lang.Enum<com.jsgalactic.axiom.http.StreamAbortedException$Reason> {
+  public static com.jsgalactic.axiom.http.StreamAbortedException$Reason valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;
+  public static com.jsgalactic.axiom.http.StreamAbortedException$Reason[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;
+  public static final com.jsgalactic.axiom.http.StreamAbortedException$Reason CLIENT_DISCONNECTED;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;
+  public static final com.jsgalactic.axiom.http.StreamAbortedException$Reason LIMIT_EXCEEDED;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;
+  public static final com.jsgalactic.axiom.http.StreamAbortedException$Reason SHUTDOWN;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;
+  public static final com.jsgalactic.axiom.http.StreamAbortedException$Reason TIMEOUT;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;
+}
+
+public interface com.jsgalactic.axiom.http.StreamBody {
+  public abstract void writeTo(com.jsgalactic.axiom.http.BodyWriter) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/BodyWriter;)V
+}
+
+public final class com.jsgalactic.axiom.http.StreamOutcome extends java.lang.Record {
+  public boolean completed();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.http.StreamOutcome$Kind kind();
+    descriptor: ()Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+  public com.jsgalactic.axiom.http.StreamOutcome(com.jsgalactic.axiom.http.StreamOutcome$Kind, long, java.time.Duration, java.lang.Throwable);
+    descriptor: (Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;JLjava/time/Duration;Ljava/lang/Throwable;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.Throwable failure();
+    descriptor: ()Ljava/lang/Throwable;
+  public java.time.Duration elapsed();
+    descriptor: ()Ljava/time/Duration;
+  public long bytesWritten();
+    descriptor: ()J
+}
+
+public static final class com.jsgalactic.axiom.http.StreamOutcome$Kind extends java.lang.Enum<com.jsgalactic.axiom.http.StreamOutcome$Kind> {
+  public static com.jsgalactic.axiom.http.StreamOutcome$Kind valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+  public static com.jsgalactic.axiom.http.StreamOutcome$Kind[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+  public static final com.jsgalactic.axiom.http.StreamOutcome$Kind CLIENT_DISCONNECTED;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+  public static final com.jsgalactic.axiom.http.StreamOutcome$Kind COMPLETED;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+  public static final com.jsgalactic.axiom.http.StreamOutcome$Kind FAILED;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+  public static final com.jsgalactic.axiom.http.StreamOutcome$Kind LIMIT_EXCEEDED;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+  public static final com.jsgalactic.axiom.http.StreamOutcome$Kind SHUTDOWN;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+  public static final com.jsgalactic.axiom.http.StreamOutcome$Kind TIMEOUT;
+    descriptor: Lcom/jsgalactic/axiom/http/StreamOutcome$Kind;
+}
+
+public interface com.jsgalactic.axiom.http.spi.HttpTransportProvider {
+  public abstract com.jsgalactic.axiom.lifecycle.Server bind(com.jsgalactic.axiom.application.Application, java.net.InetSocketAddress, com.jsgalactic.axiom.lifecycle.ListenerOptions) throws java.io.IOException;
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;Ljava/net/InetSocketAddress;Lcom/jsgalactic/axiom/lifecycle/ListenerOptions;)Lcom/jsgalactic/axiom/lifecycle/Server;
+  public default com.jsgalactic.axiom.lifecycle.Server bind(com.jsgalactic.axiom.application.Application, java.net.InetSocketAddress) throws java.io.IOException;
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;Ljava/net/InetSocketAddress;)Lcom/jsgalactic/axiom/lifecycle/Server;
+}
+
+public final class com.jsgalactic.axiom.lifecycle.ListenerOptions {
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder toBuilder();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TransportKind transport();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/TransportKind;
+  public int ioThreads();
+    descriptor: ()I
+  public int maxConnections();
+    descriptor: ()I
+  public int maxDiscardedInput();
+    descriptor: ()I
+  public int maxHeaderBytes();
+    descriptor: ()I
+  public int maxLingeringConnections();
+    descriptor: ()I
+  public int maxPipelinedRequests();
+    descriptor: ()I
+  public int maxRequestLine();
+    descriptor: ()I
+  public java.lang.String name();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Duration handshakeTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration headTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration idleTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration lingerQuietTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration lingerTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration responseTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration shutdownGrace();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration shutdownLingerTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public java.util.Optional<com.jsgalactic.axiom.lifecycle.RejectionObserver> rejectionObserver();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<com.jsgalactic.axiom.lifecycle.TlsOptions> tls();
+    descriptor: ()Ljava/util/Optional;
+  public long maxInFlightBodyBytes();
+    descriptor: ()J
+  public static com.jsgalactic.axiom.lifecycle.ListenerOptions defaults();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/ListenerOptions;
+  public static com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public static final int MAX_DURATION_DAYS = 1;
+    descriptor: I
+  public static final int MAX_NAME_LENGTH = 32;
+    descriptor: I
+}
+
+public static final class com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder {
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions build();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/ListenerOptions;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder handshakeTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder headTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder idleTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder ioThreads(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder lingerQuietTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder lingerTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder maxConnections(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder maxDiscardedInput(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder maxHeaderBytes(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder maxInFlightBodyBytes(long);
+    descriptor: (J)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder maxLingeringConnections(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder maxPipelinedRequests(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder maxRequestLine(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder name(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder rejectionObserver(com.jsgalactic.axiom.lifecycle.RejectionObserver);
+    descriptor: (Lcom/jsgalactic/axiom/lifecycle/RejectionObserver;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder responseTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder shutdownGrace(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder shutdownLingerTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder tls(com.jsgalactic.axiom.lifecycle.TlsOptions);
+    descriptor: (Lcom/jsgalactic/axiom/lifecycle/TlsOptions;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder transport(com.jsgalactic.axiom.lifecycle.TransportKind);
+    descriptor: (Lcom/jsgalactic/axiom/lifecycle/TransportKind;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+}
+
+public interface com.jsgalactic.axiom.lifecycle.RejectionObserver {
+  public abstract void rejected(int, java.lang.String, java.lang.String);
+    descriptor: (ILjava/lang/String;Ljava/lang/String;)V
+}
+
+public interface com.jsgalactic.axiom.lifecycle.Server extends java.lang.AutoCloseable {
+  public abstract boolean isOpen();
+    descriptor: ()Z
+  public abstract com.jsgalactic.axiom.execution.AdmissionSnapshot admission();
+    descriptor: ()Lcom/jsgalactic/axiom/execution/AdmissionSnapshot;
+  public abstract java.net.InetSocketAddress localAddress();
+    descriptor: ()Ljava/net/InetSocketAddress;
+  public abstract java.util.concurrent.CompletionStage<java.lang.Void> termination();
+    descriptor: ()Ljava/util/concurrent/CompletionStage;
+  public abstract void close();
+    descriptor: ()V
+  public default void reloadTls() throws java.io.IOException;
+    descriptor: ()V
+}
+
+public final class com.jsgalactic.axiom.lifecycle.TlsConfigurationException extends java.io.IOException {
+  public com.jsgalactic.axiom.lifecycle.TlsConfigurationException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public final class com.jsgalactic.axiom.lifecycle.TlsOptions {
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder toBuilder();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$ClientAuth clientAuth();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/TlsOptions$ClientAuth;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Protocol minimumProtocol();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Protocol;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Clock clock();
+    descriptor: ()Ljava/time/Clock;
+  public java.util.List<java.lang.String> cipherSuites();
+    descriptor: ()Ljava/util/List;
+  public java.util.Optional<java.nio.file.Path> certificateChain();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.nio.file.Path> clientTrust();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.nio.file.Path> privateKey();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.time.Duration> reloadInterval();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.util.function.Supplier<javax.net.ssl.SSLContext>> sslContext();
+    descriptor: ()Ljava/util/Optional;
+  public static com.jsgalactic.axiom.lifecycle.TlsOptions pem(java.nio.file.Path, java.nio.file.Path);
+    descriptor: (Ljava/nio/file/Path;Ljava/nio/file/Path;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions;
+  public static com.jsgalactic.axiom.lifecycle.TlsOptions$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public static final java.util.List<java.lang.String> DEFAULT_CIPHER_SUITES;
+    descriptor: Ljava/util/List;
+}
+
+public static final class com.jsgalactic.axiom.lifecycle.TlsOptions$Builder {
+  public com.jsgalactic.axiom.lifecycle.TlsOptions build();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/TlsOptions;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder certificateChain(java.nio.file.Path);
+    descriptor: (Ljava/nio/file/Path;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder cipherSuites(java.util.List<java.lang.String>);
+    descriptor: (Ljava/util/List;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder clock(java.time.Clock);
+    descriptor: (Ljava/time/Clock;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder minimumProtocol(com.jsgalactic.axiom.lifecycle.TlsOptions$Protocol);
+    descriptor: (Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Protocol;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder privateKey(java.nio.file.Path);
+    descriptor: (Ljava/nio/file/Path;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder reloadInterval(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder requireClientCertificates();
+    descriptor: ()Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder requireClientCertificates(java.nio.file.Path);
+    descriptor: (Ljava/nio/file/Path;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.TlsOptions$Builder sslContext(java.util.function.Supplier<javax.net.ssl.SSLContext>);
+    descriptor: (Ljava/util/function/Supplier;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Builder;
+}
+
+public static final class com.jsgalactic.axiom.lifecycle.TlsOptions$ClientAuth extends java.lang.Enum<com.jsgalactic.axiom.lifecycle.TlsOptions$ClientAuth> {
+  public static com.jsgalactic.axiom.lifecycle.TlsOptions$ClientAuth valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$ClientAuth;
+  public static com.jsgalactic.axiom.lifecycle.TlsOptions$ClientAuth[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/lifecycle/TlsOptions$ClientAuth;
+  public static final com.jsgalactic.axiom.lifecycle.TlsOptions$ClientAuth NONE;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TlsOptions$ClientAuth;
+  public static final com.jsgalactic.axiom.lifecycle.TlsOptions$ClientAuth REQUIRED;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TlsOptions$ClientAuth;
+}
+
+public static final class com.jsgalactic.axiom.lifecycle.TlsOptions$Protocol extends java.lang.Enum<com.jsgalactic.axiom.lifecycle.TlsOptions$Protocol> {
+  public java.lang.String jdkName();
+    descriptor: ()Ljava/lang/String;
+  public static com.jsgalactic.axiom.lifecycle.TlsOptions$Protocol valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Protocol;
+  public static com.jsgalactic.axiom.lifecycle.TlsOptions$Protocol[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Protocol;
+  public static final com.jsgalactic.axiom.lifecycle.TlsOptions$Protocol TLS_1_2;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Protocol;
+  public static final com.jsgalactic.axiom.lifecycle.TlsOptions$Protocol TLS_1_3;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TlsOptions$Protocol;
+}
+
+public final class com.jsgalactic.axiom.lifecycle.TransportKind extends java.lang.Enum<com.jsgalactic.axiom.lifecycle.TransportKind> {
+  public static com.jsgalactic.axiom.lifecycle.TransportKind valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/lifecycle/TransportKind;
+  public static com.jsgalactic.axiom.lifecycle.TransportKind[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/lifecycle/TransportKind;
+  public static final com.jsgalactic.axiom.lifecycle.TransportKind AUTO;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TransportKind;
+  public static final com.jsgalactic.axiom.lifecycle.TransportKind EPOLL;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TransportKind;
+  public static final com.jsgalactic.axiom.lifecycle.TransportKind KQUEUE;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TransportKind;
+  public static final com.jsgalactic.axiom.lifecycle.TransportKind NIO;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TransportKind;
+}
+
+public final class com.jsgalactic.axiom.observability.Health {
+  public boolean isDraining();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.observability.Health$Report liveness();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/Health$Report;
+  public com.jsgalactic.axiom.observability.Health$Report readiness();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/Health$Report;
+  public com.jsgalactic.axiom.observability.Health$Report startup();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/Health$Report;
+  public static com.jsgalactic.axiom.observability.Health$Builder builder(com.jsgalactic.axiom.application.Application);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+  public static final int MAX_CHECKS = 32;
+    descriptor: I
+  public static final java.lang.String LIVE_PATH = "/health/live";
+    descriptor: Ljava/lang/String;
+  public static final java.lang.String READY_PATH = "/health/ready";
+    descriptor: Ljava/lang/String;
+  public static final java.lang.String STARTUP_PATH = "/health/startup";
+    descriptor: Ljava/lang/String;
+  public static final java.time.Duration DEFAULT_TIMEOUT;
+    descriptor: Ljava/time/Duration;
+  public static final java.time.Duration MAX_CACHE;
+    descriptor: Ljava/time/Duration;
+  public static final java.time.Duration MAX_TIMEOUT;
+    descriptor: Ljava/time/Duration;
+  public void beginDrain();
+    descriptor: ()V
+  public void register(com.jsgalactic.axiom.routing.RouteGroup, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Lcom/jsgalactic/axiom/routing/RouteGroup;[Lcom/jsgalactic/axiom/context/Middleware;)V
+}
+
+public static final class com.jsgalactic.axiom.observability.Health$Builder {
+  public com.jsgalactic.axiom.observability.Health build();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/Health;
+  public com.jsgalactic.axiom.observability.Health$Builder cacheFor(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+  public com.jsgalactic.axiom.observability.Health$Builder liveness(java.lang.String, com.jsgalactic.axiom.observability.HealthCheck);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/observability/HealthCheck;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+  public com.jsgalactic.axiom.observability.Health$Builder liveness(java.lang.String, com.jsgalactic.axiom.observability.HealthCheck, java.time.Duration);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/observability/HealthCheck;Ljava/time/Duration;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+  public com.jsgalactic.axiom.observability.Health$Builder readiness(java.lang.String, com.jsgalactic.axiom.observability.HealthCheck);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/observability/HealthCheck;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+  public com.jsgalactic.axiom.observability.Health$Builder readiness(java.lang.String, com.jsgalactic.axiom.observability.HealthCheck, java.time.Duration);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/observability/HealthCheck;Ljava/time/Duration;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+  public com.jsgalactic.axiom.observability.Health$Builder startup(java.lang.String, com.jsgalactic.axiom.observability.HealthCheck);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/observability/HealthCheck;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+  public com.jsgalactic.axiom.observability.Health$Builder startup(java.lang.String, com.jsgalactic.axiom.observability.HealthCheck, java.time.Duration);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/observability/HealthCheck;Ljava/time/Duration;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+  public com.jsgalactic.axiom.observability.Health$Builder timeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/observability/Health$Builder;
+}
+
+public static final class com.jsgalactic.axiom.observability.Health$Report extends java.lang.Record {
+  public com.jsgalactic.axiom.observability.Health$Report(com.jsgalactic.axiom.observability.Health$Status, java.util.Map<java.lang.String, com.jsgalactic.axiom.observability.Health$Status>);
+    descriptor: (Lcom/jsgalactic/axiom/observability/Health$Status;Ljava/util/Map;)V
+  public com.jsgalactic.axiom.observability.Health$Status status();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/Health$Status;
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toJson();
+    descriptor: ()Ljava/lang/String;
+  public java.util.Map<java.lang.String, com.jsgalactic.axiom.observability.Health$Status> checks();
+    descriptor: ()Ljava/util/Map;
+}
+
+public static final class com.jsgalactic.axiom.observability.Health$Status extends java.lang.Enum<com.jsgalactic.axiom.observability.Health$Status> {
+  public static com.jsgalactic.axiom.observability.Health$Status valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Health$Status;
+  public static com.jsgalactic.axiom.observability.Health$Status[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/observability/Health$Status;
+  public static final com.jsgalactic.axiom.observability.Health$Status DOWN;
+    descriptor: Lcom/jsgalactic/axiom/observability/Health$Status;
+  public static final com.jsgalactic.axiom.observability.Health$Status UP;
+    descriptor: Lcom/jsgalactic/axiom/observability/Health$Status;
+}
+
+public interface com.jsgalactic.axiom.observability.HealthCheck {
+  public abstract boolean isHealthy() throws java.lang.Exception;
+    descriptor: ()Z
+}
+
+public interface com.jsgalactic.axiom.observability.Metrics {
+  public abstract com.jsgalactic.axiom.observability.Metrics$Counter counter(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Counter;
+  public abstract com.jsgalactic.axiom.observability.Metrics$Gauge gauge(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Gauge;
+  public abstract com.jsgalactic.axiom.observability.Metrics$Timer timer(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Timer;
+  public static final com.jsgalactic.axiom.observability.Metrics NOOP;
+    descriptor: Lcom/jsgalactic/axiom/observability/Metrics;
+}
+
+public static interface com.jsgalactic.axiom.observability.Metrics$Counter {
+  public abstract void add(long);
+    descriptor: (J)V
+  public abstract void increment();
+    descriptor: ()V
+}
+
+public static interface com.jsgalactic.axiom.observability.Metrics$Gauge {
+  public abstract void add(long);
+    descriptor: (J)V
+}
+
+public static interface com.jsgalactic.axiom.observability.Metrics$Timer {
+  public abstract void record(long);
+    descriptor: (J)V
+}
+
+public final class com.jsgalactic.axiom.observability.TraceContext extends java.lang.Record {
+  public boolean sampled();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.observability.TraceContext child();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/TraceContext;
+  public com.jsgalactic.axiom.observability.TraceContext(java.lang.String, java.lang.String, int);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;I)V
+  public com.jsgalactic.axiom.observability.TraceContext(java.lang.String, java.lang.String, int, com.jsgalactic.axiom.observability.TraceState);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;ILcom/jsgalactic/axiom/observability/TraceState;)V
+  public com.jsgalactic.axiom.observability.TraceState traceState();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/TraceState;
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public int flags();
+    descriptor: ()I
+  public java.lang.String parentId();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String traceId();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String traceparent();
+    descriptor: ()Ljava/lang/String;
+  public java.util.Map<java.lang.String, java.lang.String> headers();
+    descriptor: ()Ljava/util/Map;
+  public static com.jsgalactic.axiom.context.Middleware responseHeader();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public static final java.lang.String HEADER = "traceparent";
+    descriptor: Ljava/lang/String;
+  public static final java.lang.String RESPONSE_HEADER = "traceresponse";
+    descriptor: Ljava/lang/String;
+  public static java.lang.String correlation(java.lang.String, com.jsgalactic.axiom.http.Request);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/http/Request;)Ljava/lang/String;
+  public static java.lang.String correlation(java.lang.String, java.util.Optional<com.jsgalactic.axiom.observability.TraceContext>);
+    descriptor: (Ljava/lang/String;Ljava/util/Optional;)Ljava/lang/String;
+  public static java.util.Optional<com.jsgalactic.axiom.observability.TraceContext> parse(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public static java.util.Optional<com.jsgalactic.axiom.observability.TraceContext> parse(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Ljava/util/Optional;
+}
+
+public final class com.jsgalactic.axiom.observability.TraceState extends java.lang.Record {
+  public boolean isEmpty();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.observability.TraceState with(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/TraceState;
+  public com.jsgalactic.axiom.observability.TraceState(java.util.List<com.jsgalactic.axiom.observability.TraceState$Member>);
+    descriptor: (Ljava/util/List;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String header();
+    descriptor: ()Ljava/lang/String;
+  public java.util.List<com.jsgalactic.axiom.observability.TraceState$Member> members();
+    descriptor: ()Ljava/util/List;
+  public java.util.Optional<java.lang.String> get(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public static final com.jsgalactic.axiom.observability.TraceState EMPTY;
+    descriptor: Lcom/jsgalactic/axiom/observability/TraceState;
+  public static final int MAX_LENGTH = 512;
+    descriptor: I
+  public static final int MAX_MEMBERS = 32;
+    descriptor: I
+  public static final java.lang.String HEADER = "tracestate";
+    descriptor: Ljava/lang/String;
+  public static java.util.Optional<com.jsgalactic.axiom.observability.TraceState> parse(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+}
+
+public static final class com.jsgalactic.axiom.observability.TraceState$Member extends java.lang.Record {
+  public com.jsgalactic.axiom.observability.TraceState$Member(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String key();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String value();
+    descriptor: ()Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.routing.Route extends java.lang.Record {
+  public com.jsgalactic.axiom.routing.Route(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String method();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String path();
+    descriptor: ()Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.routing.RouteDoc {
+  public boolean isDeprecated();
+    descriptor: ()Z
+  public boolean isHidden();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.routing.RouteDoc deprecated();
+    descriptor: ()Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc description(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc headerParam(java.lang.String, java.lang.reflect.Type, java.lang.String, boolean);
+    descriptor: (Ljava/lang/String;Ljava/lang/reflect/Type;Ljava/lang/String;Z)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc hidden();
+    descriptor: ()Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc operationId(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc pathParam(java.lang.String, java.lang.reflect.Type, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/reflect/Type;Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc queryParam(java.lang.String, java.lang.reflect.Type, java.lang.String, boolean);
+    descriptor: (Ljava/lang/String;Ljava/lang/reflect/Type;Ljava/lang/String;Z)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc requestBody(java.lang.reflect.Type);
+    descriptor: (Ljava/lang/reflect/Type;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc requestBody(java.lang.reflect.Type, java.lang.String...);
+    descriptor: (Ljava/lang/reflect/Type;[Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc response(int, java.lang.String);
+    descriptor: (ILjava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc response(int, java.lang.String, java.lang.reflect.Type);
+    descriptor: (ILjava/lang/String;Ljava/lang/reflect/Type;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc response(int, java.lang.String, java.lang.reflect.Type, java.lang.String...);
+    descriptor: (ILjava/lang/String;Ljava/lang/reflect/Type;[Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc security(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc tags(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public com.jsgalactic.axiom.routing.RouteDoc withSummary(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public java.util.List<com.jsgalactic.axiom.routing.RouteDoc$Param> parameters();
+    descriptor: ()Ljava/util/List;
+  public java.util.List<com.jsgalactic.axiom.routing.RouteDoc$Reply> responses();
+    descriptor: ()Ljava/util/List;
+  public java.util.List<java.lang.String> security();
+    descriptor: ()Ljava/util/List;
+  public java.util.List<java.lang.String> tags();
+    descriptor: ()Ljava/util/List;
+  public java.util.Optional<com.jsgalactic.axiom.routing.RouteDoc$Body> requestBody();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> description();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> operationId();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> summary();
+    descriptor: ()Ljava/util/Optional;
+  public static com.jsgalactic.axiom.routing.RouteDoc empty();
+    descriptor: ()Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public static com.jsgalactic.axiom.routing.RouteDoc summary(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc;
+  public static java.lang.reflect.Type listOf(java.lang.reflect.Type);
+    descriptor: (Ljava/lang/reflect/Type;)Ljava/lang/reflect/Type;
+  public static java.lang.reflect.Type type(java.lang.Class<?>, java.lang.reflect.Type...);
+    descriptor: (Ljava/lang/Class;[Ljava/lang/reflect/Type;)Ljava/lang/reflect/Type;
+}
+
+public static final class com.jsgalactic.axiom.routing.RouteDoc$Body extends java.lang.Record {
+  public com.jsgalactic.axiom.routing.RouteDoc$Body(java.lang.reflect.Type, java.util.List<java.lang.String>);
+    descriptor: (Ljava/lang/reflect/Type;Ljava/util/List;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.reflect.Type type();
+    descriptor: ()Ljava/lang/reflect/Type;
+  public java.util.List<java.lang.String> mediaTypes();
+    descriptor: ()Ljava/util/List;
+}
+
+public static final class com.jsgalactic.axiom.routing.RouteDoc$In extends java.lang.Enum<com.jsgalactic.axiom.routing.RouteDoc$In> {
+  public static com.jsgalactic.axiom.routing.RouteDoc$In valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/routing/RouteDoc$In;
+  public static com.jsgalactic.axiom.routing.RouteDoc$In[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/routing/RouteDoc$In;
+  public static final com.jsgalactic.axiom.routing.RouteDoc$In HEADER;
+    descriptor: Lcom/jsgalactic/axiom/routing/RouteDoc$In;
+  public static final com.jsgalactic.axiom.routing.RouteDoc$In PATH;
+    descriptor: Lcom/jsgalactic/axiom/routing/RouteDoc$In;
+  public static final com.jsgalactic.axiom.routing.RouteDoc$In QUERY;
+    descriptor: Lcom/jsgalactic/axiom/routing/RouteDoc$In;
+}
+
+public static final class com.jsgalactic.axiom.routing.RouteDoc$Param extends java.lang.Record {
+  public boolean required();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.routing.RouteDoc$In in();
+    descriptor: ()Lcom/jsgalactic/axiom/routing/RouteDoc$In;
+  public com.jsgalactic.axiom.routing.RouteDoc$Param(com.jsgalactic.axiom.routing.RouteDoc$In, java.lang.String, java.lang.reflect.Type, java.lang.String, boolean);
+    descriptor: (Lcom/jsgalactic/axiom/routing/RouteDoc$In;Ljava/lang/String;Ljava/lang/reflect/Type;Ljava/lang/String;Z)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String description();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String name();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.reflect.Type type();
+    descriptor: ()Ljava/lang/reflect/Type;
+}
+
+public static final class com.jsgalactic.axiom.routing.RouteDoc$Reply extends java.lang.Record {
+  public com.jsgalactic.axiom.routing.RouteDoc$Reply(int, java.lang.String, java.lang.reflect.Type, java.util.List<java.lang.String>);
+    descriptor: (ILjava/lang/String;Ljava/lang/reflect/Type;Ljava/util/List;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public int status();
+    descriptor: ()I
+  public java.lang.String description();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.reflect.Type type();
+    descriptor: ()Ljava/lang/reflect/Type;
+  public java.util.List<java.lang.String> mediaTypes();
+    descriptor: ()Ljava/util/List;
+}
+
+public interface com.jsgalactic.axiom.routing.RouteGroup {
+  public abstract <E extends java.lang.Exception> com.jsgalactic.axiom.routing.RouteGroup error(java.lang.Class<E>, com.jsgalactic.axiom.context.ErrorHandler<? super E>);
+    descriptor: (Ljava/lang/Class;Lcom/jsgalactic/axiom/context/ErrorHandler;)Lcom/jsgalactic/axiom/routing/RouteGroup;
+  public abstract com.jsgalactic.axiom.routing.Route route(java.lang.String, java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public abstract com.jsgalactic.axiom.routing.RouteGroup group(java.lang.String, java.util.function.Consumer<com.jsgalactic.axiom.routing.RouteGroup>);
+    descriptor: (Ljava/lang/String;Ljava/util/function/Consumer;)Lcom/jsgalactic/axiom/routing/RouteGroup;
+  public abstract com.jsgalactic.axiom.routing.RouteGroup use(com.jsgalactic.axiom.context.Middleware);
+    descriptor: (Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/RouteGroup;
+  public default com.jsgalactic.axiom.routing.Route delete(java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public default com.jsgalactic.axiom.routing.Route get(java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public default com.jsgalactic.axiom.routing.Route head(java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public default com.jsgalactic.axiom.routing.Route options(java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public default com.jsgalactic.axiom.routing.Route patch(java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public default com.jsgalactic.axiom.routing.Route post(java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public default com.jsgalactic.axiom.routing.Route put(java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+}

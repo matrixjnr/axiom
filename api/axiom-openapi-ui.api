@@ -1,0 +1,20 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.openapi.ui.SwaggerUi {
+  public com.jsgalactic.axiom.routing.Route register(com.jsgalactic.axiom.application.Application, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public java.lang.String path();
+    descriptor: ()Ljava/lang/String;
+  public static com.jsgalactic.axiom.openapi.ui.SwaggerUi$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/openapi/ui/SwaggerUi$Builder;
+}
+
+public static final class com.jsgalactic.axiom.openapi.ui.SwaggerUi$Builder {
+  public com.jsgalactic.axiom.openapi.ui.SwaggerUi build();
+    descriptor: ()Lcom/jsgalactic/axiom/openapi/ui/SwaggerUi;
+  public com.jsgalactic.axiom.openapi.ui.SwaggerUi$Builder path(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/ui/SwaggerUi$Builder;
+  public com.jsgalactic.axiom.openapi.ui.SwaggerUi$Builder spec(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/ui/SwaggerUi$Builder;
+  public com.jsgalactic.axiom.openapi.ui.SwaggerUi$Builder title(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/ui/SwaggerUi$Builder;
+}

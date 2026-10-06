@@ -35,7 +35,10 @@ metadata on top (see `docs/releasing.md`) and squash-merge.
 
 Shared build configuration belongs in `build-logic`; dependency versions belong
 in `gradle/libs.versions.toml`. Repositories are controlled by settings.
-Do not commit generated output or IDE settings. Do not enable build scan uploads
+Reviewed `api/*.api` signature baselines are checked in: `check` rejects API changes without a
+matching baseline update. See [API compatibility](docs/api-compatibility.md) before running
+`apiUpdate`; commit intentional API changes and their reviewed baselines together.
+Do not commit other generated output or IDE settings. Do not enable build scan uploads
 by default. Runtime features need failure-path and resource lifecycle tests.
 
 Use self-contained commit messages and PR titles without specification IDs. Explain

@@ -1,0 +1,471 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public interface com.jsgalactic.axiom.security.Authenticator {
+  public abstract java.lang.String challenge();
+    descriptor: ()Ljava/lang/String;
+  public abstract java.util.Optional<com.jsgalactic.axiom.context.SecurityIdentity> authenticate(com.jsgalactic.axiom.http.Request);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Ljava/util/Optional;
+}
+
+public final class com.jsgalactic.axiom.security.ClientOrigin extends java.lang.Record {
+  public boolean forwarded();
+    descriptor: ()Z
+  public boolean secure();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.security.ClientOrigin(java.net.InetAddress, java.lang.String, boolean);
+    descriptor: (Ljava/net/InetAddress;Ljava/lang/String;Z)V
+  public com.jsgalactic.axiom.security.ClientOrigin(java.net.InetAddress, java.lang.String, boolean, java.util.Optional<java.lang.String>, java.util.OptionalInt);
+    descriptor: (Ljava/net/InetAddress;Ljava/lang/String;ZLjava/util/Optional;Ljava/util/OptionalInt;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String scheme();
+    descriptor: ()Ljava/lang/String;
+  public java.net.InetAddress address();
+    descriptor: ()Ljava/net/InetAddress;
+  public java.util.Optional<java.lang.String> host();
+    descriptor: ()Ljava/util/Optional;
+  public java.util.OptionalInt port();
+    descriptor: ()Ljava/util/OptionalInt;
+}
+
+public final class com.jsgalactic.axiom.security.Cookies {
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.util.List<java.lang.String> all(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/List;
+  public java.util.Optional<java.lang.String> get(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public java.util.Set<java.lang.String> names();
+    descriptor: ()Ljava/util/Set;
+  public static com.jsgalactic.axiom.security.Cookies none();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Cookies;
+  public static com.jsgalactic.axiom.security.Cookies of(com.jsgalactic.axiom.http.Request);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Lcom/jsgalactic/axiom/security/Cookies;
+  public static com.jsgalactic.axiom.security.Cookies of(com.jsgalactic.axiom.http.Request, int);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;I)Lcom/jsgalactic/axiom/security/Cookies;
+  public static com.jsgalactic.axiom.security.Cookies parse(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Cookies;
+  public static com.jsgalactic.axiom.security.Cookies parse(java.lang.String, int);
+    descriptor: (Ljava/lang/String;I)Lcom/jsgalactic/axiom/security/Cookies;
+  public static final int DEFAULT_MAX_LENGTH = 8192;
+    descriptor: I
+  public static final int MAX_PAIRS = 128;
+    descriptor: I
+}
+
+public final class com.jsgalactic.axiom.security.Cors implements com.jsgalactic.axiom.context.Middleware {
+  public com.jsgalactic.axiom.http.Response afterError(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.http.Response);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/http/Response;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.context.Middleware$Next) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/context/Middleware$Next;)Lcom/jsgalactic/axiom/http/Response;
+  public static com.jsgalactic.axiom.security.Cors$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Cors$Builder;
+}
+
+public static final class com.jsgalactic.axiom.security.Cors$Builder {
+  public com.jsgalactic.axiom.security.Cors build();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Cors;
+  public com.jsgalactic.axiom.security.Cors$Builder allowCredentials();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Cors$Builder;
+  public com.jsgalactic.axiom.security.Cors$Builder allowHeaders(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Cors$Builder;
+  public com.jsgalactic.axiom.security.Cors$Builder allowMethods(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Cors$Builder;
+  public com.jsgalactic.axiom.security.Cors$Builder allowOrigin(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Cors$Builder;
+  public com.jsgalactic.axiom.security.Cors$Builder anyOrigin();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Cors$Builder;
+  public com.jsgalactic.axiom.security.Cors$Builder exposeHeaders(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Cors$Builder;
+  public com.jsgalactic.axiom.security.Cors$Builder maxAge(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/Cors$Builder;
+}
+
+public final class com.jsgalactic.axiom.security.Csrf implements com.jsgalactic.axiom.context.Middleware {
+  public com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.context.Middleware$Next) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/context/Middleware$Next;)Lcom/jsgalactic/axiom/http/Response;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String token(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Ljava/lang/String;
+  public static com.jsgalactic.axiom.security.Csrf$Builder doubleSubmit(byte[]);
+    descriptor: ([B)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public static com.jsgalactic.axiom.security.Csrf$Builder synchronizer(com.jsgalactic.axiom.security.Sessions);
+    descriptor: (Lcom/jsgalactic/axiom/security/Sessions;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+}
+
+public static final class com.jsgalactic.axiom.security.Csrf$Builder {
+  public com.jsgalactic.axiom.security.Csrf build();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Csrf;
+  public com.jsgalactic.axiom.security.Csrf$Builder allowSameSite(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder allowedOrigins(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder binding(java.util.function.Function<com.jsgalactic.axiom.context.Context, java.lang.String>);
+    descriptor: (Ljava/util/function/Function;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder clock(java.time.Clock);
+    descriptor: (Ljava/time/Clock;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder cookieName(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder exemptWhen(java.util.function.Predicate<com.jsgalactic.axiom.http.Request>);
+    descriptor: (Ljava/util/function/Predicate;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder fetchMetadata(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder headerName(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder httpOnly(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder maxAge(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder random(java.security.SecureRandom);
+    descriptor: (Ljava/security/SecureRandom;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder sameSite(com.jsgalactic.axiom.security.SetCookie$SameSite);
+    descriptor: (Lcom/jsgalactic/axiom/security/SetCookie$SameSite;)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+  public com.jsgalactic.axiom.security.Csrf$Builder secure(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/security/Csrf$Builder;
+}
+
+public final class com.jsgalactic.axiom.security.ForwardedHeaders extends java.lang.Enum<com.jsgalactic.axiom.security.ForwardedHeaders> {
+  public static com.jsgalactic.axiom.security.ForwardedHeaders valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/ForwardedHeaders;
+  public static com.jsgalactic.axiom.security.ForwardedHeaders[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/security/ForwardedHeaders;
+  public static final com.jsgalactic.axiom.security.ForwardedHeaders FORWARDED;
+    descriptor: Lcom/jsgalactic/axiom/security/ForwardedHeaders;
+  public static final com.jsgalactic.axiom.security.ForwardedHeaders X_FORWARDED;
+    descriptor: Lcom/jsgalactic/axiom/security/ForwardedHeaders;
+}
+
+public final class com.jsgalactic.axiom.security.HeaderRedaction {
+  public boolean isSensitive(java.lang.String);
+    descriptor: (Ljava/lang/String;)Z
+  public com.jsgalactic.axiom.security.HeaderRedaction and(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/security/HeaderRedaction;
+  public java.util.Map<java.lang.String, java.lang.String> redact(java.util.Map<java.lang.String, java.lang.String>);
+    descriptor: (Ljava/util/Map;)Ljava/util/Map;
+  public static com.jsgalactic.axiom.security.HeaderRedaction defaults();
+    descriptor: ()Lcom/jsgalactic/axiom/security/HeaderRedaction;
+  public static final java.lang.String REDACTED = "[redacted]";
+    descriptor: Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.security.InMemorySessionStore implements com.jsgalactic.axiom.security.SessionStore {
+  public boolean create(java.lang.String, com.jsgalactic.axiom.security.SessionState);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/security/SessionState;)Z
+  public boolean rename(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Z
+  public boolean update(java.lang.String, java.util.function.UnaryOperator<com.jsgalactic.axiom.security.SessionState>);
+    descriptor: (Ljava/lang/String;Ljava/util/function/UnaryOperator;)Z
+  public int size();
+    descriptor: ()I
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.util.Optional<com.jsgalactic.axiom.security.SessionState> find(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public static com.jsgalactic.axiom.security.InMemorySessionStore$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/security/InMemorySessionStore$Builder;
+  public void remove(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public static final class com.jsgalactic.axiom.security.InMemorySessionStore$Builder {
+  public com.jsgalactic.axiom.security.InMemorySessionStore build();
+    descriptor: ()Lcom/jsgalactic/axiom/security/InMemorySessionStore;
+  public com.jsgalactic.axiom.security.InMemorySessionStore$Builder absoluteTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/InMemorySessionStore$Builder;
+  public com.jsgalactic.axiom.security.InMemorySessionStore$Builder clock(java.time.Clock);
+    descriptor: (Ljava/time/Clock;)Lcom/jsgalactic/axiom/security/InMemorySessionStore$Builder;
+  public com.jsgalactic.axiom.security.InMemorySessionStore$Builder idleTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/InMemorySessionStore$Builder;
+  public com.jsgalactic.axiom.security.InMemorySessionStore$Builder maxSessions(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/security/InMemorySessionStore$Builder;
+  public com.jsgalactic.axiom.security.InMemorySessionStore$Builder metrics(com.jsgalactic.axiom.observability.Metrics);
+    descriptor: (Lcom/jsgalactic/axiom/observability/Metrics;)Lcom/jsgalactic/axiom/security/InMemorySessionStore$Builder;
+}
+
+public final class com.jsgalactic.axiom.security.RateLimit implements com.jsgalactic.axiom.context.Middleware {
+  public com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.context.Middleware$Next) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/context/Middleware$Next;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.security.RateLimit$Decision acquire(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/RateLimit$Decision;
+  public int trackedKeys();
+    descriptor: ()I
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public static com.jsgalactic.axiom.security.RateLimit$Builder builder(long, java.time.Duration);
+    descriptor: (JLjava/time/Duration;)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+  public static final int MAX_KEY_LENGTH = 512;
+    descriptor: I
+}
+
+public static final class com.jsgalactic.axiom.security.RateLimit$Algorithm extends java.lang.Enum<com.jsgalactic.axiom.security.RateLimit$Algorithm> {
+  public static com.jsgalactic.axiom.security.RateLimit$Algorithm valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/RateLimit$Algorithm;
+  public static com.jsgalactic.axiom.security.RateLimit$Algorithm[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/security/RateLimit$Algorithm;
+  public static final com.jsgalactic.axiom.security.RateLimit$Algorithm SLIDING_WINDOW;
+    descriptor: Lcom/jsgalactic/axiom/security/RateLimit$Algorithm;
+  public static final com.jsgalactic.axiom.security.RateLimit$Algorithm TOKEN_BUCKET;
+    descriptor: Lcom/jsgalactic/axiom/security/RateLimit$Algorithm;
+}
+
+public static final class com.jsgalactic.axiom.security.RateLimit$Builder {
+  public com.jsgalactic.axiom.security.RateLimit build();
+    descriptor: ()Lcom/jsgalactic/axiom/security/RateLimit;
+  public com.jsgalactic.axiom.security.RateLimit$Builder algorithm(com.jsgalactic.axiom.security.RateLimit$Algorithm);
+    descriptor: (Lcom/jsgalactic/axiom/security/RateLimit$Algorithm;)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+  public com.jsgalactic.axiom.security.RateLimit$Builder burst(long);
+    descriptor: (J)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+  public com.jsgalactic.axiom.security.RateLimit$Builder clock(java.time.Clock);
+    descriptor: (Ljava/time/Clock;)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+  public com.jsgalactic.axiom.security.RateLimit$Builder headers(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+  public com.jsgalactic.axiom.security.RateLimit$Builder key(com.jsgalactic.axiom.security.RateLimitKey);
+    descriptor: (Lcom/jsgalactic/axiom/security/RateLimitKey;)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+  public com.jsgalactic.axiom.security.RateLimit$Builder maxKeys(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+  public com.jsgalactic.axiom.security.RateLimit$Builder metrics(com.jsgalactic.axiom.observability.Metrics);
+    descriptor: (Lcom/jsgalactic/axiom/observability/Metrics;)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+  public com.jsgalactic.axiom.security.RateLimit$Builder name(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/RateLimit$Builder;
+}
+
+public static final class com.jsgalactic.axiom.security.RateLimit$Decision extends java.lang.Record {
+  public boolean allowed();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.security.RateLimit$Decision(boolean, long, long, java.time.Duration, java.time.Duration);
+    descriptor: (ZJJLjava/time/Duration;Ljava/time/Duration;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Duration reset();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration retryAfter();
+    descriptor: ()Ljava/time/Duration;
+  public long limit();
+    descriptor: ()J
+  public long remaining();
+    descriptor: ()J
+}
+
+public interface com.jsgalactic.axiom.security.RateLimitKey {
+  public abstract java.util.Optional<java.lang.String> key(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Ljava/util/Optional;
+  public static com.jsgalactic.axiom.security.RateLimitKey clientAddress(com.jsgalactic.axiom.security.TrustedProxies);
+    descriptor: (Lcom/jsgalactic/axiom/security/TrustedProxies;)Lcom/jsgalactic/axiom/security/RateLimitKey;
+  public static com.jsgalactic.axiom.security.RateLimitKey peerAddress();
+    descriptor: ()Lcom/jsgalactic/axiom/security/RateLimitKey;
+  public static com.jsgalactic.axiom.security.RateLimitKey principal(com.jsgalactic.axiom.security.RateLimitKey);
+    descriptor: (Lcom/jsgalactic/axiom/security/RateLimitKey;)Lcom/jsgalactic/axiom/security/RateLimitKey;
+  public static final java.lang.String ANONYMOUS = "anonymous";
+    descriptor: Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.security.Security {
+  public com.jsgalactic.axiom.context.Middleware authenticate();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public com.jsgalactic.axiom.context.Middleware authenticated();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public com.jsgalactic.axiom.context.Middleware hasAnyRole(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/context/Middleware;
+  public com.jsgalactic.axiom.context.Middleware hasPermission(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/context/Middleware;
+  public com.jsgalactic.axiom.context.Middleware hasRole(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/context/Middleware;
+  public static com.jsgalactic.axiom.security.Security of(com.jsgalactic.axiom.security.Authenticator);
+    descriptor: (Lcom/jsgalactic/axiom/security/Authenticator;)Lcom/jsgalactic/axiom/security/Security;
+}
+
+public final class com.jsgalactic.axiom.security.SecurityHeaders implements com.jsgalactic.axiom.context.Middleware {
+  public com.jsgalactic.axiom.http.Response afterError(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.http.Response);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/http/Response;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.context.Middleware$Next) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/context/Middleware$Next;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.security.SecurityHeaders with(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/security/SecurityHeaders;
+  public com.jsgalactic.axiom.security.SecurityHeaders without(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/SecurityHeaders;
+  public java.util.Map<java.lang.String, java.lang.String> headers();
+    descriptor: ()Ljava/util/Map;
+  public static com.jsgalactic.axiom.security.SecurityHeaders defaults();
+    descriptor: ()Lcom/jsgalactic/axiom/security/SecurityHeaders;
+}
+
+public final class com.jsgalactic.axiom.security.Session {
+  public com.jsgalactic.axiom.security.Session attribute(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Session;
+  public com.jsgalactic.axiom.security.Session removeAttribute(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Session;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public synchronized boolean isNew();
+    descriptor: ()Z
+  public synchronized com.jsgalactic.axiom.security.Session authenticate(com.jsgalactic.axiom.context.SecurityIdentity);
+    descriptor: (Lcom/jsgalactic/axiom/context/SecurityIdentity;)Lcom/jsgalactic/axiom/security/Session;
+  public synchronized com.jsgalactic.axiom.security.Session invalidate();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Session;
+  public synchronized com.jsgalactic.axiom.security.Session rotate();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Session;
+  public synchronized java.util.Map<java.lang.String, java.lang.String> attributes();
+    descriptor: ()Ljava/util/Map;
+  public synchronized java.util.Optional<com.jsgalactic.axiom.context.SecurityIdentity> identity();
+    descriptor: ()Ljava/util/Optional;
+  public synchronized java.util.Optional<java.lang.String> attribute(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public synchronized java.util.Optional<java.time.Instant> createdAt();
+    descriptor: ()Ljava/util/Optional;
+}
+
+public final class com.jsgalactic.axiom.security.SessionAuthenticator implements com.jsgalactic.axiom.security.Authenticator {
+  public java.lang.String challenge();
+    descriptor: ()Ljava/lang/String;
+  public java.util.Optional<com.jsgalactic.axiom.context.SecurityIdentity> authenticate(com.jsgalactic.axiom.http.Request);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Ljava/util/Optional;
+}
+
+public final class com.jsgalactic.axiom.security.SessionState extends java.lang.Record {
+  public com.jsgalactic.axiom.security.SessionState withAttributes(java.util.Map<java.lang.String, java.lang.String>);
+    descriptor: (Ljava/util/Map;)Lcom/jsgalactic/axiom/security/SessionState;
+  public com.jsgalactic.axiom.security.SessionState withIdentity(java.util.Optional<com.jsgalactic.axiom.context.SecurityIdentity>);
+    descriptor: (Ljava/util/Optional;)Lcom/jsgalactic/axiom/security/SessionState;
+  public com.jsgalactic.axiom.security.SessionState withTimes(java.time.Instant, java.time.Instant);
+    descriptor: (Ljava/time/Instant;Ljava/time/Instant;)Lcom/jsgalactic/axiom/security/SessionState;
+  public com.jsgalactic.axiom.security.SessionState(java.util.Optional<com.jsgalactic.axiom.context.SecurityIdentity>, java.util.Map<java.lang.String, java.lang.String>, java.time.Instant, java.time.Instant);
+    descriptor: (Ljava/util/Optional;Ljava/util/Map;Ljava/time/Instant;Ljava/time/Instant;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Instant createdAt();
+    descriptor: ()Ljava/time/Instant;
+  public java.time.Instant lastAccessedAt();
+    descriptor: ()Ljava/time/Instant;
+  public java.util.Map<java.lang.String, java.lang.String> attributes();
+    descriptor: ()Ljava/util/Map;
+  public java.util.Optional<com.jsgalactic.axiom.context.SecurityIdentity> identity();
+    descriptor: ()Ljava/util/Optional;
+  public static com.jsgalactic.axiom.security.SessionState empty();
+    descriptor: ()Lcom/jsgalactic/axiom/security/SessionState;
+  public static final int MAX_ATTRIBUTES = 64;
+    descriptor: I
+  public static final int MAX_VALUE_LENGTH = 4096;
+    descriptor: I
+}
+
+public interface com.jsgalactic.axiom.security.SessionStore {
+  public abstract boolean create(java.lang.String, com.jsgalactic.axiom.security.SessionState);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/security/SessionState;)Z
+  public abstract boolean rename(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Z
+  public abstract boolean update(java.lang.String, java.util.function.UnaryOperator<com.jsgalactic.axiom.security.SessionState>);
+    descriptor: (Ljava/lang/String;Ljava/util/function/UnaryOperator;)Z
+  public abstract java.util.Optional<com.jsgalactic.axiom.security.SessionState> find(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+  public abstract void remove(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+}
+
+public final class com.jsgalactic.axiom.security.Sessions implements com.jsgalactic.axiom.context.Middleware {
+  public com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.context.Middleware$Next) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/context/Middleware$Next;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.security.Session session(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Lcom/jsgalactic/axiom/security/Session;
+  public com.jsgalactic.axiom.security.SessionAuthenticator authenticator();
+    descriptor: ()Lcom/jsgalactic/axiom/security/SessionAuthenticator;
+  public com.jsgalactic.axiom.security.SessionAuthenticator authenticator(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/SessionAuthenticator;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public static com.jsgalactic.axiom.security.Sessions$Builder builder(com.jsgalactic.axiom.security.SessionStore);
+    descriptor: (Lcom/jsgalactic/axiom/security/SessionStore;)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+}
+
+public static final class com.jsgalactic.axiom.security.Sessions$Builder {
+  public com.jsgalactic.axiom.security.Sessions build();
+    descriptor: ()Lcom/jsgalactic/axiom/security/Sessions;
+  public com.jsgalactic.axiom.security.Sessions$Builder cookieName(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+  public com.jsgalactic.axiom.security.Sessions$Builder domain(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+  public com.jsgalactic.axiom.security.Sessions$Builder maxAge(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+  public com.jsgalactic.axiom.security.Sessions$Builder maxCookieHeader(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+  public com.jsgalactic.axiom.security.Sessions$Builder path(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+  public com.jsgalactic.axiom.security.Sessions$Builder random(java.security.SecureRandom);
+    descriptor: (Ljava/security/SecureRandom;)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+  public com.jsgalactic.axiom.security.Sessions$Builder sameSite(com.jsgalactic.axiom.security.SetCookie$SameSite);
+    descriptor: (Lcom/jsgalactic/axiom/security/SetCookie$SameSite;)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+  public com.jsgalactic.axiom.security.Sessions$Builder secure(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/security/Sessions$Builder;
+}
+
+public final class com.jsgalactic.axiom.security.SetCookie {
+  public boolean isHttpOnly();
+    descriptor: ()Z
+  public boolean isSecure();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.http.Response addTo(com.jsgalactic.axiom.http.Response);
+    descriptor: (Lcom/jsgalactic/axiom/http/Response;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.security.SetCookie domain(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/SetCookie;
+  public com.jsgalactic.axiom.security.SetCookie expire();
+    descriptor: ()Lcom/jsgalactic/axiom/security/SetCookie;
+  public com.jsgalactic.axiom.security.SetCookie httpOnly(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/security/SetCookie;
+  public com.jsgalactic.axiom.security.SetCookie maxAge(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/security/SetCookie;
+  public com.jsgalactic.axiom.security.SetCookie path(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/SetCookie;
+  public com.jsgalactic.axiom.security.SetCookie sameSite(com.jsgalactic.axiom.security.SetCookie$SameSite);
+    descriptor: (Lcom/jsgalactic/axiom/security/SetCookie$SameSite;)Lcom/jsgalactic/axiom/security/SetCookie;
+  public com.jsgalactic.axiom.security.SetCookie secure(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/security/SetCookie;
+  public com.jsgalactic.axiom.security.SetCookie withValue(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/SetCookie;
+  public java.lang.String header();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String name();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String value();
+    descriptor: ()Ljava/lang/String;
+  public static com.jsgalactic.axiom.security.SetCookie of(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/security/SetCookie;
+}
+
+public static final class com.jsgalactic.axiom.security.SetCookie$SameSite extends java.lang.Enum<com.jsgalactic.axiom.security.SetCookie$SameSite> {
+  public static com.jsgalactic.axiom.security.SetCookie$SameSite valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/security/SetCookie$SameSite;
+  public static com.jsgalactic.axiom.security.SetCookie$SameSite[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/security/SetCookie$SameSite;
+  public static final com.jsgalactic.axiom.security.SetCookie$SameSite LAX;
+    descriptor: Lcom/jsgalactic/axiom/security/SetCookie$SameSite;
+  public static final com.jsgalactic.axiom.security.SetCookie$SameSite NONE;
+    descriptor: Lcom/jsgalactic/axiom/security/SetCookie$SameSite;
+  public static final com.jsgalactic.axiom.security.SetCookie$SameSite STRICT;
+    descriptor: Lcom/jsgalactic/axiom/security/SetCookie$SameSite;
+}
+
+public final class com.jsgalactic.axiom.security.TrustedProxies {
+  public boolean isTrusted(java.net.InetAddress);
+    descriptor: (Ljava/net/InetAddress;)Z
+  public com.jsgalactic.axiom.security.TrustedProxies reading(com.jsgalactic.axiom.security.ForwardedHeaders);
+    descriptor: (Lcom/jsgalactic/axiom/security/ForwardedHeaders;)Lcom/jsgalactic/axiom/security/TrustedProxies;
+  public java.util.Optional<com.jsgalactic.axiom.security.ClientOrigin> resolve(com.jsgalactic.axiom.http.Request);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Ljava/util/Optional;
+  public static com.jsgalactic.axiom.security.TrustedProxies none();
+    descriptor: ()Lcom/jsgalactic/axiom/security/TrustedProxies;
+  public static com.jsgalactic.axiom.security.TrustedProxies of(java.lang.String...);
+    descriptor: ([Ljava/lang/String;)Lcom/jsgalactic/axiom/security/TrustedProxies;
+}

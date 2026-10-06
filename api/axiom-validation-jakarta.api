@@ -1,0 +1,9 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.validation.jakarta.JakartaValidation implements com.jsgalactic.axiom.validation.Validator<java.lang.Object>, java.lang.AutoCloseable {
+  public java.util.List<com.jsgalactic.axiom.error.Violation> validate(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Ljava/util/List;
+  public static com.jsgalactic.axiom.validation.jakarta.JakartaValidation create(java.lang.Class<?>...);
+    descriptor: ([Ljava/lang/Class;)Lcom/jsgalactic/axiom/validation/jakarta/JakartaValidation;
+  public void close();
+    descriptor: ()V
+}

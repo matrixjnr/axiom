@@ -1,0 +1,45 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.openapi.OpenApi {
+  public com.jsgalactic.axiom.routing.Route serve(com.jsgalactic.axiom.application.Application, java.lang.String, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;Ljava/lang/String;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public com.jsgalactic.axiom.routing.Route serveSwagger(com.jsgalactic.axiom.application.Application, java.lang.String, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;Ljava/lang/String;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public java.lang.String render(com.jsgalactic.axiom.application.Application);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;)Ljava/lang/String;
+  public java.lang.String renderSwagger(com.jsgalactic.axiom.application.Application);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;)Ljava/lang/String;
+  public static com.jsgalactic.axiom.openapi.OpenApi$Builder builder(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/OpenApi$Builder;
+}
+
+public static final class com.jsgalactic.axiom.openapi.OpenApi$Builder {
+  public <T> com.jsgalactic.axiom.openapi.OpenApi$Builder rules(java.lang.Class<T>, com.jsgalactic.axiom.validation.Rules<T>);
+    descriptor: (Ljava/lang/Class;Lcom/jsgalactic/axiom/validation/Rules;)Lcom/jsgalactic/axiom/openapi/OpenApi$Builder;
+  public com.jsgalactic.axiom.openapi.OpenApi build();
+    descriptor: ()Lcom/jsgalactic/axiom/openapi/OpenApi;
+  public com.jsgalactic.axiom.openapi.OpenApi$Builder defaults(java.lang.String, com.jsgalactic.axiom.routing.RouteDoc);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/routing/RouteDoc;)Lcom/jsgalactic/axiom/openapi/OpenApi$Builder;
+  public com.jsgalactic.axiom.openapi.OpenApi$Builder description(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/OpenApi$Builder;
+  public com.jsgalactic.axiom.openapi.OpenApi$Builder maxDepth(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/openapi/OpenApi$Builder;
+  public com.jsgalactic.axiom.openapi.OpenApi$Builder schemaName(java.lang.Class<?>, java.lang.String);
+    descriptor: (Ljava/lang/Class;Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/OpenApi$Builder;
+  public com.jsgalactic.axiom.openapi.OpenApi$Builder securityScheme(java.lang.String, com.jsgalactic.axiom.openapi.SecurityScheme);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/openapi/SecurityScheme;)Lcom/jsgalactic/axiom/openapi/OpenApi$Builder;
+  public com.jsgalactic.axiom.openapi.OpenApi$Builder server(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/OpenApi$Builder;
+}
+
+public final class com.jsgalactic.axiom.openapi.SecurityScheme {
+  public static com.jsgalactic.axiom.openapi.SecurityScheme apiKeyHeader(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/SecurityScheme;
+  public static com.jsgalactic.axiom.openapi.SecurityScheme apiKeyQuery(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/SecurityScheme;
+  public static com.jsgalactic.axiom.openapi.SecurityScheme basic();
+    descriptor: ()Lcom/jsgalactic/axiom/openapi/SecurityScheme;
+  public static com.jsgalactic.axiom.openapi.SecurityScheme bearer();
+    descriptor: ()Lcom/jsgalactic/axiom/openapi/SecurityScheme;
+  public static com.jsgalactic.axiom.openapi.SecurityScheme bearer(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/openapi/SecurityScheme;
+}

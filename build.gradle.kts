@@ -12,6 +12,17 @@ tasks.named("check") { dependsOn(modules.map { "${it.path}:check" }) }
 tasks.named("check") { dependsOn(gradle.includedBuild("build-logic").task(":check")) }
 tasks.named("assemble") { dependsOn(modules.map { "${it.path}:assemble" }) }
 
+for (operation in listOf("apiDump", "apiCheck", "apiUpdate")) {
+    tasks.register(operation) {
+        group = "verification"
+        description = "Runs $operation for every published Java module."
+        dependsOn(provider {
+            subprojects.filter { it.pluginManager.hasPlugin("axiom.api-signatures") }
+                .map { "${it.path}:$operation" }
+        })
+    }
+}
+
 // README examples: a code block marked `<!-- snippet: path -->` must equal the compiled source it
 // quotes (see docs/build.md), so the examples cannot go stale silently.
 val checkReadmeSnippets = tasks.register<CheckReadmeSnippets>("checkReadmeSnippets") {

@@ -1,0 +1,79 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.test.StreamBuffering extends java.lang.Record {
+  public com.jsgalactic.axiom.test.StreamBuffering withStallTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/test/StreamBuffering;
+  public com.jsgalactic.axiom.test.StreamBuffering(int, int, int, java.time.Duration);
+    descriptor: (IIILjava/time/Duration;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public int highWaterBytes();
+    descriptor: ()I
+  public int lowWaterBytes();
+    descriptor: ()I
+  public int pieceBytes();
+    descriptor: ()I
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Duration stallTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public static com.jsgalactic.axiom.test.StreamBuffering listener();
+    descriptor: ()Lcom/jsgalactic/axiom/test/StreamBuffering;
+  public static com.jsgalactic.axiom.test.StreamBuffering ofBytes(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/test/StreamBuffering;
+  public static final com.jsgalactic.axiom.test.StreamBuffering HAND_OFF;
+    descriptor: Lcom/jsgalactic/axiom/test/StreamBuffering;
+}
+
+public final class com.jsgalactic.axiom.test.StreamedResponse implements java.lang.AutoCloseable {
+  public byte[] readAll() throws java.lang.InterruptedException;
+    descriptor: ()[B
+  public int status();
+    descriptor: ()I
+  public java.lang.String readAllText() throws java.lang.InterruptedException;
+    descriptor: ()Ljava/lang/String;
+  public java.util.Map<java.lang.String, java.lang.String> headers();
+    descriptor: ()Ljava/util/Map;
+  public java.util.Optional<byte[]> next() throws java.lang.InterruptedException;
+    descriptor: ()Ljava/util/Optional;
+  public java.util.Optional<java.lang.String> nextText() throws java.lang.InterruptedException;
+    descriptor: ()Ljava/util/Optional;
+  public java.util.concurrent.CompletableFuture<java.lang.Void> completion();
+    descriptor: ()Ljava/util/concurrent/CompletableFuture;
+  public void beginShutdown();
+    descriptor: ()V
+  public void close();
+    descriptor: ()V
+}
+
+public final class com.jsgalactic.axiom.test.TestClient implements java.lang.AutoCloseable {
+  public com.jsgalactic.axiom.http.Response execute(com.jsgalactic.axiom.http.Request) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response get(java.lang.String) throws java.lang.Exception;
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response patch(java.lang.String, java.lang.String, byte[]) throws java.lang.Exception;
+    descriptor: (Ljava/lang/String;Ljava/lang/String;[B)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response patch(java.lang.String, java.lang.String, java.lang.String) throws java.lang.Exception;
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response post(java.lang.String, java.lang.String, byte[]) throws java.lang.Exception;
+    descriptor: (Ljava/lang/String;Ljava/lang/String;[B)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response post(java.lang.String, java.lang.String, java.lang.String) throws java.lang.Exception;
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response put(java.lang.String, java.lang.String, byte[]) throws java.lang.Exception;
+    descriptor: (Ljava/lang/String;Ljava/lang/String;[B)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response put(java.lang.String, java.lang.String, java.lang.String) throws java.lang.Exception;
+    descriptor: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.test.StreamedResponse stream(com.jsgalactic.axiom.http.Request) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Lcom/jsgalactic/axiom/test/StreamedResponse;
+  public java.util.concurrent.CompletableFuture<com.jsgalactic.axiom.http.Response> submit(com.jsgalactic.axiom.http.Request);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;)Ljava/util/concurrent/CompletableFuture;
+  public static com.jsgalactic.axiom.test.TestClient start(com.jsgalactic.axiom.application.Application);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;)Lcom/jsgalactic/axiom/test/TestClient;
+  public static com.jsgalactic.axiom.test.TestClient start(com.jsgalactic.axiom.application.Application, com.jsgalactic.axiom.test.StreamBuffering);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;Lcom/jsgalactic/axiom/test/StreamBuffering;)Lcom/jsgalactic/axiom/test/TestClient;
+  public static com.jsgalactic.axiom.test.TestClient startMappingFailures(com.jsgalactic.axiom.application.Application);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;)Lcom/jsgalactic/axiom/test/TestClient;
+  public void close();
+    descriptor: ()V
+}
