@@ -336,8 +336,10 @@ each starts the application and checks, over HTTP, a valid request (201) and an 
 one (422 with only field paths and codes, no echoed input). This checks the publication
 metadata of both validation modules from a consumer's point of view. The Groovy and Maven
 consumers do not use the validation modules.
-The Maven task is skipped when `mvn` is not on the path. The task is not part of
-`check`; the Compatibility workflow and the release workflow run it.
+On Windows, the consumer tasks use `gradlew.bat` and `mvn.cmd`; other platforms use
+`gradlew` and `mvn`. The Maven task is skipped when its platform launcher is not on
+the path. The task is not part of `check`; the Compatibility workflow and the release
+workflow run it.
 
 ## Dependency verification
 

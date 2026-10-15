@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use Windows launchers for Gradle and Maven consumer compatibility tasks, including Maven availability detection.
 - Compare versioned JAR bundles with separate baseline/candidate dependency classpaths, source and binary compatibility reports, and metadata review for records, sealed classes and annotations. Retain checksummed bundle inventories in CI; supplied baselines make artifact comparison part of `check` and are protected from generated-output cleanup.
 - Run explicitly requested API baseline updates before API checks when both tasks are in the same build. Ordinary checks continue to leave the reviewed baselines untouched.
 - Add a public/protected API signature review gate to every published Java module. `check` rejects unreviewed declaration and JVM descriptor changes; `apiDump` prepares a review and `apiUpdate` explicitly refreshes checked-in baselines. Document the review and migration policy and the gate's compatibility-analysis limits.
