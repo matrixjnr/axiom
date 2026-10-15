@@ -74,7 +74,7 @@ class TestClientErrorHandlerTest {
         app.get("/unmapped", ctx -> { throw new UnsupportedOperationException(POISON); });
         try (var client = TestClient.start(app)) {
             assertThatThrownBy(() -> client.get("/unmapped")).isInstanceOf(UnsupportedOperationException.class);
-            assertThatThrownBy(() -> client.get("/unsendable")).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> client.get("/unsendable")).isInstanceOf(IllegalArgumentException.class);
         }
     }
 

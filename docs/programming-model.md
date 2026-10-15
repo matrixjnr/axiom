@@ -154,10 +154,9 @@ A handler returns an object or throws an exception:
 - `String`: status 200 by default, with `text/plain; charset=utf-8`.
 - `byte[]`: status 200 by default, with `application/octet-stream`; copied defensively.
 - `null`: status 204 unless a status was explicitly set on the context.
-- Other objects: retained without copying. `ctx.json(value)` marks a value for the
-  JSON codec, which encodes it when the response is prepared; values without a codec
-  for their Content-Type reach in-memory callers unchanged and the HTTP transport
-  answers them with 500.
+- Other objects: rejected with `IllegalArgumentException`. Use `ctx.json(value)` or
+  `ctx.encode(contentType, value)` to encode during the call. Keep the value stable
+  until encoding returns; the response owns a snapshot of the encoded bytes.
 
 `ctx.status(201).text("created")` sets a status and returns a response snapshot.
 `ctx.status(201).json(item).withLocation("/items/7")` creates a JSON 201 with a
@@ -204,8 +203,9 @@ and validated by `Request.fromTarget` like the listener's; a target the listener
 would answer with 400 throws `IllegalArgumentException` instead. The body limit (413), routing errors and `AxiomException` mapping
 produce the same problem responses as a listener. Other handler exceptions
 propagate rather than becoming 500 responses. Response bodies the transport cannot
-send (anything other than `String` or `byte[]` after encoding, or over the size
-limits) fail with `IllegalStateException` where a listener would answer 500; the
+send because they exceed the size limits fail with `IllegalStateException` where a
+listener would answer 500. Unsupported object bodies fail earlier with
+`IllegalArgumentException` at response construction; the
 client and the listener read these rules from one shared definition.
 Sockets, HTTP parsing and connection behavior (414, 431, Expect, pipelining)
 are not simulated.

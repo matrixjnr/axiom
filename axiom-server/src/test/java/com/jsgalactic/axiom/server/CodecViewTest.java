@@ -1,6 +1,7 @@
 package com.jsgalactic.axiom.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.jsgalactic.axiom.Axiom;
@@ -40,6 +41,42 @@ class CodecViewTest {
 
     private static Request post(String path, String contentType, byte[] body) {
         return new Request("POST", path).withBody(Body.of(contentType, body));
+    }
+
+    @Test void snapshotsCustomCodecResponsesDuringTheCall(@TempDir Path services) throws Exception {
+        var app = Axiom.create();
+        var value = new StringBuilder("before");
+        app.get("/custom", ctx -> {
+            var response = ctx.status(201).encode(ViewCodec.MEDIA_TYPE, value);
+            value.append("-after");
+            return response;
+        });
+        try (var running = start(app, services)) {
+            var response = running.handle(Request.get("/custom"));
+            assertThat(response.status()).isEqualTo(201);
+            assertThat(response.headers()).containsEntry("Content-Type", ViewCodec.MEDIA_TYPE);
+            assertThat((byte[]) response.body()).isEqualTo("before".getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test void ownsCodecOutputAndRejectsNullOutputImmediately(@TempDir Path services) throws Exception {
+        var app = Axiom.create();
+        var bytes = "before".getBytes(StandardCharsets.UTF_8);
+        app.get("/owned", ctx -> {
+            var response = ctx.encode(ViewCodec.MEDIA_TYPE, new byte[][] {bytes});
+            bytes[0] = 'X';
+            return response;
+        });
+        app.get("/null", ctx -> {
+            assertThatThrownBy(() -> ctx.encode(ViewCodec.MEDIA_TYPE, new byte[0][]))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("returned null");
+            return "checked";
+        });
+        try (var running = start(app, services)) {
+            assertThat((byte[]) running.handle(Request.get("/owned")).body())
+                    .isEqualTo("before".getBytes(StandardCharsets.UTF_8));
+            assertThat(running.handle(Request.get("/null")).body()).isEqualTo("checked");
+        }
     }
 
     @Test void passesTheBodyAsAReadOnlyViewWithoutCopyingIt(@TempDir Path services) throws Exception {

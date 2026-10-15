@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * The outermost step of a route's chain, outside every middleware. It encodes the chain's response
+ * The outermost step of a route's chain, outside every middleware. It negotiates the chain's response
  * (the Accept check, 406) and turns exceptions into responses with the error handlers of the
  * route's scopes, so that middleware can decorate those responses through
  * {@link Middleware#afterError}. An exception no handler maps and that is not an
@@ -39,11 +39,11 @@ final class ErrorBoundary implements Handler {
     public Object handle(Context context) throws Exception {
         var state = (DefaultContext) context;
         try {
-            // Composed chains always return a Response; encoding runs once, after every middleware.
+            // Composed chains always return a Response whose buffered body is already owned.
             var response = (Response) chain.handle(state);
-            // A failure to encode happens after every middleware returned: all of them decorate it.
+            // Negotiation happens after every middleware returned: all of them decorate failures.
             state.entered(middleware.length);
-            return encode(state.codecs(), state.request(), response, safe(state.request().method()));
+            return negotiate(state.codecs(), state.request(), response, safe(state.request().method()));
         } catch (Exception failure) {
             return decorate(state, map(state, failure));
         }
@@ -89,7 +89,7 @@ final class ErrorBoundary implements Handler {
                 throw new IllegalStateException("Error handler for " + failure.getClass().getName() + " returned null");
             }
             // Error responses are sent whatever the client accepts, like problem responses.
-            var encoded = encode(context.codecs(), context.request(), response, false);
+            var encoded = negotiate(context.codecs(), context.request(), response, false);
             logMapped(context, failure, encoded.status(), true);
             return encoded;
         } catch (AxiomException translated) {
@@ -155,21 +155,15 @@ final class ErrorBoundary implements Handler {
 
     /**
      * Prepares a response whose Content-Type has an installed codec: checks the request's Accept
-     * header (406 when nothing matches) and encodes values other than String and byte[].
+     * header (406 when nothing matches). Buffered bodies were encoded before construction.
      */
-    static Response encode(Codecs codecs, Request request, Response response, boolean negotiate) {
+    private static Response negotiate(Codecs codecs, Request request, Response response, boolean negotiate) {
         var mediaType = Codecs.mediaType(response.headers().get("Content-Type"));
         var codec = mediaType == null ? null : codecs.forMediaType(mediaType);
         if (codec == null) { return response; }
         if (negotiate && !Codecs.acceptable(request.header("Accept").orElse(null), mediaType)) {
             throw new NotAcceptableException();
         }
-        var body = response.body();
-        if (body == null || body instanceof String || body instanceof byte[] || response.isStreaming()) { return response; }
-        var encoded = Response.of(response.status(), codec.encode(body));
-        for (var header : response.headers().entrySet()) {
-            encoded = encoded.withHeader(header.getKey(), header.getValue());
-        }
-        return encoded;
+        return response;
     }
 }

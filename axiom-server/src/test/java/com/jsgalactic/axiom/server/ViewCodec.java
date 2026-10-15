@@ -28,5 +28,9 @@ public final class ViewCodec implements BodyCodec {
         throw new AssertionError("The runtime copied the body instead of passing a view");
     }
 
-    @Override public byte[] encode(Object value) { return value.toString().getBytes(StandardCharsets.UTF_8); }
+    @Override public byte[] encode(Object value) {
+        // Ownership probes: return a caller-visible array, or violate the non-null SPI contract.
+        if (value instanceof byte[][] arrays) { return arrays.length == 0 ? null : arrays[0]; }
+        return value.toString().getBytes(StandardCharsets.UTF_8);
+    }
 }

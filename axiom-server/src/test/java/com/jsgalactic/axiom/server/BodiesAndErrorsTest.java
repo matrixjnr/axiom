@@ -75,7 +75,7 @@ class BodiesAndErrorsTest {
         return app.start();
     }
 
-    @Test void decodesRecordBodiesAndEncodesJsonResponsesWhenPrepared() throws Exception {
+    @Test void decodesRecordBodiesAndEncodesJsonResponsesDuringMapping() throws Exception {
         try (var app = notes()) {
             var response = app.handle(post("/notes/7", "application/json; charset=UTF-8", "title=hello;priority=2"));
             assertThat(response.status()).isEqualTo(201);

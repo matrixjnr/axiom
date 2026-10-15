@@ -55,7 +55,7 @@ class TestClientTest {
         app.get("/object", ctx -> java.util.List.of("not serializable"));
         try (var client = TestClient.start(app)) {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.get("/object"))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("cannot be serialized");
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Context.json");
         }
     }
 

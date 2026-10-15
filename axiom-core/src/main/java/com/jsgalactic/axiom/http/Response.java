@@ -15,13 +15,12 @@ import java.util.regex.Pattern;
 
 /**
  * A response value before wire encoding. Header maps and byte arrays are defensively
- * copied; arbitrary body objects remain owned by the caller and are not deep-copied.
+ * copied. Buffered responses never retain arbitrary application objects.
  * Header names are case-insensitive. One value per header is supported at this stage.
  * <p>
- * Bodies may be {@code null}, a {@link String}, a {@code byte[]}, or any other object.
- * Other objects are retained without copying. When the response is prepared, the runtime
- * encodes them with the installed codec for the response's Content-Type (see
- * {@code Context.json}); without such a codec the HTTP transport answers 500. Two responses are equal when their statuses,
+ * Buffered bodies may be {@code null}, a {@link String}, or a {@code byte[]}.
+ * Encode application objects with {@code Context.json} or {@code Context.encode} before
+ * constructing a response. Two responses are equal when their statuses,
  * headers (names compared case-insensitively), and bodies are equal, comparing byte arrays
  * by content and other bodies with {@link Object#equals(Object)}.
  * <p>
@@ -72,11 +71,15 @@ public final class Response {
      * @param status final HTTP status (200-599)
      * @param body body value or null
      * @return a response with a content type for String or byte[] bodies
-     * @throws IllegalArgumentException for a {@link StreamBody}; use {@link #stream}
+     * @throws IllegalArgumentException for any other body type; encode objects first,
+     *         and use {@link #stream} for a {@link StreamBody}
      */
     public static Response of(int status, Object body) {
         if (body instanceof StreamBody) {
             throw new IllegalArgumentException("A StreamBody must be sent with Response.stream");
+        }
+        if (body != null && !(body instanceof String) && !(body instanceof byte[])) {
+            throw new IllegalArgumentException("Response bodies must be String, byte[] or null; use Context.json or Context.encode for objects");
         }
         Map<String, String> headers = body instanceof String
                 ? Map.of("Content-Type", "text/plain; charset=utf-8")

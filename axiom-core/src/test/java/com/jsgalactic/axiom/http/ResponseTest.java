@@ -65,8 +65,6 @@ class ResponseTest {
         assertThat(bytes).isNotEqualTo(Response.of(200, new byte[] {1, 2}).withHeader("X-Test", "V"));
         assertThat(Response.of(200, "a")).isEqualTo(Response.of(200, "a")).isNotEqualTo(Response.of(200, "b"));
         assertThat(Response.of(204, null)).isEqualTo(Response.of(204, null)).isNotEqualTo(null);
-        record Payload(String value) {}
-        assertThat(Response.of(200, new Payload("x"))).isEqualTo(Response.of(200, new Payload("x")));
     }
 
     @Test
@@ -75,7 +73,14 @@ class ResponseTest {
                 "Response[status=201, headers={Content-Type=text/plain; charset=utf-8}, body=\"hi\"]");
         assertThat(Response.of(200, new byte[3]).toString()).endsWith("body=byte[3]]");
         assertThat(Response.of(200, "x".repeat(100)).toString()).contains("... (100 chars)");
-        assertThat(Response.of(200, 42).toString()).endsWith("body=java.lang.Integer]");
+    }
+
+    @Test
+    void rejectsObjectBodiesBeforeTheyCanBeRetained() {
+        for (var body : new Object[] {42, new StringBuilder("mutable"), java.util.Map.of("key", "value")}) {
+            assertThatIllegalArgumentException().isThrownBy(() -> Response.of(200, body))
+                    .withMessageContaining("Context.json or Context.encode");
+        }
     }
 
     @Test

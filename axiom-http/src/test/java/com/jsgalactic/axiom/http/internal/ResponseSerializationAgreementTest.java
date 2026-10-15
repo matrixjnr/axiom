@@ -27,7 +27,6 @@ class ResponseSerializationAgreementTest {
         cases.put("/wide-over", () -> "é".repeat(MIB / 2 + 1));
         cases.put("/bytes-at-limit", () -> new byte[MIB]);
         cases.put("/bytes-over", () -> new byte[MIB + 1]);
-        cases.put("/object", () -> new StringBuilder("x"));
         cases.put("/headers-at-limit", () -> Response.of(204, null).withHeader("A", "v".repeat(8192 - 5)));
         cases.put("/headers-over", () -> Response.of(204, null).withHeader("A", "v".repeat(8192 - 4)));
         cases.put("/latin1", () -> Response.of(204, null).withHeader("A", "ÿ"));
@@ -45,6 +44,21 @@ class ResponseSerializationAgreementTest {
                         int status = wire.read(method.equals("HEAD")).status();
                         assertThat(status == 500).as(method + " " + path + " answered " + status).isEqualTo(refused);
                     }
+                }
+            }
+        }
+    }
+
+    @Test void unsupportedBodiesReachRouteErrorHandlersBeforeTransportSerialization() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.app.get("/object", ctx -> new StringBuilder("private payload"));
+            fixture.app.error(IllegalArgumentException.class, (ctx, failure) -> ctx.status(422).text("unsupported_body"));
+            var server = fixture.listen();
+            assertThat(fixture.app.handle(Request.get("/object")).status()).isEqualTo(422);
+            for (var method : new String[] {"GET", "HEAD"}) {
+                try (var wire = new Wire(server)) {
+                    wire.write(method + " /object HTTP/1.1\r\nHost: a\r\n\r\n");
+                    assertThat(wire.read(method.equals("HEAD")).status()).as(method).isEqualTo(422);
                 }
             }
         }

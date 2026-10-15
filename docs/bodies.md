@@ -321,9 +321,30 @@ supported type. To accept a lenient shape for one field, declare it as `String` 
 ## Encoding
 
 `ctx.json(value)` returns a response with `Content-Type: application/json`. The
-value is encoded when the response is prepared, after the handler returns, on the
-request's virtual thread. A `String` or `byte[]` passed to `json` is sent verbatim
-as already-encoded JSON. Text and byte responses are not negotiated.
+value is encoded during the call, on the request's virtual thread. The response
+owns a copy of the encoded bytes. Keep the value and its object graph stable until
+the call returns; later changes cannot affect the response. A `String` or `byte[]`
+passed to `json` is sent verbatim as already-encoded JSON, with byte arrays copied.
+
+Use `ctx.encode("application/custom", value)` for another installed codec. A missing
+codec or encoding failure throws during this call and follows the route's normal
+error handling. Middleware sees encoded bytes, never the original object.
+
+### Migration from deferred object bodies
+
+`Response.of(status, body)` and plain handler results accept only `String`, `byte[]`
+and `null`. Other objects throw `IllegalArgumentException` immediately. Replace
+`Response.of(201, value).withHeader("Content-Type", "application/json")` with
+`ctx.status(201).json(value)`, or use `ctx.status(201).encode(contentType, value)`
+for a custom codec. Returning an arbitrary object without choosing a codec is no
+longer supported, including through in-memory application handling.
+Custom `Context` implementations that support object encoding must implement
+`encode`; its default implementation handles only already-encoded strings and bytes.
+
+Apply transformations to the value before encoding. Changing a response's
+Content-Type later relabels its existing bytes; it does not encode them again.
+Streaming writers retain their existing lifecycle and must manage any state they
+capture until the stream ends; this snapshot rule applies to buffered bodies.
 
 ### Accept negotiation (406)
 

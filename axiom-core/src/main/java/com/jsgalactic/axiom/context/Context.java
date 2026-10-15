@@ -320,18 +320,43 @@ public interface Context {
 
     /**
      * Maps a value to a JSON response using the current status (200 by default). The value is
-     * encoded by the installed {@code application/json} codec when the response is prepared,
-     * after the handler returns. A {@code String} or {@code byte[]} value is sent verbatim as
-     * already-encoded JSON. Without a JSON codec installed the response cannot be sent and the
-     * listener answers 500.
+     * encoded by the installed {@code application/json} codec during this call. Keep the value
+     * stable until the call returns; later mutations cannot change the response. A {@code String}
+     * or {@code byte[]} value is sent verbatim as already-encoded JSON. An object without an
+     * installed JSON codec fails immediately with {@link IllegalStateException}.
      *
      * @param value non-null value to encode
      * @return response with {@code Content-Type: application/json}
      * @throws IllegalStateException if the status set on this context cannot carry a body
      */
     default Response json(Object value) {
-        return response(java.util.Objects.requireNonNull(value, "value"))
-                .withHeader("Content-Type", "application/json");
+        return encode("application/json", value);
+    }
+
+    /**
+     * Encodes an object with the installed codec for the supplied Content-Type during this call.
+     * The response owns a snapshot of the encoded bytes. Keep the value stable until this method
+     * returns; codecs must not retain it. Strings and byte arrays are already encoded and bypass
+     * the codec. Accept negotiation still occurs after middleware returns.
+     *
+     * @param contentType response Content-Type, including optional parameters
+     * @param value non-null body value
+     * @return response using the current status and supplied Content-Type
+     * @throws IllegalArgumentException for an invalid content type
+     * @throws IllegalStateException if an object has no codec, encoding fails or the status cannot carry a body
+     * @throws UnsupportedOperationException if a custom context does not implement object encoding
+     */
+    default Response encode(String contentType, Object value) {
+        java.util.Objects.requireNonNull(contentType, "contentType");
+        java.util.Objects.requireNonNull(value, "value");
+        if (!(value instanceof String) && !(value instanceof byte[])) {
+            throw new UnsupportedOperationException("This context cannot encode object bodies");
+        }
+        var type = com.jsgalactic.axiom.http.Body.of(contentType, new byte[0]).mediaType();
+        if (type.isEmpty() || type.get().indexOf('*') >= 0) {
+            throw new IllegalArgumentException("Content-Type must contain an exact type/subtype");
+        }
+        return response(value).withHeader("Content-Type", contentType);
     }
 
     /**
@@ -476,12 +501,13 @@ public interface Context {
     /**
      * Maps a body using the current status (200 by default).
      * Strings use UTF-8 text and byte arrays use application/octet-stream.
-     * Other objects are retained without a Content-Type and are not encoded; use
+     * Other objects are rejected immediately; use
      * {@link #json(Object)} to encode them with the JSON codec.
      * Null without an explicit status produces 204.
      * @param body returned body, or null
      * @return a response snapshot
      * @throws IllegalStateException if the status set on this context cannot carry a body
+     * @throws IllegalArgumentException if the body is not String, byte[] or null
      */
     Response response(Object body);
 

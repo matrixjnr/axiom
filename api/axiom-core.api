@@ -142,6 +142,8 @@ public interface com.jsgalactic.axiom.context.Context {
     descriptor: (Lcom/jsgalactic/axiom/context/SecurityIdentity;)Lcom/jsgalactic/axiom/context/Context;
   public default com.jsgalactic.axiom.http.Response automaticOptions();
     descriptor: ()Lcom/jsgalactic/axiom/http/Response;
+  public default com.jsgalactic.axiom.http.Response encode(java.lang.String, java.lang.Object);
+    descriptor: (Ljava/lang/String;Ljava/lang/Object;)Lcom/jsgalactic/axiom/http/Response;
   public default com.jsgalactic.axiom.http.Response json(java.lang.Object);
     descriptor: (Ljava/lang/Object;)Lcom/jsgalactic/axiom/http/Response;
   public default com.jsgalactic.axiom.http.Response noContent();
