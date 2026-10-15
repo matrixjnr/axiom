@@ -12,7 +12,7 @@ tasks.named("check") { dependsOn(modules.map { "${it.path}:check" }) }
 tasks.named("check") { dependsOn(gradle.includedBuild("build-logic").task(":check")) }
 tasks.named("assemble") { dependsOn(modules.map { "${it.path}:assemble" }) }
 
-for (operation in listOf("apiDump", "apiCheck", "apiUpdate")) {
+for (operation in listOf("apiDump", "apiCheck", "apiUpdate", "captureApiArtifact", "apiArtifactCheck")) {
     tasks.register(operation) {
         group = "verification"
         description = "Runs $operation for every published Java module."
@@ -22,6 +22,41 @@ for (operation in listOf("apiDump", "apiCheck", "apiUpdate")) {
         })
     }
 }
+
+val artifactInventory = tasks.register<WriteApiArtifactInventory>("writeApiArtifactInventory") {
+    destination.set(layout.buildDirectory.file("api-artifacts/inventory.properties"))
+}
+subprojects {
+    val module = this
+    pluginManager.withPlugin("axiom.api-signatures") {
+        artifactInventory.configure {
+            manifests.from(module.tasks.named<CaptureApiArtifact>("captureApiArtifact")
+                .flatMap { it.destination.file("manifest.properties") })
+        }
+    }
+}
+tasks.named("captureApiArtifact") { dependsOn(artifactInventory) }
+val retainedArtifactRoot = providers.gradleProperty("apiBaselineDir")
+val artifactRootDirectory = layout.projectDirectory
+// Validate before any task (including clean) can remove a retained baseline.
+if (retainedArtifactRoot.isPresent) {
+    val retainedPath = artifactRootDirectory.dir(retainedArtifactRoot.get()).asFile.canonicalFile.toPath()
+    gradle.projectsEvaluated {
+        allprojects.forEach { module ->
+            val generatedPath = module.layout.buildDirectory.get().asFile.canonicalFile.toPath()
+            require(!retainedPath.startsWith(generatedPath) && !generatedPath.startsWith(retainedPath)) {
+                "Retained API baseline must be outside every project's build directory: $retainedPath"
+            }
+        }
+    }
+}
+val artifactInventoryCheck = tasks.register<CheckApiArtifactInventory>("checkApiArtifactInventory") {
+    baseline.set(retainedArtifactRoot.map { artifactRootDirectory.dir(it) })
+    baselineVersion.set(providers.gradleProperty("apiBaselineVersion"))
+    currentModules.set(provider { subprojects.filter { it.pluginManager.hasPlugin("axiom.api-signatures") }.map { it.name }.sorted() })
+}
+tasks.named("apiArtifactCheck") { dependsOn(artifactInventoryCheck, artifactInventory) }
+if (retainedArtifactRoot.isPresent) tasks.named("check") { dependsOn(artifactInventoryCheck, artifactInventory) }
 
 // README examples: a code block marked `<!-- snippet: path -->` must equal the compiled source it
 // quotes (see docs/build.md), so the examples cannot go stale silently.
