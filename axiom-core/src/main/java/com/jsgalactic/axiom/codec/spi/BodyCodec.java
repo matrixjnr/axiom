@@ -81,10 +81,12 @@ public interface BodyCodec {
     }
 
     /**
-     * Encodes a response value.
+     * Encodes a response value synchronously during Context.json or Context.encode.
+     * The caller keeps the value stable until this method returns. Do not retain the value
+     * or references into its object graph. The runtime copies the returned bytes into the response.
      *
      * @param value value to encode, never a String or byte array
-     * @return encoded UTF-8 bytes
+     * @return encoded UTF-8 bytes, never null
      * @throws IllegalStateException if the value cannot be encoded
      */
     byte[] encode(Object value);

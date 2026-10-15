@@ -134,7 +134,8 @@ class ApplicationTest {
             assertThat(app.handle(Request.get("/null")).status()).isEqualTo(204);
             assertThat(app.handle(Request.get("/empty")).body()).isNull();
             assertThat(app.handle(Request.get("/explicit"))).isSameAs(explicit);
-            assertThat(app.handle(Request.get("/object")).body()).isSameAs(payload);
+            assertThatThrownBy(() -> app.handle(Request.get("/object")))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Context.json");
             assertThat(app.handle(Request.get("/status")).status()).isEqualTo(202);
         }
     }

@@ -157,6 +157,32 @@ final class DefaultContext implements Context {
 
     @Override
     public Response response(Object body) {
+        validateBodyStatus(body);
+        return Response.of(body == null && !explicitStatus ? 204 : status, body);
+    }
+
+    @Override
+    public Response encode(String contentType, Object value) {
+        java.util.Objects.requireNonNull(value, "value");
+        java.util.Objects.requireNonNull(contentType, "contentType");
+        validateBodyStatus(value);
+        // Validate the header before invoking application codec code.
+        Response.of(status, null).withHeader("Content-Type", contentType);
+        var mediaType = Codecs.mediaType(contentType);
+        if (mediaType == null || mediaType.indexOf('*') >= 0) {
+            throw new IllegalArgumentException("Content-Type must contain an exact type/subtype");
+        }
+        if (value instanceof String || value instanceof byte[]) {
+            return response(value).withHeader("Content-Type", contentType);
+        }
+        var codec = codecs.forMediaType(mediaType);
+        if (codec == null) { throw new IllegalStateException("No body codec installed for " + mediaType); }
+        var bytes = codec.encode(value);
+        if (bytes == null) { throw new IllegalStateException("Body codec returned null instead of encoded bytes"); }
+        return response(bytes).withHeader("Content-Type", contentType);
+    }
+
+    private void validateBodyStatus(Object body) {
         if (body != null && (status == 204 || status == 205 || status == 304)) {
             var route = match == null ? "unmatched request " + request.method() : "Route " + match.route().method()
                     + " " + match.route().path();
@@ -164,6 +190,5 @@ final class DefaultContext implements Context {
                     + status + ", which cannot carry a body, but produced a " + body.getClass().getName()
                     + " body; return null or a Response without a body");
         }
-        return Response.of(body == null && !explicitStatus ? 204 : status, body);
     }
 }

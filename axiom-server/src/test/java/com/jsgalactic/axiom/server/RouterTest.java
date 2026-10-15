@@ -39,10 +39,10 @@ class RouterTest {
                 assertThatThrownBy(() -> ctx.pathParameters().put("team", "changed"))
                         .isInstanceOf(UnsupportedOperationException.class);
                 assertThatIllegalArgumentException().isThrownBy(() -> ctx.path("missing"));
-                return ctx.route();
+                return ctx.route().path();
             });
             app.start();
-            assertThat(app.handle(Request.get("/teams/a%20b/users/%E2%82%AC")).body()).isEqualTo(route);
+            assertThat(app.handle(Request.get("/teams/a%20b/users/%E2%82%AC")).body()).isEqualTo(route.path());
         }
     }
 
@@ -186,16 +186,16 @@ class RouterTest {
     @Test
     void parameterNamesBelongToEndpointsNotSharedTrieEdges() throws Exception {
         try (var app = Axiom.create()) {
-            app.get("/:team/members/:member", ctx -> ctx.pathParameters());
-            app.get("/:organization/settings/:key", ctx -> ctx.pathParameters());
-            app.post("/:company/members/:person", ctx -> ctx.pathParameters());
+            app.get("/:team/members/:member", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
+            app.get("/:organization/settings/:key", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
+            app.post("/:company/members/:person", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
             app.start();
             assertThat(app.handle(Request.get("/t/members/m")).body())
-                    .isEqualTo(Map.of("team", "t", "member", "m"));
+                    .isEqualTo(new java.util.TreeMap<>(Map.of("team", "t", "member", "m")).toString());
             assertThat(app.handle(Request.get("/o/settings/k")).body())
-                    .isEqualTo(Map.of("organization", "o", "key", "k"));
+                    .isEqualTo(new java.util.TreeMap<>(Map.of("organization", "o", "key", "k")).toString());
             assertThat(app.handle(new Request("POST", "/c/members/p")).body())
-                    .isEqualTo(Map.of("company", "c", "person", "p"));
+                    .isEqualTo(new java.util.TreeMap<>(Map.of("company", "c", "person", "p")).toString());
         }
     }
 
@@ -219,11 +219,11 @@ class RouterTest {
     @Test
     void failedBacktrackingDoesNotLeakCaptureValues() throws Exception {
         try (var app = Axiom.create()) {
-            app.get("/:wrong/fixed/no", ctx -> ctx.pathParameters());
-            app.get("/:right/:next/yes", ctx -> ctx.pathParameters());
+            app.get("/:wrong/fixed/no", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
+            app.get("/:right/:next/yes", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
             app.start();
             assertThat(app.handle(Request.get("/a/fixed/yes")).body())
-                    .isEqualTo(Map.of("right", "a", "next", "fixed"));
+                    .isEqualTo(new java.util.TreeMap<>(Map.of("right", "a", "next", "fixed")).toString());
         }
     }
 

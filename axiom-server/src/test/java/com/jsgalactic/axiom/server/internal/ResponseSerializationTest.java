@@ -59,7 +59,6 @@ class ResponseSerializationTest {
     @Test void rejectionNamesTheBrokenRule() {
         assertThat(ResponseSerialization.rejection(Response.of(200, "ok"))).isNull();
         assertThat(ResponseSerialization.rejection(Response.of(204, null))).isNull();
-        assertThat(ResponseSerialization.rejection(Response.of(200, List.of("x")))).contains("cannot be serialized");
         assertThat(ResponseSerialization.rejection(Response.of(200, new byte[MIB + 1]))).contains("exceeds");
         assertThat(ResponseSerialization.rejection(Response.of(200, "x").withHeader("A", "Ā")))
                 .contains("Latin-1");

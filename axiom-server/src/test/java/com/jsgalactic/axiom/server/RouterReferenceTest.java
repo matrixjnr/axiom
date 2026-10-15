@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
@@ -41,7 +42,7 @@ class RouterReferenceTest {
         Collections.shuffle(routes, new Random(31));
         try (var app = Axiom.create()) {
             for (var route : routes) {
-                app.route(route.method(), route.path(), ctx -> new Captured(ctx.route().path(), ctx.pathParameters()));
+                app.route(route.method(), route.path(), ctx -> new Captured(ctx.route().path(), new TreeMap<>(ctx.pathParameters())).toString());
             }
             app.start();
             var registered = new TreeSet<String>();
@@ -102,7 +103,7 @@ class RouterReferenceTest {
                         assertThat(actual.headers()).as("%s %s", method, path).doesNotContainKey("Allow");
                     } else if (status == 200 && !method.equals("HEAD")) {
                         assertThat(actual.body()).as("%s %s", method, path)
-                                .isEqualTo(new Captured(expected.template().path(), expected.parameters()));
+                                .isEqualTo(new Captured(expected.template().path(), new TreeMap<>(expected.parameters())).toString());
                     } else if (status == 200) {
                         assertThat(app.resolve(new Request(method, path))).as("%s %s", method, path)
                                 .contains(new com.jsgalactic.axiom.routing.Route("GET", expected.template().path()));

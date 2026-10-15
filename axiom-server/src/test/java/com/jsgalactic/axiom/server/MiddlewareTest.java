@@ -114,7 +114,7 @@ class MiddlewareTest {
     }
 
     @Test
-    void encodesCodecValuesOnceAfterTheWholeChain() throws Exception {
+    void middlewareObservesEncodedSnapshots() throws Exception {
         record Item(String name) { }
         var seen = new AtomicReference<Object>();
         try (var app = Axiom.create()) {
@@ -127,7 +127,7 @@ class MiddlewareTest {
             app.get("/blocked", ctx -> "never", (ctx, next) -> ctx.status(403).json(new Item("none")));
             app.start();
             assertThat(text(app.handle(Request.get("/item")))).isEqualTo("name=pen");
-            assertThat(seen.get()).isEqualTo(new Item("pen"));
+            assertThat((byte[]) seen.get()).isEqualTo("name=pen".getBytes(StandardCharsets.UTF_8));
             var blocked = app.handle(Request.get("/blocked"));
             assertThat(blocked.status()).isEqualTo(403);
             assertThat(text(blocked)).isEqualTo("name=none");

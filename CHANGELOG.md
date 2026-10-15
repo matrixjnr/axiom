@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Snapshot buffered response bodies at construction. Encode JSON and custom codec values synchronously through `Context.json` and `Context.encode`; reject arbitrary objects in `Response.of` and plain handler results. Middleware sees encoded bytes. See the migration notes in `docs/bodies.md`.
 - Use Windows launchers for Gradle and Maven consumer compatibility tasks, including Maven availability detection.
 - Compare versioned JAR bundles with separate baseline/candidate dependency classpaths, source and binary compatibility reports, and metadata review for records, sealed classes and annotations. Retain checksummed bundle inventories in CI; supplied baselines make artifact comparison part of `check` and are protected from generated-output cleanup.
 - Run explicitly requested API baseline updates before API checks when both tasks are in the same build. Ordinary checks continue to leave the reviewed baselines untouched.
