@@ -44,6 +44,8 @@ a baseline does not promise that an experimental contract is stable.
    resulting `api/*.api` diff, and commit it with the implementation. The aggregate
    `./gradlew apiUpdate` updates every published module. These generated baseline files are
    deliberately checked in; `apiCheck` never rewrites them.
+   If `apiUpdate` and `apiCheck` are explicitly requested in the same build, the update
+   finishes first. Running `check` alone never schedules an update.
 5. Run `./gradlew clean check` and the relevant examples. For consumer-facing changes, also run
    the published-artifact consumers described in [releasing](releasing.md).
 

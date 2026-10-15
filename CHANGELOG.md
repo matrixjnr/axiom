@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Run explicitly requested API baseline updates before API checks when both tasks are in the same build. Ordinary checks continue to leave the reviewed baselines untouched.
 - Add a public/protected API signature review gate to every published Java module. `check` rejects unreviewed declaration and JVM descriptor changes; `apiDump` prepares a review and `apiUpdate` explicitly refreshes checked-in baselines. Document the review and migration policy and the gate's compatibility-analysis limits.
 - Make `Request` an immutable final class, preserving its constructors, factories, accessors and withers. Pre-release record patterns and `java.lang.Record` consumers must migrate to named accessors. Preserve metadata equality and fix hashing for equal requests whose header names differ only in case.
 - Refresh the Axiom logo with custom vector lettering and light/dark README variants. Clarify why the OpenAPI example appears under two Swagger UI tags, with checks for both generated formats. Accept Windows line endings in documentation front matter and keep OpenAPI golden files at LF for deterministic comparisons.

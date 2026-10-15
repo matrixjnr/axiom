@@ -23,7 +23,7 @@ val apiCheck = tasks.register<CheckApiSignatures>("apiCheck") {
     baseline.from(baselineFile)
     actual.set(apiDump.flatMap { it.destination })
 }
-tasks.register<GenerateApiSignatures>("apiUpdate") {
+val apiUpdate = tasks.register<GenerateApiSignatures>("apiUpdate") {
     group = "verification"
     description = "Updates the API baseline; review and commit its diff with the API change."
     classes.from(main.map { it.output.classesDirs })
@@ -33,4 +33,7 @@ tasks.register<GenerateApiSignatures>("apiUpdate") {
     // A restored or edited baseline must always be replaced by the actual current declarations.
     outputs.upToDateWhen { false }
 }
+// If both are explicitly requested, finish the approved update before reading its baseline.
+// Ordering alone never schedules an update during an ordinary check.
+apiCheck.configure { mustRunAfter(apiUpdate) }
 tasks.named("check") { dependsOn(apiCheck) }
