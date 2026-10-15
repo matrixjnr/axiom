@@ -1,0 +1,60 @@
+name: API artifacts
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      baseline_run:
+        description: Successful API artifacts push run on main to compare against
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+      - name: Build and verify candidate bundles
+        run: ./gradlew check captureApiArtifact "-PapiArtifactVersion=$GITHUB_SHA" --max-workers=2
+      - name: Retain versioned bundles
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: api-artifacts-${{ github.sha }}
+          path: build/api-artifacts/
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true
+      - name: Download and verify baseline identity
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BASELINE_RUN: ${{ inputs.baseline_run }}
+        run: |
+          [[ "$BASELINE_RUN" =~ ^[0-9]+$ ]] || { echo "baseline_run must be a numeric run ID" >&2; exit 1; }
+          run_json="$(gh api "repos/$GH_REPO/actions/runs/$BASELINE_RUN")"
+          echo "$run_json" | jq -e '.conclusion == "success" and .event == "push" and .head_branch == "main" and .path == ".github/workflows/api-artifacts.yml"' > /dev/null
+          baseline_sha="$(echo "$run_json" | jq -r '.head_sha')"
+          [[ "$baseline_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          gh run download "$BASELINE_RUN" --name "api-artifacts-$baseline_sha" --dir "$RUNNER_TEMP/api-baseline"
+          echo "API_BASELINE_VERSION=$baseline_sha" >> "$GITHUB_ENV"
+      - name: Compare retained and candidate artifacts
+        if: github.event_name == 'workflow_dispatch'
+        run: ./gradlew apiArtifactCheck "-PapiBaselineDir=$RUNNER_TEMP/api-baseline" "-PapiBaselineVersion=$API_BASELINE_VERSION" "-PapiArtifactVersion=$GITHUB_SHA" --continue --max-workers=2
+      - name: Retain comparison reports
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: api-comparison-${{ github.sha }}
+          path: '**/build/reports/api-artifacts/comparison.txt'
+          if-no-files-found: warn
+          overwrite: true

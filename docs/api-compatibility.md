@@ -53,12 +53,68 @@ Missing baselines fail the check, including for a newly published module. A revi
 can be regenerated locally using the configured Java 21 toolchain; no extra runtime or library
 dependency is introduced.
 
-## Limits of this gate
+## Versioned artifact comparison
+
+The signature files remain the mandatory review gate. `apiArtifactCheck` adds analysis against
+separately retained JARs using [japicmp](https://siom79.github.io/japicmp/CliTool.html), with
+different dependency classpaths for the baseline and candidate. Build-only ASM checks supplement
+the analyzer with annotation/default values, type-use annotations, sealed permitted subclasses,
+and ordered record components. Metadata changes require review even when the analyzer finds no
+binary or source incompatibility. Reports show the old and new metadata separately.
+
+Capture a baseline from an approved checkout, using its immutable commit SHA as the identity:
+
+```text
+./gradlew clean check captureApiArtifact "-PapiArtifactVersion=<baseline-commit-sha>"
+```
+
+Copy `build/api-artifacts/` to retained storage outside **every project build directory** before
+switching checkouts. Keep `inventory.properties`, all module directories and dependency files
+together. The inventory records the published module set and checksums each module manifest;
+each manifest checksums the module JAR and its exact dependency closure. Comparison rejects a
+missing bundle, changed checksum, wrong module/version, removed module, unsafe path or missing
+dependency. Never point the retained baseline at current generated output. Configuration rejects
+overlapping paths before `clean` can run.
+
+From the candidate checkout, run:
+
+```text
+./gradlew clean check "-PapiBaselineDir=/absolute/path/to/retained/baseline" "-PapiBaselineVersion=<baseline-commit-sha>" "-PapiArtifactVersion=<candidate-commit-sha>" --continue
+```
+
+Supplying `apiBaselineDir` makes artifact comparison part of `check`. To run it directly, use
+`apiArtifactCheck` with those same properties. Each module writes
+`build/reports/api-artifacts/comparison.txt`, separating binary incompatibilities, source
+incompatibilities and metadata requiring review. Missing dependencies are errors; they are never
+ignored. The candidate is captured separately and comparison never updates retained bundles.
+The code reads class files without initializing application classes.
+
+Before 1.0, intentional breaks need migration notes and an explicit baseline/version decision.
+For stable releases, preserve existing consumers or choose a major release and review its
+baseline deliberately. Experimental SPIs are included; their status does not silently suppress
+findings. New published modules also need a deliberate baseline decision. Tests of runtime and
+wire behavior remain necessary.
+
+## Retained bundles in CI
+
+The **API artifacts** workflow verifies and captures candidates on pull requests and pushes to
+`main`. Artifacts are named `api-artifacts-<commit-sha>` and retained for 90 days. Pull-request
+candidates are not accepted as baselines. To compare a candidate, dispatch the workflow with the
+numeric run ID of a successful API artifacts **push on main**. The workflow verifies the run's
+repository, event, branch, workflow path and commit identity, downloads that exact bundle, then
+runs the comparison and uploads its reports. The first eligible baseline becomes available after
+this workflow merges and completes on `main`.
+
+Approved release bundles must be retained separately before Actions retention expires. Local
+comparison accepts the same portable bundle format, so the check is independent of Actions
+storage once downloaded. Checksums detect corruption; the owner must choose a trusted baseline.
+
+## Limits of the signature gate
 
 This is an exact signature review gate, not a complete source/binary compatibility analyzer.
 It does not compare inherited members supplied by dependencies, annotations/default annotation
 values, sealed-class permitted subclasses, or record-component metadata/order. It does not
 prove runtime behavior, wire-format compatibility, or compatibility with an already released
-artifact. Those require focused tests and a fuller compatibility analyzer before a stable
-release, tracked in [#174](https://github.com/matrixjnr/axiom/issues/174). Updating a baseline is
-an explicit review decision, not evidence that a change is safe.
+artifact. Use the versioned artifact comparison above for those class-file checks. Neither
+signature checks nor artifact analysis prove runtime or wire-format behavior. Updating a baseline
+is an explicit review decision, not evidence that a change is safe.
