@@ -167,17 +167,20 @@ val publishCompatRepo = tasks.register("publishCompatRepo") {
     })
 }
 val compatVersion = project.version.toString()
+val windowsHost = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+val gradleLauncher = file(if (windowsHost) "gradlew.bat" else "gradlew").absolutePath
+val mavenLauncher = if (windowsHost) "mvn.cmd" else "mvn"
 val compatGradle = listOf("gradle-kotlin", "gradle-groovy").map { consumer ->
     tasks.register<Exec>("compatibility-$consumer") {
         group = "verification"
         description = "Builds and runs the $consumer consumer against locally published artifacts."
         dependsOn(publishCompatRepo)
         workingDir = file("compatibility/$consumer")
-        commandLine(file("gradlew").absolutePath, "--console=plain", "--no-daemon",
+        commandLine(gradleLauncher, "--console=plain", "--no-daemon",
             "-PaxiomRepo=${compatRepo.get().asFile.toURI()}", "-PaxiomVersion=$compatVersion", "compatibilityCheck")
     }
 }
-val mavenAvailable = System.getenv("PATH").orEmpty().split(File.pathSeparator).any { File(it, "mvn").canExecute() }
+val mavenAvailable = System.getenv("PATH").orEmpty().split(File.pathSeparator).any { File(it, mavenLauncher).canExecute() }
 val compatMaven = tasks.register<Exec>("compatibility-maven") {
     group = "verification"
     description = "Builds and runs the Maven consumer against locally published artifacts (needs mvn on PATH)."
@@ -186,7 +189,7 @@ val compatMaven = tasks.register<Exec>("compatibility-maven") {
     workingDir = file("compatibility/maven")
     // --strict-checksums fails on a mismatch with the checksums the repositories publish; Maven has
     // no committed verification metadata, so this is the weaker equivalent (see docs/build.md).
-    commandLine("mvn", "--batch-mode", "--no-transfer-progress", "--strict-checksums",
+    commandLine(mavenLauncher, "--batch-mode", "--no-transfer-progress", "--strict-checksums",
         "-Daxiom.repo=${compatRepo.get().asFile.toURI()}", "-Daxiom.version=$compatVersion",
         "-Dmaven.repo.local=${layout.buildDirectory.dir("compat-m2").get().asFile}", "verify")
 }
