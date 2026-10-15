@@ -55,7 +55,7 @@ jobs:
       # Fails on a broken link or anchor in the Markdown, then writes build/jekyll and build/docs-api.
       - run: ./gradlew checkDocsLinks jekyllSource aggregateJavadoc
       # Gems come from site/Gemfile.lock only, installed with the lock frozen (hashes verified).
-      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+      - uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
           ruby-version: '3.3.6'
           bundler-cache: true
