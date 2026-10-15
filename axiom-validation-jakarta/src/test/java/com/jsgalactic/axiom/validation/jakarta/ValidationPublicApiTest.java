@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.jar.JarFile;
+import org.hibernate.validator.HibernateValidator;
 import org.junit.jupiter.api.Test;
 
 /** Keeps Jakarta and Hibernate types out of the signatures of both validation modules. */
@@ -55,7 +56,7 @@ class ValidationPublicApiTest {
     void detectsProviderTypes() {
         assertThatThrownBy(() -> check(jakarta.validation.Validator.class, new HashSet<>()))
                 .isInstanceOf(AssertionError.class).hasMessageContaining("third-party");
-        assertThatThrownBy(() -> check(org.hibernate.validator.HibernateValidator.class, new HashSet<>()))
+        assertThatThrownBy(() -> check(HibernateValidator.class, new HashSet<>()))
                 .isInstanceOf(AssertionError.class).hasMessageContaining("third-party");
     }
 

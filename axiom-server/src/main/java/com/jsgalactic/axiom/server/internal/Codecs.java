@@ -2,7 +2,9 @@ package com.jsgalactic.axiom.server.internal;
 
 import com.jsgalactic.axiom.codec.spi.BodyCodec;
 import com.jsgalactic.axiom.observability.Metrics;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.ServiceLoader;
@@ -116,8 +118,8 @@ final class Codecs {
     }
 
     /** Parses an Accept field value; returns null when any element is malformed. Weights are in thousandths. */
-    static java.util.List<AcceptRange> parseAccept(String value) {
-        var ranges = new java.util.ArrayList<AcceptRange>();
+    static List<AcceptRange> parseAccept(String value) {
+        var ranges = new ArrayList<AcceptRange>();
         int i = 0;
         int length = value.length();
         while (i <= length) {

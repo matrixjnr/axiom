@@ -10,6 +10,7 @@ import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.routing.Route;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -55,7 +56,7 @@ class SecurityIdentityTest {
 
     @Test
     void carriesImmutableAttributesAndCountsThemInToString() {
-        var source = new java.util.HashMap<>(Map.of("tenant", "acme", "email", "ada@example.com"));
+        var source = new HashMap<>(Map.of("tenant", "acme", "email", "ada@example.com"));
         var identity = new SecurityIdentity("ada", Set.of(), Set.of(), source);
         source.put("tenant", "evil");
         assertThat(identity.attribute("tenant")).contains("acme");
@@ -77,7 +78,7 @@ class SecurityIdentityTest {
         assertThatIllegalArgumentException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), Map.of("a", "v\r\nx")));
         assertThatIllegalArgumentException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), Map.of("a", "x".repeat(2049))));
         new SecurityIdentity("ada", Set.of(), Set.of(), Map.of("empty", "", "max", "x".repeat(2048)));
-        var many = new java.util.HashMap<String, String>();
+        var many = new HashMap<String, String>();
         for (int i = 0; i < 65; i++) { many.put("a" + i, "v"); }
         assertThatIllegalArgumentException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), many));
         assertThatNullPointerException().isThrownBy(() -> new SecurityIdentity("ada", Set.of(), Set.of(), null));

@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.stream.Collectors;
 
 /** Builds JWK Set documents for tests, independently of the code under test. */
@@ -50,7 +51,7 @@ final class Jwks {
     }
 
     static String ed25519(String kid, String alg, EdECPublicKey key) {
-        var raw = java.util.Base64.getUrlDecoder().decode(unsigned(key.getPoint().getY(), 32)); // big-endian y
+        var raw = Base64.getUrlDecoder().decode(unsigned(key.getPoint().getY(), 32)); // big-endian y
         var x = new byte[32]; // RFC 8032 encoding: little-endian y, sign of x in the top bit
         for (int i = 0; i < 32; i++) { x[i] = raw[31 - i]; }
         if (key.getPoint().isXOdd()) { x[31] |= (byte) 0x80; }

@@ -217,6 +217,12 @@ alone 68.3% and 54.6%.
 
 ## Code style
 
+Use imports and simple Java type names in implementation and test code. Checkstyle
+rejects unnecessary inline qualification, including static calls, annotations and
+nested types. Exact exceptions cover the same-name Axiom and Jakarta `Validator`
+types that Java requires us to disambiguate. Strings containing runtime class names
+and the generated API signature files keep their qualified names.
+
 Checkstyle (version in `gradle/libs.versions.toml`) is applied to every Java module by the
 `axiom.java-base` convention plugin. `checkstyleMain` and `checkstyleTest` are part of each
 module's `check` and fail the build on any violation (`maxWarnings = 0`); run one module with
@@ -228,8 +234,8 @@ characters, standard naming, `final` classes without a visible constructor (or a
 utility classes), required braces for multi-line statements, and Javadoc on every public type and
 method of library main sources. Tests, examples and benchmarks are exempt from the Javadoc rule,
 and the README examples from the utility-class rule, by filters inside the ruleset itself; there
-is no separate suppression file. A rule the code does not satisfy is removed or tuned rather than
-the code reformatted. The Checkstyle dependencies have checksums in
+is no separate suppression file. Add style rules with the source cleanup needed to pass them.
+The Checkstyle dependencies have checksums in
 `gradle/verification-metadata.xml` like every other tool dependency.
 
 ## README examples

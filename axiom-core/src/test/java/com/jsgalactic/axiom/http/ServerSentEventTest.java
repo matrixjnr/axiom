@@ -8,6 +8,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -150,6 +151,6 @@ class ServerSentEventTest {
             @Override public long bytesWritten() { return 0; }
         };
         var sink = EventSink.of(closed);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> sink.keepAlive()).isInstanceOf(StreamAbortedException.class);
+        Assertions.assertThatThrownBy(() -> sink.keepAlive()).isInstanceOf(StreamAbortedException.class);
     }
 }

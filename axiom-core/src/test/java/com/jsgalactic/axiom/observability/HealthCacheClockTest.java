@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jsgalactic.axiom.application.Application;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
@@ -23,7 +24,7 @@ class HealthCacheClockTest {
     @Test void aKeptResultIsReusedUntilItsIntervalPassesAndTheNextProbeRunsTheCheckAgain() {
         var clock = new AtomicLong(1_000);
         var runs = new AtomicInteger();
-        var healthy = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var healthy = new AtomicBoolean(true);
         var health = Health.builder(running()).cacheFor(Duration.ofNanos(100)).clock(clock::get)
                 .readiness("db", () -> { runs.incrementAndGet(); return healthy.get(); }).build();
         assertThat(health.readiness().status()).isEqualTo(Health.Status.UP);

@@ -9,6 +9,7 @@ import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.test.TestClient;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
@@ -63,14 +64,14 @@ class BooksApiTest {
     }
 
     private static Map<String, String> basic(String user, String password) {
-        var token = java.util.Base64.getEncoder().encodeToString((user + ":" + password).getBytes(StandardCharsets.UTF_8));
+        var token = Base64.getEncoder().encodeToString((user + ":" + password).getBytes(StandardCharsets.UTF_8));
         return Map.of("Authorization", "Basic " + token);
     }
 
     @Test void theDocumentationIsServedOnlyToCallersWithThePassword() throws Exception {
         var password = UUID.randomUUID().toString();
         try (var client = TestClient.start(BooksApi.create(DocsAccess.requirePassword(password)))) {
-            for (var path : java.util.List.of("/openapi.json", "/swagger.json", "/docs", "/docs/swagger-initializer.js")) {
+            for (var path : List.of("/openapi.json", "/swagger.json", "/docs", "/docs/swagger-initializer.js")) {
                 var anonymous = client.get(path);
                 assertThat(anonymous.status()).as(path).isEqualTo(401);
                 assertThat(anonymous.headers().get("WWW-Authenticate")).startsWith("Basic realm=\"docs\"");

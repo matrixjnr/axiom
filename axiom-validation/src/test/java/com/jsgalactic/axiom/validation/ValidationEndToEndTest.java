@@ -9,7 +9,9 @@ import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.test.TestClient;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /** Runs handlers through the real dispatcher and problem mapping, without a body codec. */
@@ -76,7 +78,7 @@ class ValidationEndToEndTest {
         var app = Axiom.create();
         app.post("/batches", ctx -> {
             var lines = new String(ctx.request().body().bytes(), StandardCharsets.UTF_8).split("\n");
-            var signups = java.util.Arrays.stream(lines)
+            var signups = Arrays.stream(lines)
                     .map(line -> Signup.parse(line.getBytes(StandardCharsets.UTF_8))).toList();
             Validation.require(batch, new Batch(signups));
             return ctx.noContent();
@@ -101,7 +103,7 @@ class ValidationEndToEndTest {
     }
 
     static List<String> fields(Response response) {
-        return java.util.regex.Pattern.compile("\"field\":\"([^\"]*)\"").matcher(text(response)).results()
+        return Pattern.compile("\"field\":\"([^\"]*)\"").matcher(text(response)).results()
                 .map(match -> match.group(1)).toList();
     }
 }

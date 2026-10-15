@@ -8,6 +8,7 @@ import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.Optional;
 import java.util.OptionalInt;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -182,7 +183,7 @@ class ForwardedHeadersTest {
     void validatesPortsAsOptionalIntegers() {
         assertThat(new ClientOrigin(InetAddress.getLoopbackAddress(), "http", false).port()).isEqualTo(OptionalInt.empty());
         assertThat(new ClientOrigin(InetAddress.getLoopbackAddress(), "http", false).host()).isEqualTo(Optional.empty());
-        org.assertj.core.api.Assertions.assertThatIllegalArgumentException().isThrownBy(() -> new ClientOrigin(
+        Assertions.assertThatIllegalArgumentException().isThrownBy(() -> new ClientOrigin(
                 InetAddress.getLoopbackAddress(), "http", false, Optional.empty(), OptionalInt.of(0)));
     }
 }

@@ -5,7 +5,17 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
+import com.jsgalactic.axiom.error.ConflictException;
+import com.jsgalactic.axiom.error.TooManyRequestsException;
+import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.http.Request;
+import com.jsgalactic.axiom.http.Response;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class TestClientTest {
@@ -25,25 +35,25 @@ class TestClientTest {
 
     @Test
     void rejectsWithServiceUnavailableWhenAdmissionCapacityIsHeld() throws Exception {
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        var release = new java.util.concurrent.CountDownLatch(1);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
         var app = Axiom.create();
-        app.admissionPolicy(com.jsgalactic.axiom.execution.AdmissionPolicy.reject(1));
+        app.admissionPolicy(AdmissionPolicy.reject(1));
         app.get("/slow", ctx -> { entered.countDown(); release.await(); return "done"; });
         try (var client = TestClient.start(app)) {
             var first = client.submit(Request.get("/slow"));
-            assertThat(entered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
             assertProblem(client.get("/slow"), 503, "service_unavailable");
             release.countDown();
-            assertThat(first.get(5, java.util.concurrent.TimeUnit.SECONDS).body()).isEqualTo("done");
+            assertThat(first.get(5, TimeUnit.SECONDS).body()).isEqualTo("done");
         } finally { release.countDown(); }
     }
 
     @Test
     void answersGatewayTimeoutWhenTheDeadlineExpires() throws Exception {
         var app = Axiom.create();
-        app.requestTimeout(java.time.Duration.ofMillis(50));
-        app.get("/hang", ctx -> { new java.util.concurrent.CountDownLatch(1).await(); return "never"; });
+        app.requestTimeout(Duration.ofMillis(50));
+        app.get("/hang", ctx -> { new CountDownLatch(1).await(); return "never"; });
         try (var client = TestClient.start(app)) {
             assertProblem(client.get("/hang"), 504, "gateway_timeout");
         }
@@ -52,19 +62,19 @@ class TestClientTest {
     @Test
     void failsWhereTheTransportWouldAnswer500() throws Exception {
         var app = Axiom.create();
-        app.get("/object", ctx -> java.util.List.of("not serializable"));
+        app.get("/object", ctx -> List.of("not serializable"));
         try (var client = TestClient.start(app)) {
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.get("/object"))
+            Assertions.assertThatThrownBy(() -> client.get("/object"))
                     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Context.json");
         }
     }
 
-    private static String text(com.jsgalactic.axiom.http.Response response) {
+    private static String text(Response response) {
         var body = response.body();
-        return body instanceof byte[] bytes ? new String(bytes, java.nio.charset.StandardCharsets.UTF_8) : (String) body;
+        return body instanceof byte[] bytes ? new String(bytes, StandardCharsets.UTF_8) : (String) body;
     }
 
-    private static void assertProblem(com.jsgalactic.axiom.http.Response response, int status, String code) {
+    private static void assertProblem(Response response, int status, String code) {
         assertThat(response.status()).isEqualTo(status);
         assertThat(response.headers()).containsEntry("Content-Type", "application/problem+json");
         assertThat(text(response)).matches("\\{\"status\":" + status + ",\"code\":\"" + code
@@ -75,7 +85,7 @@ class TestClientTest {
     void sendsRawBodiesWithTheirContentType() throws Exception {
         var app = Axiom.create();
         app.post("/echo/:id", ctx -> ctx.path("id") + "|" + ctx.request().body().contentType().orElse("none") + "|"
-                + new String(ctx.request().body().bytes(), java.nio.charset.StandardCharsets.UTF_8));
+                + new String(ctx.request().body().bytes(), StandardCharsets.UTF_8));
         app.put("/echo/:id", ctx -> "put " + ctx.request().body().length());
         app.patch("/echo/:id", ctx -> "patch " + ctx.header("content-type").orElse("none"));
         try (var client = TestClient.start(app)) {
@@ -95,9 +105,9 @@ class TestClientTest {
         var app = Axiom.create();
         app.maxRequestBody(8);
         app.post("/decode", ctx -> ctx.body(String.class));
-        app.get("/conflict", ctx -> { throw new com.jsgalactic.axiom.error.ConflictException(); });
+        app.get("/conflict", ctx -> { throw new ConflictException(); });
         app.get("/limited", ctx -> {
-            throw new com.jsgalactic.axiom.error.TooManyRequestsException(java.time.Duration.ofSeconds(5));
+            throw new TooManyRequestsException(Duration.ofSeconds(5));
         });
         try (var client = TestClient.start(app)) {
             assertProblem(client.post("/decode", "text/plain", "123456789"), 413, "content_too_large");

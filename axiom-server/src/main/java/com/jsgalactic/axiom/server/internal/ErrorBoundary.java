@@ -1,6 +1,7 @@
 package com.jsgalactic.axiom.server.internal;
 
 import com.jsgalactic.axiom.context.Context;
+import com.jsgalactic.axiom.context.ErrorHandler;
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.error.AxiomException;
@@ -9,6 +10,7 @@ import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
 
 /**
  * The outermost step of a route's chain, outside every middleware. It negotiates the chain's response
@@ -112,7 +114,7 @@ final class ErrorBoundary implements Handler {
         return development ? Problems.withDebug(problem, failure) : problem;
     }
 
-    private com.jsgalactic.axiom.context.ErrorHandler<Exception> find(Class<?> type) {
+    private ErrorHandler<Exception> find(Class<?> type) {
         for (var scope : scopes) {
             var handler = scope.find(type);
             if (handler != null) { return handler; }
@@ -141,7 +143,7 @@ final class ErrorBoundary implements Handler {
      * application error handler runs. Interruption and cancellation are never offered at all.
      */
     private static boolean cancelled(DefaultContext context, Exception failure) {
-        return failure instanceof InterruptedException || failure instanceof java.util.concurrent.CancellationException
+        return failure instanceof InterruptedException || failure instanceof CancellationException
                 || Thread.currentThread().isInterrupted() || context.execution().isExpired();
     }
 

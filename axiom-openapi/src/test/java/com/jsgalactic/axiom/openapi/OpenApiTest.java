@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
+import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteDoc;
 import com.jsgalactic.axiom.test.TestClient;
 import java.io.IOException;
@@ -12,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class OpenApiTest {
@@ -95,7 +99,7 @@ class OpenApiTest {
     }
 
     private static int count(String text, String part) {
-        return text.split(java.util.regex.Pattern.quote(part), -1).length - 1;
+        return text.split(Pattern.quote(part), -1).length - 1;
     }
 
     // ---- failures at build time
@@ -123,7 +127,7 @@ class OpenApiTest {
         method.route("PROPFIND", "/dav", ctx -> "x");
         assertThatIllegalArgumentException().isThrownBy(() -> config.render(method))
                 .withMessageContaining("PROPFIND").withMessageContaining("hidden()");
-        method.describe(new com.jsgalactic.axiom.routing.Route("PROPFIND", "/dav"), RouteDoc.empty().hidden());
+        method.describe(new Route("PROPFIND", "/dav"), RouteDoc.empty().hidden());
         assertThat(config.render(method)).doesNotContain("dav");
     }
 
@@ -176,9 +180,9 @@ class OpenApiTest {
             assertThat(client.get("/openapi.json").body()).isEqualTo(first.body());
 
             var etag = first.headers().get("ETag");
-            var revalidate = client.execute(new Request("GET", "/openapi.json", Map.of("If-None-Match", etag), com.jsgalactic.axiom.http.Body.empty()));
+            var revalidate = client.execute(new Request("GET", "/openapi.json", Map.of("If-None-Match", etag), Body.empty()));
             assertThat(revalidate.status()).isEqualTo(304);
-            var other = client.execute(new Request("GET", "/openapi.json", Map.of("If-None-Match", "\"zzz\""), com.jsgalactic.axiom.http.Body.empty()));
+            var other = client.execute(new Request("GET", "/openapi.json", Map.of("If-None-Match", "\"zzz\""), Body.empty()));
             assertThat(other.status()).isEqualTo(200);
 
             var swaggerResponse = client.get("/swagger.json");
@@ -191,7 +195,7 @@ class OpenApiTest {
     @Test void middlewareProtectsTheDocumentRoute() throws Exception {
         var app = Axiom.create();
         OpenApi.builder("T", "1").build().serve(app, "/openapi.json",
-                (ctx, next) -> ctx.header("X-Key").isPresent() ? next.run() : com.jsgalactic.axiom.http.Response.of(401, null));
+                (ctx, next) -> ctx.header("X-Key").isPresent() ? next.run() : Response.of(401, null));
         try (var client = TestClient.start(app)) {
             assertThat(client.get("/openapi.json").status()).isEqualTo(401);
         }

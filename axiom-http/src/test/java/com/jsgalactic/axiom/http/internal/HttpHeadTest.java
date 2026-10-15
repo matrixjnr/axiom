@@ -6,6 +6,8 @@ import com.jsgalactic.axiom.http.Response;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * HEAD over a real socket. Each HEAD reply is read without a body and followed by another
@@ -126,8 +128,8 @@ class HttpHeadTest {
     }
 
     /** Errors the listener produces before routing must not send a body to a HEAD request either. */
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {
+    @ParameterizedTest
+    @ValueSource(strings = {
             "HEAD /items/1 HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello",
             "HEAD //items HTTP/1.1\r\nHost: a\r\n\r\n",
             "HEAD /items/1 HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\n\r\n",

@@ -1,5 +1,8 @@
 package com.jsgalactic.axiom.observability;
 
+import com.jsgalactic.axiom.context.Middleware;
+import com.jsgalactic.axiom.http.Request;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
@@ -124,9 +127,9 @@ public record TraceContext(String traceId, String parentId, int flags, TraceStat
      * {@code tracestate} when there are members. Usually called on {@link #child()}.
      * @return the header names and values
      */
-    public java.util.Map<String, String> headers() {
-        return traceState.isEmpty() ? java.util.Map.of(HEADER, traceparent())
-                : java.util.Map.of(HEADER, traceparent(), TraceState.HEADER, traceState.header());
+    public Map<String, String> headers() {
+        return traceState.isEmpty() ? Map.of(HEADER, traceparent())
+                : Map.of(HEADER, traceparent(), TraceState.HEADER, traceState.header());
     }
 
     /**
@@ -138,7 +141,7 @@ public record TraceContext(String traceId, String parentId, int flags, TraceStat
      * does not decorate responses made from exceptions (see {@code Middleware}).
      * @return the opt-in middleware
      */
-    public static com.jsgalactic.axiom.context.Middleware responseHeader() {
+    public static Middleware responseHeader() {
         return (context, next) -> {
             var response = next.run();
             var trace = context.traceContext();
@@ -163,7 +166,7 @@ public record TraceContext(String traceId, String parentId, int flags, TraceStat
      * @param request the request
      * @return the description
      */
-    public static String correlation(String requestId, com.jsgalactic.axiom.http.Request request) {
+    public static String correlation(String requestId, Request request) {
         return correlation(requestId, parse(request.header(HEADER).orElse(null)));
     }
 

@@ -8,6 +8,7 @@ import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
+import com.jsgalactic.axiom.lifecycle.RejectionObserver;
 import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.server.internal.Problems;
 import com.jsgalactic.axiom.server.internal.ResponseSerialization;
@@ -52,10 +53,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.regex.Pattern;
 
 /** All mutable connection state belongs to the channel's event loop. */
 final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
@@ -63,7 +67,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static final Object UNMATCHED = new Object();
     /** Bound from a request's first byte until its head is complete; a slower client receives 408. */
     static final Duration REQUEST_HEAD_TIMEOUT = ListenerOptions.defaults().headTimeout();
-    private static final java.util.regex.Pattern CONTENT_LENGTH = java.util.regex.Pattern.compile("[0-9]{1,18}");
+    private static final Pattern CONTENT_LENGTH = Pattern.compile("[0-9]{1,18}");
     /**
      * Outstanding requests per connection, including the active one. A further request is not
      * executed: it is answered 503 after the earlier responses, and the connection closes.
@@ -113,7 +117,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final int maxPipelined;
     private final int maxDiscardedInput;
     /** Receives the listener's own error responses, or null. */
-    private final com.jsgalactic.axiom.lifecycle.RejectionObserver rejections;
+    private final RejectionObserver rejections;
     /**
      * True once the listener has started closing. Read on every response, from the moment the
      * listener's close begins, so a response sent after that carries {@code Connection: close} even
@@ -524,7 +528,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     private static Throwable unwrap(Throwable failure) {
-        while (failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null) {
+        while (failure instanceof CompletionException && failure.getCause() != null) {
             failure = failure.getCause();
         }
         return failure;
@@ -653,7 +657,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         boolean started;
         try {
             started = ctx.executor().submit(() -> beginStream(ctx, exchange, response, close, writer)).get();
-        } catch (java.util.concurrent.ExecutionException | RejectedExecutionException unavailable) {
+        } catch (ExecutionException | RejectedExecutionException unavailable) {
             started = false;
         }
         // Nothing was sent yet, so a refusal can still be an ordinary response.

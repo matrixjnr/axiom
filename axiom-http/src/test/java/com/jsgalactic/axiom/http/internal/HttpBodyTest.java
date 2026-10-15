@@ -4,11 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.http.Response;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.HexFormat;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @Tag("integration")
 class HttpBodyTest {
@@ -60,7 +68,7 @@ class HttpBodyTest {
             // defaults: only a small part of the body fits in them, so the client is necessarily
             // still sending when the 413 is written, and a server that closed instead of lingering
             // would reset the connection.
-            var server = NettyServer.bind(fixture.app, new java.net.InetSocketAddress("127.0.0.1", 0),
+            var server = NettyServer.bind(fixture.app, new InetSocketAddress("127.0.0.1", 0),
                     TransportSettings.DEFAULTS.withLinger(Duration.ofSeconds(60)).withLingerQuiet(Duration.ofSeconds(60))
                             .withSocketBuffers(64 * 1024, 64 * 1024));
             fixture.servers.add(server);
@@ -74,9 +82,9 @@ class HttpBodyTest {
             // The head and the start of the body arrive together, so body bytes are unread when the 413 is sent.
             var head = ("POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: " + length + "\r\n\r\n")
                     .getBytes(StandardCharsets.US_ASCII);
-            wire.socket.getOutputStream().write(java.util.Arrays.copyOf(head, head.length + piece.length));
+            wire.socket.getOutputStream().write(Arrays.copyOf(head, head.length + piece.length));
             // Keeps sending the declared body without waiting, as many clients do.
-            var failure = new java.util.concurrent.atomic.AtomicReference<IOException>();
+            var failure = new AtomicReference<IOException>();
             var sender = Thread.ofVirtual().start(() -> {
                 try {
                     for (int sent = piece.length; sent < length; sent += piece.length) {
@@ -208,8 +216,8 @@ class HttpBodyTest {
             // seconds even unloaded; the default ten-second deadline made it fail with 408 under load.
             fixture.app.requestTimeout(Duration.ofMinutes(2));
             fixture.app.post("/digest", ctx -> {
-                var digest = java.security.MessageDigest.getInstance("SHA-256");
-                return ctx.request().body().length() + ":" + java.util.HexFormat.of().formatHex(digest.digest(ctx.request().body().bytes()));
+                var digest = MessageDigest.getInstance("SHA-256");
+                return ctx.request().body().length() + ":" + HexFormat.of().formatHex(digest.digest(ctx.request().body().bytes()));
             });
             try (var wire = new Wire(fixture.listen())) {
                 wire.socket.setSoTimeout(120_000);
@@ -224,21 +232,21 @@ class HttpBodyTest {
                 var reply = wire.read(false);
                 // No timing assertion: per-chunk copy counts are checked deterministically by
                 // HttpConnectionTest.tinyChunksAreCopiedOnArrivalWithoutNettyAccumulation.
-                assertThat(reply.text()).isEqualTo(limit + ":" + java.util.HexFormat.of().formatHex(
-                        java.security.MessageDigest.getInstance("SHA-256").digest(expected)));
+                assertThat(reply.text()).isEqualTo(limit + ":" + HexFormat.of().formatHex(
+                        MessageDigest.getInstance("SHA-256").digest(expected)));
 
                 var large = new byte[4 * 1024 * 1024];
-                new java.util.Random(7).nextBytes(large);
+                new Random(7).nextBytes(large);
                 wire.write("POST /digest HTTP/1.1\r\nHost: a\r\nContent-Length: " + large.length + "\r\n\r\n");
                 wire.socket.getOutputStream().write(large);
-                assertThat(wire.read(false).text()).isEqualTo(large.length + ":" + java.util.HexFormat.of().formatHex(
-                        java.security.MessageDigest.getInstance("SHA-256").digest(large)));
+                assertThat(wire.read(false).text()).isEqualTo(large.length + ":" + HexFormat.of().formatHex(
+                        MessageDigest.getInstance("SHA-256").digest(large)));
             }
         }
     }
 
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"+5", "-1", "", "abc", "5 5", "0x5", "5.0", "1234567890123456789"})
+    @ParameterizedTest
+    @ValueSource(strings = {"+5", "-1", "", "abc", "5 5", "0x5", "5.0", "1234567890123456789"})
     void rejectsMalformedContentLengthAndCloses(String value) throws Exception {
         try (var fixture = echo(16); var wire = new Wire(fixture.listen())) {
             wire.write("POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: " + value + "\r\n\r\nhello");

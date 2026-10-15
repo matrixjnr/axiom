@@ -1,5 +1,7 @@
 package com.jsgalactic.axiom.server.internal;
 
+import static java.lang.Runtime.getRuntime;
+
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.context.ErrorHandler;
 import com.jsgalactic.axiom.context.Handler;
@@ -30,6 +32,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.ServiceLoader;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
@@ -61,7 +66,7 @@ final class DefaultApplication implements Application {
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<Route, RouteDoc> routeDocs = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
-    private final Set<String> recognizedMethods = new java.util.TreeSet<>();
+    private final Set<String> recognizedMethods = new TreeSet<>();
     private Handler notFoundHandler;
     private Handler methodNotAllowedHandler;
     private Handler notImplementedHandler;
@@ -106,8 +111,8 @@ final class DefaultApplication implements Application {
 
     DefaultApplication() {
         this(new ShutdownHooks() {
-            @Override public void add(Thread hook) { java.lang.Runtime.getRuntime().addShutdownHook(hook); }
-            @Override public void remove(Thread hook) { java.lang.Runtime.getRuntime().removeShutdownHook(hook); }
+            @Override public void add(Thread hook) { getRuntime().addShutdownHook(hook); }
+            @Override public void remove(Thread hook) { getRuntime().removeShutdownHook(hook); }
         });
     }
 
@@ -210,8 +215,8 @@ final class DefaultApplication implements Application {
         for (var server : owned) {
             try {
                 server.termination().toCompletableFuture()
-                        .get(Math.max(0, deadline - System.nanoTime()), java.util.concurrent.TimeUnit.NANOSECONDS);
-            } catch (TimeoutException | java.util.concurrent.ExecutionException unfinished) {
+                        .get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+            } catch (TimeoutException | ExecutionException unfinished) {
                 LOG.log(System.Logger.Level.WARNING,
                         "A listener had not terminated " + wait + " after JVM shutdown began", unfinished);
             } catch (InterruptedException interrupted) {
@@ -294,7 +299,7 @@ final class DefaultApplication implements Application {
     @Override
     public synchronized Application recognizeMethods(String... methods) {
         requireState(State.CONFIGURING);
-        var declared = new java.util.TreeSet<String>();
+        var declared = new TreeSet<String>();
         for (var method : Objects.requireNonNull(methods, "methods")) {
             Objects.requireNonNull(method, "method");
             new Request(method, "/"); // IllegalArgumentException ("Invalid HTTP method") for a non-token

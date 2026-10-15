@@ -28,6 +28,7 @@ import java.util.regex.Pattern;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
+import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 
 /**
@@ -168,7 +169,7 @@ final class TlsMaterial {
             keys.setKeyEntry("server", key, storePassword, chain.toArray(new X509Certificate[0]));
             var keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
             keyManagers.init(keys, storePassword);
-            javax.net.ssl.TrustManager[] trustManagers = null;
+            TrustManager[] trustManagers = null;
             if (trust != null) {
                 checkValidity(trustPath, trust, now);
                 var anchors = KeyStore.getInstance("PKCS12");

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.http.Request;
@@ -96,7 +97,7 @@ class GroupAtomicityTest {
             });
             assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
             assertThatIllegalStateException().isThrownBy(app::start).withMessageContaining("route group");
-            assertThat(app.state()).isEqualTo(com.jsgalactic.axiom.application.Application.State.CONFIGURING);
+            assertThat(app.state()).isEqualTo(Application.State.CONFIGURING);
             release.countDown();
             configuring.join(10_000);
             assertThat(failure.get()).isNull();

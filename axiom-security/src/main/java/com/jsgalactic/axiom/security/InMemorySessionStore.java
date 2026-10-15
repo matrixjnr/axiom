@@ -1,6 +1,7 @@
 package com.jsgalactic.axiom.security;
 
 import com.jsgalactic.axiom.observability.Metrics;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
@@ -8,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
@@ -275,7 +277,7 @@ public final class InMemorySessionStore implements SessionStore {
         return elapsed.isNegative() ? Duration.ZERO : elapsed; // A clock that moved back expires nothing.
     }
 
-    private java.util.Map<String, SessionState> mapFor(SessionState state) {
+    private Map<String, SessionState> mapFor(SessionState state) {
         return state.identity().isPresent() ? authenticated : anonymous;
     }
 
@@ -331,7 +333,7 @@ public final class InMemorySessionStore implements SessionStore {
     private static String key(String id) {
         Objects.requireNonNull(id, "id");
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(id.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(id.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is a required JDK algorithm", impossible);
         }

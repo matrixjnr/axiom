@@ -4,16 +4,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
+import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpResponseEncoder;
+import io.netty.handler.timeout.IdleStateEvent;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** After a listener error response the connection half-closes and discards input for a bounded time. */
 class HttpLingerTest {
@@ -108,7 +114,7 @@ class HttpLingerTest {
 
     @Test void drainCutsTheLingerOfAClientStillSendingToTheShutdownBound() {
         // The quiet period is out of the way, so only the total bounds can end lingering.
-        var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(java.time.Duration.ofHours(1)));
+        var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(Duration.ofHours(1)));
         try {
             channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
             assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
@@ -129,7 +135,7 @@ class HttpLingerTest {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         app.get("/slow", ctx -> { entered.countDown(); release.await(); return "slow"; });
-        var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(java.time.Duration.ofHours(1)));
+        var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(Duration.ofHours(1)));
         try {
             channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\n"));
             assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
@@ -169,7 +175,7 @@ class HttpLingerTest {
             channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
             assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
             assertThat(channel.isActive()).isTrue();
-            channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+            channel.pipeline().fireUserEventTriggered(IdleStateEvent.ALL_IDLE_STATE_EVENT);
             assertThat(channel.isActive()).isFalse();
         } finally { channel.finishAndReleaseAll(); }
     }
@@ -204,16 +210,16 @@ class HttpLingerTest {
         }
     }
 
-    @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
-    @org.junit.jupiter.params.provider.ValueSource(strings = {
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
             "GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n",
             "GET / HTTP/1.0\r\n\r\nGET / HTTP/1.0\r\n\r\n",
             "GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n",
             "GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGARBAGE\r\n\r\n"})
     void everyCloseAfterAResponseLingers(String requests) {
-        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var calls = new AtomicInteger();
         app.get("/", ctx -> { calls.incrementAndGet(); return "hi"; });
-        app.get("/bye", ctx -> { calls.incrementAndGet(); return com.jsgalactic.axiom.http.Response.of(200, "bye").withHeader("Connection", "close"); });
+        app.get("/bye", ctx -> { calls.incrementAndGet(); return Response.of(200, "bye").withHeader("Connection", "close"); });
         var channel = socket();
         try {
             channel.writeInbound(ascii(requests));

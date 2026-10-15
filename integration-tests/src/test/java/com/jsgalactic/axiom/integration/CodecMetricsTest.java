@@ -7,6 +7,7 @@ import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.test.TestClient;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -17,7 +18,7 @@ class CodecMetricsTest {
     private static final class Recorder implements Metrics {
         final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
         final Map<String, AtomicLong> observations = new ConcurrentHashMap<>();
-        private static String key(String name, String... tags) { return name + java.util.Arrays.toString(tags); }
+        private static String key(String name, String... tags) { return name + Arrays.toString(tags); }
         @Override public Counter counter(String name, String... tags) {
             var value = counters.computeIfAbsent(key(name, tags), k -> new AtomicLong());
             return new Counter() {

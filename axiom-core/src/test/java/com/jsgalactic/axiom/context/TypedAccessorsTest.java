@@ -9,9 +9,12 @@ import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.routing.Route;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
+import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -84,7 +87,7 @@ class TypedAccessorsTest {
     }
 
     /** Every failure is a 400 with a fixed code and a message that never contains the input. */
-    private static void assertSafe(org.assertj.core.api.ThrowableAssert.ThrowingCallable call, String code, String input) {
+    private static void assertSafe(ThrowableAssert.ThrowingCallable call, String code, String input) {
         assertThatThrownBy(call).isInstanceOfSatisfying(BadRequestException.class, failure -> {
             assertThat(failure.status()).isEqualTo(400);
             assertThat(failure.code()).isEqualTo(code);
@@ -95,7 +98,7 @@ class TypedAccessorsTest {
     }
 
     private static String enc(String value) {
-        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private static Context context(String query, Map<String, String> captures) {

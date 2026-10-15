@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -264,8 +265,8 @@ public final class MetricsRegistry implements Metrics {
     }
 
     private static String conflict(String name, Kind existing, Kind requested) {
-        return "Metric " + name + " is a " + existing.name().toLowerCase(java.util.Locale.ROOT)
-                + " and cannot also be a " + requested.name().toLowerCase(java.util.Locale.ROOT);
+        return "Metric " + name + " is a " + existing.name().toLowerCase(Locale.ROOT)
+                + " and cannot also be a " + requested.name().toLowerCase(Locale.ROOT);
     }
 
     private static List<String> copy(String[] tags) {

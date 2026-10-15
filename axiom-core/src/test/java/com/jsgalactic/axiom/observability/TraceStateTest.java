@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -88,7 +89,7 @@ class TraceStateTest {
     }
 
     @Test void correlationNamesTheRequestAndTheTraceWhenThereIsOne() {
-        assertThat(TraceContext.correlation("req-1", java.util.Optional.empty())).isEqualTo("req-1");
+        assertThat(TraceContext.correlation("req-1", Optional.empty())).isEqualTo("req-1");
         assertThat(TraceContext.correlation("req-1", TraceContext.parse(VALID)))
                 .isEqualTo("req-1 trace=0af7651916cd43dd8448eb211c80319c");
     }

@@ -34,6 +34,7 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 
@@ -152,7 +153,7 @@ final class Schemas {
         }
         if (raw == Iterable.class || Collection.class.isAssignableFrom(raw)) {
             requireArgs(r, 1, where);
-            return array(generate(r.args().get(0), where + "[]", depth + 1, simple), java.util.Set.class.isAssignableFrom(raw));
+            return array(generate(r.args().get(0), where + "[]", depth + 1, simple), Set.class.isAssignableFrom(raw));
         }
         if (Map.class.isAssignableFrom(raw)) {
             if (simple) {
@@ -486,7 +487,7 @@ final class Schemas {
     // ---- validation rules
 
     private void applyRules(Class<?> raw, String name, Map<String, Map<String, Object>> properties,
-                            java.util.Set<String> required) {
+                            Set<String> required) {
         var described = rules.get(raw);
         if (described == null) {
             return;
@@ -514,7 +515,7 @@ final class Schemas {
     }
 
     private void apply(String where, Map<String, Object> schema, Constraint c, String property,
-                       java.util.Set<String> required) {
+                       Set<String> required) {
         var type = (String) schema.get("type");
         switch (c.kind()) {
             case NOT_NULL -> {

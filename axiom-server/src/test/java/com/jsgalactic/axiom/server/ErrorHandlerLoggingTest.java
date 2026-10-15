@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
+import com.jsgalactic.axiom.error.AxiomException;
 import com.jsgalactic.axiom.error.BadRequestException;
 import com.jsgalactic.axiom.error.InternalServerErrorException;
 import com.jsgalactic.axiom.error.NotFoundException;
@@ -16,6 +17,7 @@ import com.jsgalactic.axiom.http.Response;
 import java.time.Duration;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.ResourceBundle;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -62,7 +64,7 @@ class ErrorHandlerLoggingTest {
             int status = statuses.get(i);
             try (var app = app(failure)) {
                 app.error(Exception.class, (ctx, mapped) -> Response.of(status, "mapped"));
-                app.error(com.jsgalactic.axiom.error.AxiomException.class, (ctx, mapped) -> Response.of(status, "mapped"));
+                app.error(AxiomException.class, (ctx, mapped) -> Response.of(status, "mapped"));
                 app.start();
                 var execution = ExecutionContext.create(Duration.ofSeconds(10));
                 var response = call(app, execution);
@@ -105,11 +107,11 @@ class ErrorHandlerLoggingTest {
         final List<Throwable> thrown = new CopyOnWriteArrayList<>();
         @Override public String getName() { return "capture"; }
         @Override public boolean isLoggable(Level level) { return true; }
-        @Override public void log(Level level, java.util.ResourceBundle bundle, String message, Throwable thrown) {
+        @Override public void log(Level level, ResourceBundle bundle, String message, Throwable thrown) {
             entries.add(level + " " + message);
             this.thrown.add(thrown);
         }
-        @Override public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
+        @Override public void log(Level level, ResourceBundle bundle, String format, Object... params) {
             entries.add(level + " " + format);
         }
     }

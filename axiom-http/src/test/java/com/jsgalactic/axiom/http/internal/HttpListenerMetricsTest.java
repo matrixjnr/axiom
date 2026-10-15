@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
+import com.jsgalactic.axiom.lifecycle.Server;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Tag;
@@ -16,7 +17,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("integration")
 class HttpListenerMetricsTest {
-    private static com.jsgalactic.axiom.lifecycle.Server listen(Fixture fixture, String name, int maxConnections)
+    private static Server listen(Fixture fixture, String name, int maxConnections)
             throws Exception {
         var options = ListenerOptions.builder().name(name).maxConnections(maxConnections).build();
         var server = fixture.app.listen(new InetSocketAddress("127.0.0.1", 0), options);

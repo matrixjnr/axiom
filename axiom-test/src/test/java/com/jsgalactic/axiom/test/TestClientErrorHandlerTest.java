@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.error.NotFoundException;
+import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.NoSuchElementException;
 import org.junit.jupiter.api.Test;
@@ -42,7 +44,7 @@ class TestClientErrorHandlerTest {
     void mappingClientsAnswerUnmappedFailuresLikeTheListener() throws Exception {
         var app = Axiom.create();
         app.get("/unmapped", ctx -> { throw new UnsupportedOperationException(POISON); });
-        app.get("/checked", ctx -> { throw new java.io.IOException(POISON); });
+        app.get("/checked", ctx -> { throw new IOException(POISON); });
         app.get("/missing", ctx -> { throw new NotFoundException("item_not_found"); });
         app.get("/unsendable", ctx -> Response.of(200, new Object()));
         app.get("/stream", ctx -> { throw new IllegalStateException(POISON); });
@@ -59,11 +61,11 @@ class TestClientErrorHandlerTest {
             // Failures that already had a response keep it.
             assertThat(client.get("/missing").status()).isEqualTo(404);
             // The streaming entry point answers a failure before the head the same way.
-            try (var stream = client.stream(com.jsgalactic.axiom.http.Request.get("/stream"))) {
+            try (var stream = client.stream(Request.get("/stream"))) {
                 assertThat(stream.status()).isEqualTo(500);
             }
             // The future completes normally, not exceptionally.
-            assertThat(client.submit(com.jsgalactic.axiom.http.Request.get("/unmapped")).get().status()).isEqualTo(500);
+            assertThat(client.submit(Request.get("/unmapped")).get().status()).isEqualTo(500);
         }
     }
 

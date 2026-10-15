@@ -10,6 +10,7 @@ import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.spi.HttpTransportProvider;
+import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -19,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
@@ -110,7 +112,7 @@ class LifecycleLockTest {
         @Override
         public Enumeration<URL> getResources(String name) throws IOException {
             if (name.equals("META-INF/services/" + HttpTransportProvider.class.getName())) {
-                return Collections.enumeration(java.util.List.of(services));
+                return Collections.enumeration(List.of(services));
             }
             return super.getResources(name);
         }
@@ -130,7 +132,7 @@ class LifecycleLockTest {
 
         @Override
         public Server bind(Application application, InetSocketAddress address,
-                com.jsgalactic.axiom.lifecycle.ListenerOptions options) throws IOException {
+                ListenerOptions options) throws IOException {
             binding.countDown();
             try {
                 if (!release.await(5, TimeUnit.SECONDS)) { throw new IOException("Bind was not released"); }

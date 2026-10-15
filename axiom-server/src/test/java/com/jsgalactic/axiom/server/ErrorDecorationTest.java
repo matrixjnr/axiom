@@ -10,6 +10,7 @@ import com.jsgalactic.axiom.error.ConflictException;
 import com.jsgalactic.axiom.error.ForbiddenException;
 import com.jsgalactic.axiom.error.InternalServerErrorException;
 import com.jsgalactic.axiom.error.NotFoundException;
+import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import java.util.ArrayList;
@@ -206,7 +207,7 @@ class ErrorDecorationTest {
             app.start();
             assertThatThrownBy(() -> app.handle(new Request("POST", "/boom")))
                     .isInstanceOf(UnsupportedOperationException.class);
-            var big = new Request("POST", "/boom").withBody(com.jsgalactic.axiom.http.Body.of("text/plain", new byte[10]));
+            var big = new Request("POST", "/boom").withBody(Body.of("text/plain", new byte[10]));
             assertThat(app.handle(big).status()).isEqualTo(413);
             assertThat(calls).isEmpty();
         }

@@ -19,7 +19,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLSocket;
@@ -292,7 +294,7 @@ class TlsListenerTest {
         try (var tls = new TlsFixture(); var fixture = new Fixture()) {
             var first = tls.identity("first");
             var second = tls.identity("second");
-            var current = new java.util.concurrent.atomic.AtomicReference<>(first);
+            var current = new AtomicReference<>(first);
             var calls = new AtomicInteger();
             schemeOf(fixture);
             var options = TlsOptions.builder().sslContext(() -> {
@@ -571,7 +573,7 @@ class TlsListenerTest {
             try (var socket = connect(listener, TlsFixture.client(server.certificate(), null))) {
                 socket.startHandshake();
                 listener.close();
-                listener.termination().toCompletableFuture().get(30, java.util.concurrent.TimeUnit.SECONDS);
+                listener.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
                 assertThat(socket.getInputStream().read()).isEqualTo(-1);
             }
         }

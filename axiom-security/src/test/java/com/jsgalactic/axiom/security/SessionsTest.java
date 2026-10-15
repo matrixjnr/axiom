@@ -9,12 +9,15 @@ import com.jsgalactic.axiom.context.SecurityIdentity;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.test.TestClient;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -78,7 +81,7 @@ class SessionsTest {
     }
 
     private static String body(Response response) {
-        return response.body() instanceof byte[] bytes ? new String(bytes, java.nio.charset.StandardCharsets.UTF_8) : String.valueOf(response.body());
+        return response.body() instanceof byte[] bytes ? new String(bytes, StandardCharsets.UTF_8) : String.valueOf(response.body());
     }
 
     private String body(TestClient client, String method, String target, String id) throws Exception {
@@ -113,7 +116,7 @@ class SessionsTest {
 
     @Test
     void identifiersAreUniqueAndRandom() throws Exception {
-        var seen = new java.util.HashSet<String>();
+        var seen = new HashSet<String>();
         try (var client = TestClient.start(app())) {
             for (int i = 0; i < 200; i++) { assertThat(seen.add(sessionCookie(client.execute(request("POST", "/set?v=1", null))))).isTrue(); }
         }
@@ -236,10 +239,10 @@ class SessionsTest {
     void aFailingHandlerAppliesNoSessionWrites() throws Exception {
         try (var client = TestClient.start(app())) {
             var id = sessionCookie(client.execute(request("POST", "/set?v=kept", null)));
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.execute(request("POST", "/boom", COOKIE + "=" + id)))
+            Assertions.assertThatThrownBy(() -> client.execute(request("POST", "/boom", COOKIE + "=" + id)))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(body(client, "GET", "/peek", id)).isEqualTo("kept/anonymous");
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.execute(request("POST", "/boom", null)))
+            Assertions.assertThatThrownBy(() -> client.execute(request("POST", "/boom", null)))
                     .isInstanceOf(IllegalStateException.class);
         }
         assertThat(store.size()).isEqualTo(1);
@@ -248,7 +251,7 @@ class SessionsTest {
     @Test
     void aSecondCookieFromTheHandlerFailsLoudlyBeforeTouchingTheStore() throws Exception {
         try (var client = TestClient.start(app())) {
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.execute(request("POST", "/own-cookie", null)))
+            Assertions.assertThatThrownBy(() -> client.execute(request("POST", "/own-cookie", null)))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("Set-Cookie");
         }
         assertThat(store.size()).isZero();
@@ -358,7 +361,7 @@ class SessionsTest {
         var app = Axiom.create();
         app.get("/x", ctx -> sessions.session(ctx).toString());
         try (var client = TestClient.start(app)) {
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.get("/x")).isInstanceOf(IllegalStateException.class);
+            Assertions.assertThatThrownBy(() -> client.get("/x")).isInstanceOf(IllegalStateException.class);
         }
     }
 

@@ -1,5 +1,7 @@
 package com.jsgalactic.axiom.http;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -194,8 +196,8 @@ public final class Response {
             }
         }
         try {
-            new java.net.URI(location);
-        } catch (java.net.URISyntaxException invalid) {
+            new URI(location);
+        } catch (URISyntaxException invalid) {
             throw new IllegalArgumentException("Location is not a valid URI reference");
         }
         return withHeader("Location", location);

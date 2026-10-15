@@ -14,6 +14,8 @@ import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.RejectedExecutionException;
@@ -345,7 +347,7 @@ public final class TestClient implements AutoCloseable {
             return Problems.response(503, context.requestId());
         }
         boolean answered = failure instanceof Exception && !(failure instanceof InterruptedException)
-                && !(failure instanceof java.util.concurrent.CancellationException)
+                && !(failure instanceof CancellationException)
                 && !(failure instanceof StreamAbortedException);
         if (mapFailures && answered) {
             LOG.log(System.Logger.Level.ERROR, "Request " + context.requestId() + " failed", failure);
@@ -386,7 +388,7 @@ public final class TestClient implements AutoCloseable {
     }
 
     /** The recorder of the stream measurements of a route's endpoint. */
-    private StreamMetrics.Scope streamScope(java.util.Optional<? extends Object> route) {
+    private StreamMetrics.Scope streamScope(Optional<? extends Object> route) {
         return streamMetrics.scope(dispatcher.endpointTag(route.<Object>map(value -> value).orElse(UNMATCHED)));
     }
 

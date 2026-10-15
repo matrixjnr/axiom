@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.test.TestClient;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class NotesApiTest {
@@ -30,7 +31,7 @@ class NotesApiTest {
             client.post("/owners/ada/notes", "application/json", "{\"title\":\"Plan\"}");
             var created = client.post("/owners/ada/notes", "application/json", "{\"title\":\"Second\"}");
             assertThat(created.headers().get("Server-Timing")).matches("app;dur=[0-9.]+");
-            for (var path : java.util.List.of("/owners/ada/notes/42", "/owners/ada/notes/x", "/owners/bob/notes/1")) {
+            for (var path : List.of("/owners/ada/notes/42", "/owners/ada/notes/x", "/owners/bob/notes/1")) {
                 var missing = client.get(path);
                 assertThat(missing.status()).as(path).isEqualTo(404);
                 assertThat(missing.headers()).containsEntry("Content-Type", "application/problem+json");

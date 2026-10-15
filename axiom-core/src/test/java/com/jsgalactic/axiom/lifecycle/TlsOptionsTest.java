@@ -3,12 +3,15 @@ package com.jsgalactic.axiom.lifecycle;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.jsgalactic.axiom.execution.AdmissionSnapshot;
+import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CompletionStage;
 import javax.net.ssl.SSLContext;
 import org.junit.jupiter.api.Test;
 
@@ -117,10 +120,10 @@ class TlsOptionsTest {
 
     @Test void aServerWithoutTlsRefusesToReload() {
         Server server = new Server() {
-            @Override public java.net.InetSocketAddress localAddress() { return null; }
+            @Override public InetSocketAddress localAddress() { return null; }
             @Override public boolean isOpen() { return false; }
-            @Override public com.jsgalactic.axiom.execution.AdmissionSnapshot admission() { return null; }
-            @Override public java.util.concurrent.CompletionStage<Void> termination() { return null; }
+            @Override public AdmissionSnapshot admission() { return null; }
+            @Override public CompletionStage<Void> termination() { return null; }
             @Override public void close() { }
         };
         assertThatThrownBy(server::reloadTls).isInstanceOf(IllegalStateException.class);

@@ -6,6 +6,7 @@ import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.routing.RouteGroup;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -86,7 +87,7 @@ public final class Health {
         /** Copies the checks. */
         public Report {
             Objects.requireNonNull(status, "status");
-            checks = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(checks));
+            checks = Collections.unmodifiableMap(new LinkedHashMap<>(checks));
         }
 
         /**

@@ -5,6 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.reflect.Modifier;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -13,11 +21,11 @@ class RequestTest {
     @Test
     void requestIsAnImmutableClassWithNamedAccessors() {
         assertThat(Request.class.isRecord()).isFalse();
-        assertThat(java.lang.reflect.Modifier.isFinal(Request.class.getModifiers())).isTrue();
-        var headers = new java.util.HashMap<String, String>();
+        assertThat(Modifier.isFinal(Request.class.getModifiers())).isTrue();
+        var headers = new HashMap<String, String>();
         headers.put("Accept", "application/json");
         var body = Body.of("text/plain", new byte[] {65});
-        var peer = new java.net.InetSocketAddress("127.0.0.1", 1234);
+        var peer = new InetSocketAddress("127.0.0.1", 1234);
         var request = new Request("POST", "/notes", "sort=new", headers, body, peer, true);
         headers.clear();
         assertThat(request.method()).isEqualTo("POST");
@@ -32,21 +40,21 @@ class RequestTest {
     @Test
     void equalityAndHashingAgreeForCaseInsensitiveHeaders() {
         var body = Body.of("text/plain", new byte[] {65});
-        var first = new Request("POST", "/notes", "q=1", java.util.Map.of("Accept", "text/plain"), body);
-        var same = new Request("POST", "/notes", "q=1", java.util.Map.of("accept", "text/plain"), body);
+        var first = new Request("POST", "/notes", "q=1", Map.of("Accept", "text/plain"), body);
+        var same = new Request("POST", "/notes", "q=1", Map.of("accept", "text/plain"), body);
         assertThat(first).isEqualTo(same).hasSameHashCodeAs(same);
         assertThat(same).isEqualTo(first);
-        assertThat(new java.util.HashSet<>(java.util.List.of(first, same))).hasSize(1);
+        assertThat(new HashSet<>(List.of(first, same))).hasSize(1);
         assertThat(first).isEqualTo(first).isNotEqualTo(null).isNotEqualTo("request");
         assertThat(first).isNotEqualTo(new Request("GET", "/notes", "q=1", first.headers(), body));
         assertThat(first).isNotEqualTo(new Request("POST", "/other", "q=1", first.headers(), body));
         assertThat(first).isNotEqualTo(new Request("POST", "/notes", "q=2", first.headers(), body));
-        assertThat(first).isNotEqualTo(first.withHeaders(java.util.Map.of("Accept", "application/json")));
+        assertThat(first).isNotEqualTo(first.withHeaders(Map.of("Accept", "application/json")));
         assertThat(first).isEqualTo(first.withBody(Body.of("text/plain", new byte[] {65})))
                 .hasSameHashCodeAs(first.withBody(Body.of("text/plain", new byte[] {65})));
         assertThat(first).isNotEqualTo(first.withBody(Body.of("text/plain", new byte[] {66})));
         assertThat(first).isNotEqualTo(first.withBody(Body.of("application/octet-stream", new byte[] {65})));
-        assertThat(first).isNotEqualTo(first.withRemoteAddress(new java.net.InetSocketAddress("127.0.0.1", 1234)));
+        assertThat(first).isNotEqualTo(first.withRemoteAddress(new InetSocketAddress("127.0.0.1", 1234)));
         assertThat(first).isNotEqualTo(first.withTls(true));
     }
 
@@ -96,7 +104,7 @@ class RequestTest {
         assertThat(asterisk.path()).isEqualTo("*");
         assertThat(asterisk.query()).isEmpty();
         assertThat(asterisk).isEqualTo(new Request("OPTIONS", "*"));
-        assertThat(asterisk.withHeaders(java.util.Map.of("X", "y")).path()).isEqualTo("*");
+        assertThat(asterisk.withHeaders(Map.of("X", "y")).path()).isEqualTo("*");
         for (var method : new String[] {"GET", "HEAD", "POST", "options", "Options", "TRACE", "PROPFIND"}) {
             assertThatThrownBy(() -> Request.fromTarget(method, "*")).as(method)
                     .isInstanceOf(InvalidRequestPathException.class);
@@ -108,7 +116,7 @@ class RequestTest {
         // Absolute-form targets are not normalized; they stay rejected for every method.
         assertThatThrownBy(() -> Request.fromTarget("OPTIONS", "http://host/a"))
                 .isInstanceOf(InvalidRequestPathException.class);
-        assertThatThrownBy(() -> new Request("OPTIONS", "*", "x=1", java.util.Map.of(), Body.empty()))
+        assertThatThrownBy(() -> new Request("OPTIONS", "*", "x=1", Map.of(), Body.empty()))
                 .isInstanceOf(InvalidRequestPathException.class);
     }
 
@@ -132,35 +140,35 @@ class RequestTest {
         assertThat(plain).isEqualTo(Request.fromTarget("POST", "/notes"));
         assertThat(plain.query()).isEmpty();
         assertThat(plain).isNotEqualTo(Request.fromTarget("POST", "/notes?x=1"));
-        var full = plain.withHeaders(java.util.Map.of("Accept", "application/json"))
+        var full = plain.withHeaders(Map.of("Accept", "application/json"))
                 .withBody(Body.of("application/json", new byte[] {'{', '}'}));
         assertThat(full.header("accept")).contains("application/json");
         assertThat(full.header("missing")).isEmpty();
         assertThat(full.body().length()).isEqualTo(2);
         assertThat(full).isNotEqualTo(plain);
         assertThatThrownBy(() -> full.headers().put("x", "y")).isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> new Request("GET", "/../x", java.util.Map.of(), Body.empty()))
+        assertThatThrownBy(() -> new Request("GET", "/../x", Map.of(), Body.empty()))
                 .isInstanceOf(InvalidRequestPathException.class);
     }
 
     @Test
     void rejectsUnsafeHeadersAndHidesValuesFromDescriptions() {
-        for (var invalid : java.util.List.of(java.util.Map.of("Bad Name", "x"), java.util.Map.of("X", "a\r\nb"),
-                java.util.Map.of("X", "1", "x", "2"))) {
+        for (var invalid : List.of(Map.of("Bad Name", "x"), Map.of("X", "a\r\nb"),
+                Map.of("X", "1", "x", "2"))) {
             assertThatIllegalArgumentException().isThrownBy(() -> Request.get("/").withHeaders(invalid));
         }
-        var request = Request.get("/").withHeaders(java.util.Map.of("Authorization", "Bearer secret-token"))
-                .withBody(Body.of("text/plain", "password".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        var request = Request.get("/").withHeaders(Map.of("Authorization", "Bearer secret-token"))
+                .withBody(Body.of("text/plain", "password".getBytes(StandardCharsets.UTF_8)));
         assertThat(request.toString()).contains("Authorization").doesNotContain("secret-token", "password");
     }
 
     @Test
     void carriesAResolvedRemoteAddressThroughCopiesWithoutPrintingIt() throws Exception {
-        var peer = new java.net.InetSocketAddress(java.net.InetAddress.getByAddress(new byte[] {(byte) 192, 0, 2, 7}), 4711);
+        var peer = new InetSocketAddress(InetAddress.getByAddress(new byte[] {(byte) 192, 0, 2, 7}), 4711);
         assertThat(Request.get("/").remoteAddress()).isNull();
         var request = Request.get("/").withRemoteAddress(peer);
         assertThat(request.remoteAddress()).isEqualTo(peer);
-        assertThat(request.withHeaders(java.util.Map.of("A", "b")).withBody(Body.empty()).remoteAddress()).isEqualTo(peer);
+        assertThat(request.withHeaders(Map.of("A", "b")).withBody(Body.empty()).remoteAddress()).isEqualTo(peer);
         assertThat(request.toString()).doesNotContain("192.0.2.7");
         assertThat(request.withRemoteAddress(null).remoteAddress()).isNull();
     }
@@ -173,17 +181,17 @@ class RequestTest {
         var secure = plain.withTls(true);
         assertThat(secure.isSecure()).isTrue();
         assertThat(secure.scheme()).isEqualTo("https");
-        assertThat(secure.withHeaders(java.util.Map.of("A", "b")).withBody(Body.empty())
+        assertThat(secure.withHeaders(Map.of("A", "b")).withBody(Body.empty())
                 .withRemoteAddress(null).isSecure()).isTrue();
         assertThat(secure.withTls(false).isSecure()).isFalse();
-        assertThat(new Request("GET", "/", "", java.util.Map.of(), Body.empty(), null).isSecure()).isFalse();
+        assertThat(new Request("GET", "/", "", Map.of(), Body.empty(), null).isSecure()).isFalse();
         // A header can never make a request secure.
-        assertThat(plain.withHeaders(java.util.Map.of("X-Forwarded-Proto", "https")).isSecure()).isFalse();
+        assertThat(plain.withHeaders(Map.of("X-Forwarded-Proto", "https")).isSecure()).isFalse();
     }
 
     @Test
     void rejectsAnUnresolvedRemoteAddressSoNothingLooksItUp() {
-        assertThatThrownBy(() -> Request.get("/").withRemoteAddress(java.net.InetSocketAddress.createUnresolved("example.org", 80)))
+        assertThatThrownBy(() -> Request.get("/").withRemoteAddress(InetSocketAddress.createUnresolved("example.org", 80)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

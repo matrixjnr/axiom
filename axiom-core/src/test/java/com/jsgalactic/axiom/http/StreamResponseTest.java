@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -99,6 +100,6 @@ class StreamResponseTest {
     void abortReasonsAreReported() {
         var failure = new StreamAbortedException(StreamAbortedException.Reason.LIMIT_EXCEEDED);
         assertThat(failure.reason()).isEqualTo(StreamAbortedException.Reason.LIMIT_EXCEEDED);
-        assertThat(failure).isInstanceOf(java.io.IOException.class).hasMessageContaining("LIMIT_EXCEEDED");
+        assertThat(failure).isInstanceOf(IOException.class).hasMessageContaining("LIMIT_EXCEEDED");
     }
 }

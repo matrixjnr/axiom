@@ -23,6 +23,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /** Key sets through an injected source: parsing, binding, caching, rotation and failure handling. */
@@ -354,7 +355,7 @@ class JwksTest {
         assertThatIllegalArgumentException().isThrownBy(() -> options.maxStale(Duration.ofDays(8)));
         assertThatIllegalArgumentException().isThrownBy(() -> JwtAuthenticator.builder().jwks(source, options.minRefreshInterval(Duration.ofMinutes(11))));
         assertThatIllegalArgumentException().isThrownBy(() -> JwtAuthenticator.builder().jwks(source, options.maxStale(Duration.ofMinutes(5))));
-        org.assertj.core.api.Assertions.assertThatNullPointerException().isThrownBy(() -> JwtAuthenticator.builder().jwks(null));
+        Assertions.assertThatNullPointerException().isThrownBy(() -> JwtAuthenticator.builder().jwks(null));
     }
 
     @Test

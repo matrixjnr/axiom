@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.InvalidRequestPathException;
 import com.jsgalactic.axiom.http.Request;
+import com.jsgalactic.axiom.routing.Route;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -106,7 +107,7 @@ class RouterReferenceTest {
                                 .isEqualTo(new Captured(expected.template().path(), new TreeMap<>(expected.parameters())).toString());
                     } else if (status == 200) {
                         assertThat(app.resolve(new Request(method, path))).as("%s %s", method, path)
-                                .contains(new com.jsgalactic.axiom.routing.Route("GET", expected.template().path()));
+                                .contains(new Route("GET", expected.template().path()));
                     } else if (status == 405) {
                         assertThat(actual.headers()).as("%s %s", method, path)
                                 .containsEntry("Allow", String.join(", ", allowed));

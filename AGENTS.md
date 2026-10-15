@@ -5,6 +5,8 @@
 - PR descriptions explain the problem, resulting behavior, relevant design decisions,
   validation, and material limitations. Scale detail to the change.
 - Keep public APIs small, document lifecycle and ownership, and enforce module boundaries.
+- Use imports and simple type names in Java code and tests. Qualify a type inline only when
+  Java requires disambiguation between types with the same simple name.
 - Test failure paths and concurrency invariants when behavior depends on them. Use deterministic
   coordination instead of sleeps. Run `./gradlew clean check` and relevant examples.
 - Keep core independent of server, transport, and serialization implementations.

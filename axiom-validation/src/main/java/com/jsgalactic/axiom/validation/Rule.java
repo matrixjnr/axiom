@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -339,8 +341,8 @@ public final class Rule<T> {
             return integer.compareTo(BigInteger.valueOf(bound));
         }
         if (value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte
-                || value instanceof java.util.concurrent.atomic.AtomicInteger
-                || value instanceof java.util.concurrent.atomic.AtomicLong) {
+                || value instanceof AtomicInteger
+                || value instanceof AtomicLong) {
             return Long.compare(value.longValue(), bound);
         }
         return Double.compare(value.doubleValue(), bound);

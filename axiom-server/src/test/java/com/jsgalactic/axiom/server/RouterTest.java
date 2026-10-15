@@ -8,11 +8,13 @@ import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.http.InvalidRequestPathException;
 import com.jsgalactic.axiom.http.Request;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.TreeMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -100,7 +102,7 @@ class RouterTest {
                 // A client error: a 400 problem response, not a propagated exception.
                 var response = app.handle(Request.get(invalid));
                 assertThat(response.status()).as(invalid).isEqualTo(400);
-                assertThat(new String((byte[]) response.body(), java.nio.charset.StandardCharsets.UTF_8))
+                assertThat(new String((byte[]) response.body(), StandardCharsets.UTF_8))
                         .contains("\"code\":\"invalid_path_encoding\"");
             }
         }
@@ -186,16 +188,16 @@ class RouterTest {
     @Test
     void parameterNamesBelongToEndpointsNotSharedTrieEdges() throws Exception {
         try (var app = Axiom.create()) {
-            app.get("/:team/members/:member", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
-            app.get("/:organization/settings/:key", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
-            app.post("/:company/members/:person", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
+            app.get("/:team/members/:member", ctx -> new TreeMap<>(ctx.pathParameters()).toString());
+            app.get("/:organization/settings/:key", ctx -> new TreeMap<>(ctx.pathParameters()).toString());
+            app.post("/:company/members/:person", ctx -> new TreeMap<>(ctx.pathParameters()).toString());
             app.start();
             assertThat(app.handle(Request.get("/t/members/m")).body())
-                    .isEqualTo(new java.util.TreeMap<>(Map.of("team", "t", "member", "m")).toString());
+                    .isEqualTo(new TreeMap<>(Map.of("team", "t", "member", "m")).toString());
             assertThat(app.handle(Request.get("/o/settings/k")).body())
-                    .isEqualTo(new java.util.TreeMap<>(Map.of("organization", "o", "key", "k")).toString());
+                    .isEqualTo(new TreeMap<>(Map.of("organization", "o", "key", "k")).toString());
             assertThat(app.handle(new Request("POST", "/c/members/p")).body())
-                    .isEqualTo(new java.util.TreeMap<>(Map.of("company", "c", "person", "p")).toString());
+                    .isEqualTo(new TreeMap<>(Map.of("company", "c", "person", "p")).toString());
         }
     }
 
@@ -219,11 +221,11 @@ class RouterTest {
     @Test
     void failedBacktrackingDoesNotLeakCaptureValues() throws Exception {
         try (var app = Axiom.create()) {
-            app.get("/:wrong/fixed/no", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
-            app.get("/:right/:next/yes", ctx -> new java.util.TreeMap<>(ctx.pathParameters()).toString());
+            app.get("/:wrong/fixed/no", ctx -> new TreeMap<>(ctx.pathParameters()).toString());
+            app.get("/:right/:next/yes", ctx -> new TreeMap<>(ctx.pathParameters()).toString());
             app.start();
             assertThat(app.handle(Request.get("/a/fixed/yes")).body())
-                    .isEqualTo(new java.util.TreeMap<>(Map.of("right", "a", "next", "fixed")).toString());
+                    .isEqualTo(new TreeMap<>(Map.of("right", "a", "next", "fixed")).toString());
         }
     }
 

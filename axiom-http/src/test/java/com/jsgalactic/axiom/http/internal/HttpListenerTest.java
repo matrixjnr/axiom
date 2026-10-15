@@ -5,13 +5,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
+import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.lifecycle.Server;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -97,9 +113,9 @@ class HttpListenerTest {
         try (var fixture = new Fixture()) {
             fixture.app.get("/", ctx -> switch (failure) {
                 case "exception" -> throw new IOException("secret");
-                case "application-timeout" -> throw new java.util.concurrent.TimeoutException("downstream secret");
-                case "application-reject" -> throw new java.util.concurrent.RejectedExecutionException("downstream overloaded");
-                case "application-cancel" -> throw new java.util.concurrent.CancellationException("application secret");
+                case "application-timeout" -> throw new TimeoutException("downstream secret");
+                case "application-reject" -> throw new RejectedExecutionException("downstream overloaded");
+                case "application-cancel" -> throw new CancellationException("application secret");
                 case "object" -> new Object();
                 case "oversize" -> new byte[1024 * 1024 + 1];
                 default -> Response.of(200, "ok").withHeader("X-Invalid", "\u2603");
@@ -152,7 +168,7 @@ class HttpListenerTest {
         try (var fixture = new Fixture()) {
             fixture.app.get("/", ctx -> "ok");
             var server = fixture.listen();
-            var before = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+            var before = Instant.now().truncatedTo(ChronoUnit.SECONDS);
             try (var wire = new Wire(server)) {
                 assertDate(wire.get("/"), before);
                 assertDate(wire.get("/missing"), before);
@@ -164,10 +180,10 @@ class HttpListenerTest {
         }
     }
 
-    private static void assertDate(Reply reply, java.time.Instant notBefore) {
-        var date = java.time.ZonedDateTime.parse(reply.headers().get("Date"),
-                java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
-        assertThat(date).isBetween(notBefore, java.time.Instant.now());
+    private static void assertDate(Reply reply, Instant notBefore) {
+        var date = ZonedDateTime.parse(reply.headers().get("Date"),
+                DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+        assertThat(date).isBetween(notBefore, Instant.now());
         assertThat(reply.headers().get("Date")).endsWith(" GMT");
     }
 
@@ -305,9 +321,9 @@ class HttpListenerTest {
     @Test void closeAnswersQueuedRequestsWithoutPromotingThem() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var calls = new AtomicInteger();
         try (var fixture = new Fixture()) {
-            fixture.app.admissionPolicy(new com.jsgalactic.axiom.execution.AdmissionPolicy(1, 1, java.time.Duration.ofSeconds(30)));
+            fixture.app.admissionPolicy(new AdmissionPolicy(1, 1, Duration.ofSeconds(30)));
             fixture.app.get("/", ctx -> {
                 calls.incrementAndGet();
                 entered.countDown();
@@ -345,7 +361,7 @@ class HttpListenerTest {
         var acceptorBlocked = new CountDownLatch(1);
         var unblockAcceptor = new CountDownLatch(1);
         try (var fixture = new Fixture()) {
-            fixture.app.admissionPolicy(new com.jsgalactic.axiom.execution.AdmissionPolicy(1, 1, java.time.Duration.ofSeconds(30)));
+            fixture.app.admissionPolicy(new AdmissionPolicy(1, 1, Duration.ofSeconds(30)));
             fixture.app.get("/", ctx -> {
                 entered.countDown();
                 assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
@@ -387,15 +403,15 @@ class HttpListenerTest {
             app.start();
             // Small fixed socket buffers keep most of the response out of the kernel whatever its
             // defaults, and the inactivity timeout is far away: only the response bound can close.
-            var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
+            var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
                     TransportSettings.DEFAULTS.withSocketBuffers(8192, 8192)
-                            .withIdleTimeout(java.time.Duration.ofHours(1))
-                            .withResponseTimeout(java.time.Duration.ofMillis(200)));
-            try (var client = new java.net.Socket()) {
+                            .withIdleTimeout(Duration.ofHours(1))
+                            .withResponseTimeout(Duration.ofMillis(200)));
+            try (var client = new Socket()) {
                 client.setReceiveBufferSize(4096);
                 client.connect(server.localAddress(), 30_000);
                 client.setSoTimeout(30_000);
-                client.getOutputStream().write("GET /big HTTP/1.1\r\nHost: a\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                client.getOutputStream().write("GET /big HTTP/1.1\r\nHost: a\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
                 assertThat(served.await(30, TimeUnit.SECONDS)).isTrue();
                 // The client reads nothing until the server has given up on it.
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
@@ -407,7 +423,7 @@ class HttpListenerTest {
                 try {
                     var buffer = new byte[65536];
                     for (int read; (read = client.getInputStream().read(buffer)) != -1;) { received += read; }
-                } catch (java.net.SocketException reset) { /* Also an end of the truncated response. */ }
+                } catch (SocketException reset) { /* Also an end of the truncated response. */ }
                 assertThat(received).isLessThan(body.length);
             } finally {
                 server.close();
@@ -435,8 +451,8 @@ class HttpListenerTest {
                 return "late";
             });
             app.start();
-            var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                    TransportSettings.DEFAULTS.withShutdownGrace(java.time.Duration.ofMillis(100)));
+            var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
+                    TransportSettings.DEFAULTS.withShutdownGrace(Duration.ofMillis(100)));
             try (var wire = new Wire(server)) {
                 wire.write("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
                 assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
@@ -452,7 +468,7 @@ class HttpListenerTest {
         var entered = new CountDownLatch(1);
         var interrupted = new CountDownLatch(1);
         try (var fixture = new Fixture()) {
-            fixture.app.requestTimeout(java.time.Duration.ofHours(1));
+            fixture.app.requestTimeout(Duration.ofHours(1));
             fixture.app.get("/", ctx -> {
                 entered.countDown();
                 try { new CountDownLatch(1).await(); }
@@ -469,7 +485,7 @@ class HttpListenerTest {
     }
 
     @Test void bindFailureCanBeRetriedAndHandlerCanCloseApplication() throws Exception {
-        try (var fixture = new Fixture(); var occupied = new java.net.ServerSocket(0)) {
+        try (var fixture = new Fixture(); var occupied = new ServerSocket(0)) {
             fixture.app.get("/", ctx -> { fixture.app.close(); return "closed"; });
             assertThatThrownBy(() -> fixture.app.listen(occupied.getLocalPort())).isInstanceOf(IOException.class);
             assertThat(fixture.app.state()).isEqualTo(Application.State.RUNNING);
@@ -488,7 +504,7 @@ class HttpListenerTest {
             var server = fixture.listen();
             server.termination().toCompletableFuture().complete(null);
             assertThat(server.termination().toCompletableFuture()).isNotDone();
-            var wires = new java.util.ArrayList<Wire>();
+            var wires = new ArrayList<Wire>();
             try {
                 for (int i = 0; i < 128; i++) {
                     var wire = new Wire(server);
@@ -507,9 +523,9 @@ class HttpListenerTest {
     @Test void assignsRequestIdsAndSharesExecutionMetadataWithHandler() throws Exception {
         try (var fixture = new Fixture()) {
             // Generous, so the handler sees budget left even on a loaded machine.
-            fixture.app.requestTimeout(java.time.Duration.ofSeconds(60));
+            fixture.app.requestTimeout(Duration.ofSeconds(60));
             fixture.app.get("/", ctx -> {
-                assertThat(ctx.execution().remainingTime()).isPositive().isLessThanOrEqualTo(java.time.Duration.ofSeconds(60));
+                assertThat(ctx.execution().remainingTime()).isPositive().isLessThanOrEqualTo(Duration.ofSeconds(60));
                 return Response.of(200, ctx.execution().requestId()).withHeader("X-Request-ID", "application-spoof");
             });
             try (var wire = new Wire(fixture.listen())) {
@@ -527,7 +543,7 @@ class HttpListenerTest {
         var interrupted = new CountDownLatch(1);
         var returned = new CountDownLatch(1);
         try (var fixture = new Fixture()) {
-            fixture.app.requestTimeout(java.time.Duration.ofSeconds(1));
+            fixture.app.requestTimeout(Duration.ofSeconds(1));
             fixture.app.get("/slow", ctx -> {
                 entered.countDown();
                 try { new CountDownLatch(1).await(); }
@@ -556,7 +572,7 @@ class HttpListenerTest {
         var entered = new CountDownLatch(1);
         var later = new AtomicBoolean();
         try (var fixture = new Fixture()) {
-            fixture.app.requestTimeout(java.time.Duration.ofSeconds(1));
+            fixture.app.requestTimeout(Duration.ofSeconds(1));
             fixture.app.get("/slow", ctx -> { entered.countDown(); new CountDownLatch(1).await(); return null; });
             fixture.app.get("/later", ctx -> { later.set(true); return "later"; });
             try (var wire = new Wire(fixture.listen())) {
@@ -580,7 +596,7 @@ class HttpListenerTest {
                 return "ok";
             });
             var server = fixture.listen();
-            var wires = new java.util.ArrayList<Wire>();
+            var wires = new ArrayList<Wire>();
             try {
                 for (int i = 0; i < 5; i++) {
                     var wire = new Wire(server);
@@ -599,9 +615,9 @@ class HttpListenerTest {
     @Test void routeQueueTimeoutUsesTemplateIdentityAndLeavesOtherRoutesAvailable() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var calls = new AtomicInteger();
         try (var fixture = new Fixture()) {
-            fixture.app.admissionPolicy(new com.jsgalactic.axiom.execution.AdmissionPolicy(2, 4, java.time.Duration.ofSeconds(5)));
+            fixture.app.admissionPolicy(new AdmissionPolicy(2, 4, Duration.ofSeconds(5)));
             var limited = fixture.app.get("/limited/:id", ctx -> {
                 calls.incrementAndGet();
                 entered.countDown();
@@ -609,7 +625,7 @@ class HttpListenerTest {
                 return ctx.path("id");
             });
             fixture.app.admissionPolicy(limited,
-                    new com.jsgalactic.axiom.execution.AdmissionPolicy(1, 1, java.time.Duration.ofSeconds(1)));
+                    new AdmissionPolicy(1, 1, Duration.ofSeconds(1)));
             fixture.app.get("/other", ctx -> "available");
             var server = fixture.listen();
             try (var first = new Wire(server); var second = new Wire(server); var other = new Wire(server)) {
@@ -633,7 +649,7 @@ class HttpListenerTest {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         try (var fixture = new Fixture()) {
-            fixture.app.admissionPolicy(com.jsgalactic.axiom.execution.AdmissionPolicy.reject(1));
+            fixture.app.admissionPolicy(AdmissionPolicy.reject(1));
             fixture.app.get("/busy", ctx -> {
                 entered.countDown();
                 assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();

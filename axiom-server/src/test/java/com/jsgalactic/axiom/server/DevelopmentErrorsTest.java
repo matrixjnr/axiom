@@ -9,6 +9,7 @@ import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.error.NotFoundException;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +27,7 @@ class DevelopmentErrorsTest {
     private static Application app(boolean development) {
         var app = Axiom.create();
         if (development) { app.developmentErrors(); }
-        app.get("/boom", ctx -> { throw new IllegalStateException(SECRET_DETAIL, new java.io.IOException("disk \"x\"")); });
+        app.get("/boom", ctx -> { throw new IllegalStateException(SECRET_DETAIL, new IOException("disk \"x\"")); });
         app.get("/missing", ctx -> { throw new NotFoundException("note_not_found"); });
         app.get("/handler-fails", ctx -> { throw new UnsupportedOperationException(SECRET_DETAIL); });
         app.get("/mapped", ctx -> { throw new ArithmeticException(SECRET_DETAIL); });

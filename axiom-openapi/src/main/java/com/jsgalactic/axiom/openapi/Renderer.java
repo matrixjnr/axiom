@@ -5,12 +5,15 @@ import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteDoc;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Supplier;
 
 /** Builds the OpenAPI 3.1 or Swagger 2.0 document model and writes it as JSON. */
 final class Renderer {
@@ -46,7 +49,7 @@ final class Renderer {
                         + "; hide the route with RouteDoc.empty().hidden()");
             }
             var operations = paths.computeIfAbsent(templatePath(route.path()), key -> new TreeMap<>(
-                    java.util.Comparator.comparingInt(METHODS::indexOf)));
+                    Comparator.comparingInt(METHODS::indexOf)));
             operations.put(route.method(), operation(route, withDefaults(route.path(), own), label));
         }
         var out = new LinkedHashMap<String, Object>();
@@ -88,7 +91,7 @@ final class Renderer {
 
     private static Map<String, Object> lower(Map<String, Map<String, Object>> operations) {
         var out = new LinkedHashMap<String, Object>();
-        operations.forEach((method, operation) -> out.put(method.toLowerCase(java.util.Locale.ROOT), operation));
+        operations.forEach((method, operation) -> out.put(method.toLowerCase(Locale.ROOT), operation));
         return out;
     }
 
@@ -246,7 +249,7 @@ final class Renderer {
             op.put("parameters", parameters);
         }
         var responses = new LinkedHashMap<String, Object>();
-        doc.responses().stream().sorted(java.util.Comparator.comparingInt(RouteDoc.Reply::status)).forEach(reply -> {
+        doc.responses().stream().sorted(Comparator.comparingInt(RouteDoc.Reply::status)).forEach(reply -> {
             var entry = new LinkedHashMap<String, Object>();
             entry.put("description", reply.description());
             if (reply.type() != null) {
@@ -318,7 +321,7 @@ final class Renderer {
         var schema = schema(() -> schemas.simple(param.type(), "parameter '" + param.name() + "'"), label);
         var out = new LinkedHashMap<String, Object>();
         out.put("name", param.name());
-        out.put("in", param.in().name().toLowerCase(java.util.Locale.ROOT));
+        out.put("in", param.in().name().toLowerCase(Locale.ROOT));
         if (param.description() != null) {
             out.put("description", param.description());
         }
@@ -339,7 +342,7 @@ final class Renderer {
     // ---- helpers
 
     /** Runs a schema generation and puts the route in front of any failure. */
-    private static Map<String, Object> schema(java.util.function.Supplier<Map<String, Object>> generation, String label) {
+    private static Map<String, Object> schema(Supplier<Map<String, Object>> generation, String label) {
         try {
             return generation.get();
         } catch (IllegalArgumentException e) {

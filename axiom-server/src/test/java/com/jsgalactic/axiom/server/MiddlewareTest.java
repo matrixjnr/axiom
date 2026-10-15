@@ -8,18 +8,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.error.ForbiddenException;
+import com.jsgalactic.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteGroup;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class MiddlewareTest {
-    private final List<String> calls = java.util.Collections.synchronizedList(new ArrayList<>());
+    private final List<String> calls = Collections.synchronizedList(new ArrayList<>());
 
     private Middleware record(String name) {
         return (ctx, next) -> {
@@ -73,7 +77,7 @@ class MiddlewareTest {
             app.start();
             assertThat(app.handle(Request.get("/secret")).status()).isEqualTo(401);
             assertThat(calls).isEmpty();
-            var authorized = Request.get("/secret").withHeaders(java.util.Map.of("Authorization", "Bearer x"));
+            var authorized = Request.get("/secret").withHeaders(Map.of("Authorization", "Bearer x"));
             assertThat(app.handle(authorized).body()).isEqualTo("secret");
         }
     }
@@ -131,7 +135,7 @@ class MiddlewareTest {
             var blocked = app.handle(Request.get("/blocked"));
             assertThat(blocked.status()).isEqualTo(403);
             assertThat(text(blocked)).isEqualTo("name=none");
-            var refused = app.handle(Request.get("/item").withHeaders(java.util.Map.of("Accept", "text/plain")));
+            var refused = app.handle(Request.get("/item").withHeaders(Map.of("Accept", "text/plain")));
             assertThat(refused.status()).isEqualTo(406);
         }
     }
@@ -270,7 +274,7 @@ class MiddlewareTest {
 
     @Test
     void globalMiddlewareCanAlwaysAskWhetherARouteMatched() throws Exception {
-        var seen = java.util.Collections.synchronizedList(new ArrayList<String>());
+        var seen = Collections.synchronizedList(new ArrayList<String>());
         try (var app = Axiom.create()) {
             app.use((ctx, next) -> {
                 var response = next.run();
@@ -312,7 +316,7 @@ class MiddlewareTest {
             app.use(record("global"));
             app.post("/upload", ctx -> "stored");
             app.start();
-            var large = new Request("POST", "/upload").withBody(com.jsgalactic.axiom.http.Body.of("text/plain", new byte[2]));
+            var large = new Request("POST", "/upload").withBody(Body.of("text/plain", new byte[2]));
             assertThat(app.handle(large).status()).isEqualTo(413);
             assertThat(app.handle(new Request("CONNECT", "/upload")).status()).isEqualTo(501);
             assertThat(calls).isEmpty();
@@ -423,7 +427,7 @@ class MiddlewareTest {
         try (var app = Axiom.create()) {
             var route = new AtomicReference<Route>();
             app.group("/api", api -> route.set(api.get("/slow", ctx -> "slow")));
-            var policy = com.jsgalactic.axiom.execution.AdmissionPolicy.reject(1);
+            var policy = AdmissionPolicy.reject(1);
             app.admissionPolicy(route.get(), policy);
             app.start();
             assertThat(app.admissionPolicy(new Route("GET", "/api/slow"))).isEqualTo(policy);

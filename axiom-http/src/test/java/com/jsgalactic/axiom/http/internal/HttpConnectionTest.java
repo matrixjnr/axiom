@@ -3,18 +3,49 @@ package com.jsgalactic.axiom.http.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.application.Application;
+import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
+import com.sun.management.ThreadMXBean;
+import io.netty.buffer.AbstractByteBufAllocator;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.buffer.UnpooledByteBufAllocator;
+import io.netty.buffer.UnpooledDirectByteBuf;
+import io.netty.buffer.UnpooledHeapByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.DefaultHttpRequest;
+import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpResponseEncoder;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.util.ReferenceCountUtil;
+import java.lang.management.ManagementFactory;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class HttpConnectionTest {
     @Test void saturatedExecutorReturns503WithoutRunningHandler() throws Exception {
@@ -51,7 +82,7 @@ class HttpConnectionTest {
     @Test void pipelineOverflowIsAnswered503AfterEarlierResponsesWithoutInterruptingTheHandler() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        var interrupted = new AtomicBoolean();
         var executor = executor();
         try (var app = Axiom.create()) {
             app.get("/", ctx -> {
@@ -74,7 +105,7 @@ class HttpConnectionTest {
                     FullHttpResponse response = awaitResponse(channel);
                     try {
                         assertThat(response.status().code()).isEqualTo(200);
-                        assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8))
+                        assertThat(response.content().toString(StandardCharsets.UTF_8))
                                 .isEqualTo(i == 0 ? "first" : "queued");
                     } finally { response.release(); }
                 }
@@ -124,13 +155,13 @@ class HttpConnectionTest {
             app.get("/", ctx -> "body");
             app.start();
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
-            var allocator = new io.netty.buffer.UnpooledByteBufAllocator(false);
+            var allocator = new UnpooledByteBufAllocator(false);
             channel.config().setAllocator(allocator);
             try {
                 request(channel);
                 FullHttpResponse response = awaitResponse(channel);
                 try {
-                    assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("body");
+                    assertThat(response.content().toString(StandardCharsets.UTF_8)).isEqualTo("body");
                     assertThat(response.content().alloc()).isSameAs(allocator);
                 } finally { response.release(); }
             } finally { channel.finishAndReleaseAll(); }
@@ -145,7 +176,7 @@ class HttpConnectionTest {
         try (var app = Axiom.create()) {
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
-                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                channel.pipeline().fireUserEventTriggered(IdleStateEvent.ALL_IDLE_STATE_EVENT);
                 assertThat(channel.isActive()).isFalse();
             } finally { channel.finishAndReleaseAll(); }
         } finally { executor.close(); }
@@ -161,13 +192,13 @@ class HttpConnectionTest {
             try {
                 request(channel);
                 assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
-                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                channel.pipeline().fireUserEventTriggered(IdleStateEvent.ALL_IDLE_STATE_EVENT);
                 assertThat(channel.isActive()).isTrue();
                 release.countDown();
                 FullHttpResponse response = awaitResponse(channel);
                 try { assertThat(response.status().code()).isEqualTo(200); }
                 finally { response.release(); }
-                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                channel.pipeline().fireUserEventTriggered(IdleStateEvent.ALL_IDLE_STATE_EVENT);
                 assertThat(channel.isActive()).isFalse();
             } finally { channel.finishAndReleaseAll(); }
         } finally {
@@ -180,7 +211,7 @@ class HttpConnectionTest {
     @Test void idleEventDoesNotAbortRequestWaitingForAdmission() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var policy = new com.jsgalactic.axiom.execution.AdmissionPolicy(1, 1, Duration.ofSeconds(30));
+        var policy = new AdmissionPolicy(1, 1, Duration.ofSeconds(30));
         var executor = new RequestDispatcher(policy);
         try (var app = Axiom.create()) {
             executor.submit(ExecutionContext.create(Duration.ofSeconds(10)), () -> {
@@ -196,7 +227,7 @@ class HttpConnectionTest {
             try {
                 request(channel);
                 assertThat(executor.snapshot().queued()).isEqualTo(1);
-                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                channel.pipeline().fireUserEventTriggered(IdleStateEvent.ALL_IDLE_STATE_EVENT);
                 assertThat(channel.isActive()).isTrue();
                 release.countDown();
                 FullHttpResponse response = awaitResponse(channel);
@@ -250,8 +281,8 @@ class HttpConnectionTest {
         } finally { executor.close(); }
     }
 
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {
+    @ParameterizedTest
+    @ValueSource(strings = {
             "GET / HTTP/1.1\r\nHost: a\r\n\r\nGET / HT",
             "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabcGET / HT",
             "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabcGET / HTTP/1.1\r\nHost: a\r\n",
@@ -304,32 +335,32 @@ class HttpConnectionTest {
         }
     }
 
-    private static EmbeddedChannel wireChannel(com.jsgalactic.axiom.application.Application app, RequestDispatcher executor,
+    private static EmbeddedChannel wireChannel(Application app, RequestDispatcher executor,
             Duration headTimeout) {
         var channel = new EmbeddedChannel();
         channel.freezeTime();
-        channel.pipeline().addLast(new RequestDecoder(new io.netty.handler.codec.http.HttpDecoderConfig()),
-                new io.netty.handler.codec.http.HttpResponseEncoder(),
+        channel.pipeline().addLast(new RequestDecoder(new HttpDecoderConfig()),
+                new HttpResponseEncoder(),
                 new HttpConnection(app, executor, TransportSettings.DEFAULTS.withHeadTimeout(headTimeout), null, () -> false));
         return channel;
     }
 
-    private static io.netty.buffer.ByteBuf ascii(String text) {
-        return io.netty.buffer.Unpooled.copiedBuffer(text, java.nio.charset.StandardCharsets.US_ASCII);
+    private static ByteBuf ascii(String text) {
+        return Unpooled.copiedBuffer(text, StandardCharsets.US_ASCII);
     }
 
     private static String outbound(EmbeddedChannel channel) {
         var text = new StringBuilder();
-        for (io.netty.buffer.ByteBuf buffer; (buffer = channel.readOutbound()) != null;) {
-            text.append(buffer.toString(java.nio.charset.StandardCharsets.US_ASCII));
+        for (ByteBuf buffer; (buffer = channel.readOutbound()) != null;) {
+            text.append(buffer.toString(StandardCharsets.US_ASCII));
             buffer.release();
         }
         return text.toString();
     }
 
     private static String awaitOutbound(EmbeddedChannel channel) throws InterruptedException {
-        io.netty.buffer.ByteBuf first = awaitResponse(channel);
-        try { return first.toString(java.nio.charset.StandardCharsets.US_ASCII) + outbound(channel); }
+        ByteBuf first = awaitResponse(channel);
+        try { return first.toString(StandardCharsets.US_ASCII) + outbound(channel); }
         finally { first.release(); }
     }
 
@@ -361,7 +392,7 @@ class HttpConnectionTest {
     @Test void dispatchFailureFromWriteListenerAnswers503() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var failing = new java.util.concurrent.atomic.AtomicBoolean();
+        var failing = new AtomicBoolean();
         var executor = executor();
         try (var real = Axiom.create()) {
             real.get("/", ctx -> { entered.countDown(); release.await(); return "first"; });
@@ -395,16 +426,16 @@ class HttpConnectionTest {
     }
 
     /** Delegates to a running application, but every lifecycle query fails once {@code failing} is set. */
-    private static com.jsgalactic.axiom.application.Application failingAfter(com.jsgalactic.axiom.application.Application app,
-            java.util.concurrent.atomic.AtomicBoolean failing) {
-        return (com.jsgalactic.axiom.application.Application) java.lang.reflect.Proxy.newProxyInstance(
-                HttpConnectionTest.class.getClassLoader(), new Class<?>[] {com.jsgalactic.axiom.application.Application.class},
+    private static Application failingAfter(Application app,
+            AtomicBoolean failing) {
+        return (Application) Proxy.newProxyInstance(
+                HttpConnectionTest.class.getClassLoader(), new Class<?>[] {Application.class},
                 (proxy, method, args) -> {
                     if (failing.get() && !method.getName().equals("requestTimeout")) {
                         throw new IllegalStateException("broken application");
                     }
                     try { return method.invoke(app, args); }
-                    catch (java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                    catch (InvocationTargetException failure) { throw failure.getCause(); }
                 });
     }
 
@@ -413,11 +444,11 @@ class HttpConnectionTest {
         try (var app = Axiom.create()) {
             app.get("/", ctx -> "unread");
             app.start();
-            var written = new java.util.concurrent.atomic.AtomicReference<Object>();
+            var written = new AtomicReference<Object>();
             // Holds writes without completing them, like a client that stopped reading.
-            var stalled = new io.netty.channel.ChannelOutboundHandlerAdapter() {
-                @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
-                        io.netty.channel.ChannelPromise promise) { written.set(message); }
+            var stalled = new ChannelOutboundHandlerAdapter() {
+                @Override public void write(ChannelHandlerContext ctx, Object message,
+                        ChannelPromise promise) { written.set(message); }
             };
             var channel = new EmbeddedChannel(stalled, new HttpConnection(app, executor));
             try {
@@ -428,10 +459,10 @@ class HttpConnectionTest {
                     Thread.onSpinWait();
                 }
                 assertThat(written.get()).isNotNull();
-                channel.pipeline().fireUserEventTriggered(io.netty.handler.timeout.IdleStateEvent.ALL_IDLE_STATE_EVENT);
+                channel.pipeline().fireUserEventTriggered(IdleStateEvent.ALL_IDLE_STATE_EVENT);
                 assertThat(channel.isActive()).isFalse();
             } finally {
-                io.netty.util.ReferenceCountUtil.release(written.get());
+                ReferenceCountUtil.release(written.get());
                 channel.finishAndReleaseAll();
             }
         } finally {
@@ -445,12 +476,12 @@ class HttpConnectionTest {
         try (var app = Axiom.create()) {
             app.get("/", ctx -> "unread");
             app.start();
-            var written = new java.util.concurrent.atomic.AtomicReference<Object>();
+            var written = new AtomicReference<Object>();
             // Holds writes without completing them, like a client that reads too slowly. Unlike the
             // inactivity timeout, the bound holds even if the write makes some progress meanwhile.
-            var stalled = new io.netty.channel.ChannelOutboundHandlerAdapter() {
-                @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
-                        io.netty.channel.ChannelPromise pending) { written.set(message); }
+            var stalled = new ChannelOutboundHandlerAdapter() {
+                @Override public void write(ChannelHandlerContext ctx, Object message,
+                        ChannelPromise pending) { written.set(message); }
             };
             var channel = new EmbeddedChannel(stalled, new HttpConnection(app, executor));
             channel.freezeTime();
@@ -464,7 +495,7 @@ class HttpConnectionTest {
                 channel.runScheduledPendingTasks();
                 assertThat(channel.isActive()).isFalse();
             } finally {
-                io.netty.util.ReferenceCountUtil.release(written.get());
+                ReferenceCountUtil.release(written.get());
                 channel.finishAndReleaseAll();
             }
         } finally {
@@ -478,11 +509,11 @@ class HttpConnectionTest {
         try (var app = Axiom.create()) {
             app.get("/", ctx -> "read");
             app.start();
-            var written = new java.util.concurrent.atomic.AtomicReference<Object>();
-            var promise = new java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelPromise>();
-            var held = new io.netty.channel.ChannelOutboundHandlerAdapter() {
-                @Override public void write(io.netty.channel.ChannelHandlerContext ctx, Object message,
-                        io.netty.channel.ChannelPromise pending) { written.set(message); promise.set(pending); }
+            var written = new AtomicReference<Object>();
+            var promise = new AtomicReference<ChannelPromise>();
+            var held = new ChannelOutboundHandlerAdapter() {
+                @Override public void write(ChannelHandlerContext ctx, Object message,
+                        ChannelPromise pending) { written.set(message); promise.set(pending); }
             };
             var channel = new EmbeddedChannel(held, new HttpConnection(app, executor));
             channel.freezeTime();
@@ -492,14 +523,14 @@ class HttpConnectionTest {
                 // The client takes the response just before the bound.
                 channel.advanceTimeBy(HttpConnection.RESPONSE_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
                 channel.runScheduledPendingTasks();
-                io.netty.util.ReferenceCountUtil.release(written.getAndSet(null));
+                ReferenceCountUtil.release(written.getAndSet(null));
                 promise.get().setSuccess();
                 // A completed write leaves no deadline behind on the keep-alive connection.
                 channel.advanceTimeBy(HttpConnection.RESPONSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
                 channel.runScheduledPendingTasks();
                 assertThat(channel.isActive()).isTrue();
             } finally {
-                io.netty.util.ReferenceCountUtil.release(written.get());
+                ReferenceCountUtil.release(written.get());
                 channel.finishAndReleaseAll();
             }
         } finally {
@@ -508,7 +539,7 @@ class HttpConnectionTest {
         }
     }
 
-    private static void awaitWritten(EmbeddedChannel channel, java.util.concurrent.atomic.AtomicReference<Object> written) {
+    private static void awaitWritten(EmbeddedChannel channel, AtomicReference<Object> written) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (written.get() == null) {
             assertThat(System.nanoTime()).as("response written").isLessThan(deadline);
@@ -545,12 +576,12 @@ class HttpConnectionTest {
             app.post("/", ctx -> { throw new AssertionError("incomplete body must not execute"); });
             app.start();
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
-            var chunk = io.netty.buffer.Unpooled.copiedBuffer("partial", java.nio.charset.StandardCharsets.US_ASCII);
+            var chunk = Unpooled.copiedBuffer("partial", StandardCharsets.US_ASCII);
             try {
                 var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/");
                 request.headers().set("Host", "localhost").set("Content-Length", "100");
                 chunk.retain(); // Observe the count after the handler's own reference is released.
-                channel.writeInbound(request, new io.netty.handler.codec.http.DefaultHttpContent(chunk));
+                channel.writeInbound(request, new DefaultHttpContent(chunk));
                 // Bytes are copied on arrival, so the connection holds no reference mid-body.
                 assertThat(chunk.refCnt()).isEqualTo(1);
                 channel.close();
@@ -611,23 +642,23 @@ class HttpConnectionTest {
     }
 
     /** Counts every buffer the connection allocates, including composite consolidation. */
-    private static final class CountingAllocator extends io.netty.buffer.AbstractByteBufAllocator {
-        final java.util.concurrent.atomic.AtomicInteger allocations = new java.util.concurrent.atomic.AtomicInteger();
+    private static final class CountingAllocator extends AbstractByteBufAllocator {
+        final AtomicInteger allocations = new AtomicInteger();
         CountingAllocator() { super(false); }
         @Override public boolean isDirectBufferPooled() { return false; }
-        @Override protected io.netty.buffer.ByteBuf newHeapBuffer(int initial, int max) {
+        @Override protected ByteBuf newHeapBuffer(int initial, int max) {
             allocations.incrementAndGet();
-            return new io.netty.buffer.UnpooledHeapByteBuf(this, initial, max);
+            return new UnpooledHeapByteBuf(this, initial, max);
         }
-        @Override protected io.netty.buffer.ByteBuf newDirectBuffer(int initial, int max) {
+        @Override protected ByteBuf newDirectBuffer(int initial, int max) {
             allocations.incrementAndGet();
-            return new io.netty.buffer.UnpooledDirectByteBuf(this, initial, max);
+            return new UnpooledDirectByteBuf(this, initial, max);
         }
-        @Override public io.netty.buffer.CompositeByteBuf compositeHeapBuffer(int maxComponents) {
+        @Override public CompositeByteBuf compositeHeapBuffer(int maxComponents) {
             allocations.incrementAndGet();
             return super.compositeHeapBuffer(maxComponents);
         }
-        @Override public io.netty.buffer.CompositeByteBuf compositeDirectBuffer(int maxComponents) {
+        @Override public CompositeByteBuf compositeDirectBuffer(int maxComponents) {
             allocations.incrementAndGet();
             return super.compositeDirectBuffer(maxComponents);
         }
@@ -635,12 +666,12 @@ class HttpConnectionTest {
 
     /** Heap bytes allocated by the calling thread, which runs every embedded channel task. */
     private static long allocatedByThisThread() {
-        var threads = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+        var threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
         boolean measurable = threads.isThreadAllocatedMemorySupported() && threads.isThreadAllocatedMemoryEnabled();
         if (Boolean.getBoolean("axiom.requireAllocationTests")) {
             assertThat(measurable).as("thread allocation measurement is required by axiom.requireAllocationTests").isTrue();
         }
-        org.junit.jupiter.api.Assumptions.assumeTrue(measurable, "per-thread allocation is not measurable on this JVM");
+        Assumptions.assumeTrue(measurable, "per-thread allocation is not measurable on this JVM");
         return threads.getCurrentThreadAllocatedBytes();
     }
 
@@ -654,7 +685,7 @@ class HttpConnectionTest {
             try {
                 var request = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/");
                 request.headers().set("Host", "localhost").set("Content-Length", String.valueOf(1024 * 1024));
-                var first = new io.netty.handler.codec.http.DefaultHttpContent(io.netty.buffer.Unpooled.wrappedBuffer(new byte[] {1}));
+                var first = new DefaultHttpContent(Unpooled.wrappedBuffer(new byte[] {1}));
                 // Warm up the code path so class loading does not count.
                 channel.writeInbound(request);
                 long before = allocatedByThisThread();
@@ -671,10 +702,10 @@ class HttpConnectionTest {
         var executor = executor();
         int length = 300_001;
         var expected = new byte[length];
-        new java.util.Random(11).nextBytes(expected);
+        new Random(11).nextBytes(expected);
         try (var app = Axiom.create()) {
             app.maxRequestBody(length);
-            app.post("/", ctx -> java.util.Arrays.equals(ctx.request().body().bytes(), expected) ? "intact" : "corrupt");
+            app.post("/", ctx -> Arrays.equals(ctx.request().body().bytes(), expected) ? "intact" : "corrupt");
             app.start();
             var channel = new EmbeddedChannel(new HttpConnection(app, executor));
             try {
@@ -684,14 +715,14 @@ class HttpConnectionTest {
                 int offset = 0;
                 for (int size = 1; offset < length; size = size * 3 + 1) {
                     int piece = Math.min(size, length - offset);
-                    var content = io.netty.buffer.Unpooled.copiedBuffer(expected, offset, piece);
+                    var content = Unpooled.copiedBuffer(expected, offset, piece);
                     offset += piece;
-                    channel.writeInbound(offset == length ? new io.netty.handler.codec.http.DefaultLastHttpContent(content)
-                            : new io.netty.handler.codec.http.DefaultHttpContent(content));
+                    channel.writeInbound(offset == length ? new DefaultLastHttpContent(content)
+                            : new DefaultHttpContent(content));
                 }
                 FullHttpResponse response = awaitResponse(channel);
                 try {
-                    assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("intact");
+                    assertThat(response.content().toString(StandardCharsets.UTF_8)).isEqualTo("intact");
                 } finally { response.release(); }
             } finally { channel.finishAndReleaseAll(); }
         } finally {
@@ -720,14 +751,14 @@ class HttpConnectionTest {
                 request.headers().set("Host", "localhost").set("Transfer-Encoding", "chunked");
                 channel.writeInbound(request);
                 for (int i = 0; i < 20_000; i++) {
-                    var piece = io.netty.buffer.Unpooled.buffer(1).writeByte('a' + i % 26);
-                    channel.writeInbound(new io.netty.handler.codec.http.DefaultHttpContent(piece));
+                    var piece = Unpooled.buffer(1).writeByte('a' + i % 26);
+                    channel.writeInbound(new DefaultHttpContent(piece));
                     assertThat(piece.refCnt()).isZero();
                 }
                 channel.writeInbound(LastHttpContent.EMPTY_LAST_CONTENT);
                 FullHttpResponse response = awaitResponse(channel);
                 try {
-                    assertThat(response.content().toString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("received 20000");
+                    assertThat(response.content().toString(StandardCharsets.UTF_8)).isEqualTo("received 20000");
                 } finally { response.release(); }
                 // Only the response body is allocated from the channel allocator.
                 assertThat(allocator.allocations).hasValueLessThanOrEqualTo(1);
