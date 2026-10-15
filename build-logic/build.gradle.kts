@@ -7,6 +7,11 @@ java { toolchain { languageVersion.set(JavaLanguageVersion.of(21)) } }
 // Unit tests of the convention checks (publication coverage, module boundaries). The root build
 // runs them as part of its `check` (see the root build.gradle.kts).
 dependencies {
+    implementation(libs.japicmp) {
+        // Comparisons use the Java API and text reports; JAXB's XML runtime is unnecessary.
+        exclude(group = "org.glassfish.jaxb", module = "jaxb-runtime")
+    }
+    implementation(libs.asm.tree)
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
