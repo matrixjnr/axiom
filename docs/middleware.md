@@ -18,7 +18,7 @@ listener / TestClient: parse, admit, start deadline
        unmatched: global -> router answer or its custom handler (404, 405, OPTIONS 204, 501)
   <- exception?  error handler (nearest class) or built-in problem mapping,
                  then Middleware.afterError, innermost first
-  <- codec encoding and Accept check (406), HEAD body removal
+  <- Accept check (406), HEAD body removal
   <- listener: serialization, X-Request-ID, write
 ```
 
@@ -31,8 +31,8 @@ listener / TestClient: parse, admit, start deadline
   internals.
 - Everything decided at `start()`: no chain is built per request.
 
-Not goals of this step: asynchronous middleware, and middleware that runs
-before admission or for errors the listener produces itself.
+Middleware use synchronous continuations. They run after admission and do not
+wrap errors produced by the listener itself.
 
 ## Middleware
 
@@ -101,10 +101,13 @@ the response it gets back (`next.run().withHeader(...)`), and it sees exceptions
 from the rest of the chain as exceptions from `next.run()`, which it can catch,
 translate or let propagate.
 
-- The handler's result reaches middleware as a `Response`, mapped exactly as
-  today (`String` to text, `null` to 204, the context status). Codec encoding and
-  the Accept check (406, safe methods only) happen once, after the whole chain, so a middleware sees
-  `ctx.json(value)` bodies unencoded and can short-circuit with `ctx.json(...)` too.
+- The handler's result reaches middleware as a `Response` (`String` to text,
+  `null` to 204, using the context status). `ctx.json(value)` and
+  `ctx.encode(mediaType, value)` encode immediately and snapshot the resulting
+  bytes. Middleware see owned, encoded bodies and can short-circuit with the
+  same methods. Arbitrary objects returned without encoding are rejected.
+  The Accept check (406, safe methods only) happens after the whole chain;
+  encoding failures can therefore occur before that check.
 - `next.run()` may be called at most once, only while the middleware runs and
   only on the request's thread; a second, late or other-thread call throws
   `IllegalStateException`.
@@ -119,6 +122,43 @@ deadline covers them; a timeout interrupts them like a handler; an exception
 they throw is handled exactly like a handler exception. One instance serves all
 requests concurrently, so a middleware must be thread-safe and keep per-request
 state in local variables.
+
+## Decision: synchronous middleware, parallel work inside handlers
+
+Middleware continuations remain synchronous: call `next.run()` at most once,
+while `handle` is on the stack, on the request thread. This keeps exception
+propagation, context ownership, admission and cancellation within one request
+task. Invoking a saved continuation after middleware returns, or invoking it
+on an executor thread, fails with `IllegalStateException`.
+
+Blocking downstream calls already fit the request's virtual thread. When two
+independent calls must overlap, give them a local scope inside the handler.
+The compiled and tested [FanOutApi example](../examples/readme/src/main/java/FanOutApi.java)
+uses Java 21's stable virtual-thread executor and a completion queue:
+
+1. Read the route ID and `ctx.execution()` on the request thread. Share immutable
+   inputs and the thread-safe `ExecutionContext`, never `Context` or `Next`.
+2. Start exactly two child tasks. Each receives the remaining deadline as its
+   downstream timeout; configure the actual client to honor that budget.
+3. Await completions with the remaining request budget recalculated each time.
+   Observe either child's failure immediately, without waiting for submission order.
+4. Cancel unfinished children on success, failure, timeout or interruption. Close
+   the executor and wait for child termination before returning or throwing.
+5. Build and encode the response on the request thread after the children stop.
+
+The example propagates original downstream exceptions for normal application
+error handling. A downstream timeout can be mapped explicitly with
+`app.error(TimeoutException.class, (ctx, failure) -> { throw new GatewayTimeoutException(); });`.
+An expired or interrupted request follows the framework cancellation path instead.
+
+Cancellation is cooperative: downstream operations must honor interruption and
+use finite I/O timeouts. Executor closure waits for termination; it cannot
+forcibly stop an uncooperative client. The request deadline bounds waiting for
+results, not arbitrary child cleanup. Do not start detached work or use unbounded
+fan-out. This is a scoped task pattern using stable Java 21 APIs, without a
+preview API requirement or a new middleware continuation API. Concrete client
+cancellation recipes and verification remain tracked in
+[#190](https://github.com/matrixjnr/axiom/issues/190).
 
 ## Registration
 
