@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Record synchronous middleware continuations as the supported contract, with a compiled parallel lookup example covering deadline propagation, sibling cancellation and child cleanup. Correct middleware response encoding documentation.
+
 - Use imported Java type names and enforce unnecessary qualification checks in Checkstyle.
 - Snapshot buffered response bodies at construction. Encode JSON and custom codec values synchronously through `Context.json` and `Context.encode`; reject arbitrary objects in `Response.of` and plain handler results. Middleware sees encoded bytes. See the migration notes in `docs/bodies.md`.
 - Use Windows launchers for Gradle and Maven consumer compatibility tasks, including Maven availability detection.
