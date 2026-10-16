@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a Java 21 downstream HTTP recipe with a shared client, a complete-body wait budget, a 64 KiB response cap and real-socket cancellation tests. Document application ownership and asynchronous network cleanup.
+
 - Record synchronous middleware continuations as the supported contract, with a compiled parallel lookup example covering deadline propagation, sibling cancellation and child cleanup. Correct middleware response encoding documentation.
 
 - Define the controlled HTTP benchmark protocol: equivalent workloads, correctness checks, balanced trials, resource accounting and retained evidence. Review the Rust/SQLite challenge as a pinned reference and correct the benchmark description of the lock-free request path.

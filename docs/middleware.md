@@ -156,9 +156,9 @@ use finite I/O timeouts. Executor closure waits for termination; it cannot
 forcibly stop an uncooperative client. The request deadline bounds waiting for
 results, not arbitrary child cleanup. Do not start detached work or use unbounded
 fan-out. This is a scoped task pattern using stable Java 21 APIs, without a
-preview API requirement or a new middleware continuation API. Concrete client
-cancellation recipes and verification remain tracked in
-[#190](https://github.com/matrixjnr/axiom/issues/190).
+preview API requirement or a new middleware continuation API. For a concrete
+HTTP client adapter and verified cancellation boundaries, see
+[downstream HTTP calls](downstream-http.md).
 
 ## Registration
 
