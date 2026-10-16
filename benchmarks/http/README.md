@@ -27,10 +27,13 @@ number of parameterized routes (100 or 10,000); four supporting routes are also
 registered. Each benchmark reuses an already constructed request and consumes the
 returned response through JMH.
 
-Measurements include the public application's lifecycle-lock acquisition, routing,
+Measurements include the public application's runtime snapshot read, routing,
 context construction, handler execution where matched, and response construction.
 They exclude request construction, startup, network IO, and serialization. This is
 not an isolated trie lookup or an end-to-end HTTP server benchmark.
+
+Use the [server benchmark protocol](../../docs/server-benchmark-protocol.md) for
+external HTTP comparisons and their correctness, isolation and evidence requirements.
 
 For a harness smoke check:
 

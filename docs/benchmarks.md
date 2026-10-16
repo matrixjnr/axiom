@@ -15,6 +15,10 @@ number from these benchmarks is a guarantee, a target or a CI gate. They exist s
 that changes to hot paths can be compared on one machine, by one person, under
 controlled conditions.
 
+The [server benchmark protocol](server-benchmark-protocol.md) defines the external
+HTTP comparison: equivalent work, correctness gates, balanced trial order,
+resource accounting and retained evidence.
+
 ## What is measured
 
 | Benchmark | Cases | Path |
