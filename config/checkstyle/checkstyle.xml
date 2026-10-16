@@ -36,9 +36,24 @@
   </module>
 
   <module name="TreeWalker">
+    <!-- These exact references distinguish types with the same simple name. -->
+    <module name="SuppressionXpathSingleFilter">
+      <property name="id" value="inlineTypeQualification"/>
+      <property name="files" value="[\\/](JakartaValidation|ValidationPublicApiTest)\.java$"/>
+      <property name="query" value="//DOT[IDENT[@text='Validator'] and DOT[IDENT[@text='jakarta'] and IDENT[@text='validation']]]"/>
+    </module>
+    <!-- Also cover static calls, annotations and nested types that the import check skips.
+         Select the boundary from a lowercase package segment to an uppercase type name;
+         imports, package declarations, comments and string literals are outside this rule. -->
+    <module name="MatchXpath">
+      <property name="id" value="inlineTypeQualification"/>
+      <property name="query" value="//DOT[IDENT[matches(@text, '^[A-Z]')]][DOT[IDENT[matches(@text, '^[a-z]')]]][not(ancestor::IMPORT or ancestor::STATIC_IMPORT or ancestor::PACKAGE_DEF)]"/>
+      <message key="matchxpath.match" value="Import the type and use its simple name instead of an inline fully qualified name."/>
+    </module>
     <module name="OuterTypeFilename"/>
     <module name="OneTopLevelClass"/>
     <module name="AvoidStarImport"/>
+    <module name="UnnecessaryFullyQualifiedType"/>
     <module name="RedundantImport"/>
     <module name="UnusedImports">
       <property name="processJavadoc" value="true"/>

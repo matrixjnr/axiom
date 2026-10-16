@@ -4,11 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.jsgalactic.axiom.codec.spi.BodyCodec;
+import com.jsgalactic.axiom.observability.Metrics;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -81,7 +85,7 @@ class CodecsTest {
     @Test void handsTheSameInstanceToConcurrentCallers() throws Exception {
         int callers = 16;
         var barrier = new CyclicBarrier(callers);
-        var overlapped = new java.util.concurrent.atomic.AtomicInteger();
+        var overlapped = new AtomicInteger();
         var codec = new Named("shared", "application/json") {
             @Override public <T> T decode(byte[] content, Class<T> type) {
                 try {
@@ -118,9 +122,9 @@ class CodecsTest {
         var codecs = Codecs.of(List.of(codec), metrics);
         var csv = codecs.forMediaType("text/csv");
         assertThat(csv.decode(new byte[] {1}, String.class)).isEqualTo("csv");
-        assertThat(csv.decode(java.nio.ByteBuffer.wrap(new byte[] {1}), String.class)).isEqualTo("csv");
+        assertThat(csv.decode(ByteBuffer.wrap(new byte[] {1}), String.class)).isEqualTo("csv");
         assertThat(csv.encode("x")).containsExactly(1);
-        org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+        Assertions.assertThatIllegalArgumentException()
                 .isThrownBy(() -> csv.decode(new byte[0], String.class));
         codecs.forMediaType("application/csv").encode("y");
         assertThat(csv.mediaTypes()).containsExactlyInAnyOrder("text/csv", "application/csv");
@@ -135,15 +139,15 @@ class CodecsTest {
 
     @Test void withoutMetricsTheCodecIsNotWrappedAndAFailingMetricsImplementationIsIgnored() {
         var plain = new Named("json", "application/json");
-        assertThat(Codecs.of(List.of(plain), com.jsgalactic.axiom.observability.Metrics.NOOP)
+        assertThat(Codecs.of(List.of(plain), Metrics.NOOP)
                 .forMediaType("application/json")).isSameAs(plain);
-        var failing = new com.jsgalactic.axiom.observability.Metrics() {
+        var failing = new Metrics() {
             @Override public Counter counter(String name, String... tags) { throw new IllegalStateException(); }
             @Override public Gauge gauge(String name, String... tags) { throw new IllegalStateException(); }
             @Override public Timer timer(String name, String... tags) { throw new IllegalStateException(); }
         };
         assertThat(Codecs.of(List.of(plain), failing).forMediaType("application/json")).isSameAs(plain);
-        var late = new com.jsgalactic.axiom.observability.Metrics() {
+        var late = new Metrics() {
             @Override public Counter counter(String name, String... tags) {
                 return new Counter() {
                     @Override public void increment() { throw new IllegalStateException(); }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -36,7 +37,7 @@ class AxiomExceptionTest {
         assertThatIllegalArgumentException().isThrownBy(() -> new DecodeException("invalid", ""));
         assertThatNullPointerException().isThrownBy(() -> new Violation(null, "invalid"));
         assertThatIllegalArgumentException().isThrownBy(() -> new ValidationException(
-                java.util.Collections.nCopies(101, new Violation("a", "b"))));
+                Collections.nCopies(101, new Violation("a", "b"))));
     }
 
     @Test void messagesContainOnlyStatusAndCode() {

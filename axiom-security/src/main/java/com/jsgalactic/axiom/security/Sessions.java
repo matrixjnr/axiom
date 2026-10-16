@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.security;
 
 import com.jsgalactic.axiom.context.Context;
 import com.jsgalactic.axiom.context.Middleware;
+import com.jsgalactic.axiom.context.SecurityIdentity;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import java.security.SecureRandom;
@@ -235,7 +236,7 @@ public final class Sessions implements Middleware {
     }
 
     /** The session of a request: the one the middleware loaded, or a read-only lookup without it. */
-    Optional<com.jsgalactic.axiom.context.SecurityIdentity> identityOf(Request request) {
+    Optional<SecurityIdentity> identityOf(Request request) {
         var loaded = active.get(request);
         if (loaded != null) { return loaded.identity(); }
         return lookup(request).flatMap(state -> state.identity());

@@ -6,12 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import java.time.Duration;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
@@ -159,7 +161,7 @@ class RequestDispatcherTest {
         var start = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         try (var submitters = Executors.newVirtualThreadPerTaskExecutor()) {
-            var submissions = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+            var submissions = new ArrayList<Future<Boolean>>();
             for (int i = 0; i < 8; i++) {
                 submissions.add(submitters.submit(() -> {
                     ready.countDown();

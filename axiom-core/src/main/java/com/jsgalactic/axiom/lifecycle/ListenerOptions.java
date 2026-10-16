@@ -3,6 +3,7 @@ package com.jsgalactic.axiom.lifecycle;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Transport limits and timeouts of one HTTP listener, passed to
@@ -29,7 +30,7 @@ public final class ListenerOptions {
 
     /** Longest listener name. */
     public static final int MAX_NAME_LENGTH = 32;
-    private static final java.util.regex.Pattern NAME = java.util.regex.Pattern.compile("[a-z][a-z0-9_]*");
+    private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9_]*");
 
     private final String name;
     private final Duration shutdownGrace;

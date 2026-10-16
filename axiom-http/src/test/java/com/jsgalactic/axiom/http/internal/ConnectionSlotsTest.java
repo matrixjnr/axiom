@@ -2,10 +2,12 @@ package com.jsgalactic.axiom.http.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jsgalactic.axiom.observability.Metrics;
 import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class ConnectionSlotsTest {
@@ -26,7 +28,7 @@ class ConnectionSlotsTest {
         assertThat(probe.tagValues()).containsExactlyInAnyOrder(ConnectionSlots.CONNECTIONS + ":listener=default",
                 ConnectionSlots.CONNECTIONS + ":state=open", ConnectionSlots.CONNECTIONS + ":state=lingering");
 
-        var failing = new com.jsgalactic.axiom.observability.Metrics() {
+        var failing = new Metrics() {
             @Override public Counter counter(String name, String... tags) { throw new IllegalStateException(); }
             @Override public Gauge gauge(String name, String... tags) { return delta -> { throw new IllegalStateException(); }; }
             @Override public Timer timer(String name, String... tags) { throw new IllegalStateException(); }
@@ -62,8 +64,8 @@ class ConnectionSlotsTest {
         var slots = new ConnectionSlots(8, 3);
         var start = new CountDownLatch(1);
         var exceeded = new AtomicBoolean();
-        var open = new java.util.concurrent.atomic.AtomicInteger();
-        var lingering = new java.util.concurrent.atomic.AtomicInteger();
+        var open = new AtomicInteger();
+        var lingering = new AtomicInteger();
         var threads = new ArrayList<Thread>();
         for (int t = 0; t < 8; t++) {
             threads.add(Thread.ofPlatform().start(() -> {

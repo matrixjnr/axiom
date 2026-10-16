@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.validation;
 
 import com.jsgalactic.axiom.error.Violation;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -243,7 +244,7 @@ public final class Rules<T> implements Validator<T> {
         }
         var copy = new LinkedHashMap<String, List<Constraint>>();
         described.forEach((key, list) -> copy.put(key, List.copyOf(list)));
-        return java.util.Collections.unmodifiableMap(copy);
+        return Collections.unmodifiableMap(copy);
     }
 
     /**

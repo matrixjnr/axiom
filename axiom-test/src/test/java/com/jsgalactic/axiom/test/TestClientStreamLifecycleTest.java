@@ -9,6 +9,7 @@ import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.BodyWriter;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.http.ServerSentEvent;
 import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.http.StreamAbortedException.Reason;
 import com.jsgalactic.axiom.http.StreamOutcome;
@@ -241,7 +242,7 @@ class TestClientStreamLifecycleTest {
             seenBefore.complete(events.shutdownRequested());
             shutdown.await();
             events.onShutdown(late::incrementAndGet); // Already begun: runs at once, here.
-            events.send(com.jsgalactic.axiom.http.ServerSentEvent.named("bye", "closing").withRetry(Duration.ofSeconds(1)));
+            events.send(ServerSentEvent.named("bye", "closing").withRetry(Duration.ofSeconds(1)));
         }));
         try (var client = TestClient.start(app); var stream = client.stream(get("/events"))) {
             assertThat(stream.nextText().orElseThrow()).contains("hello");

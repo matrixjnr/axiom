@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Map;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -77,7 +79,7 @@ class ResponseTest {
 
     @Test
     void rejectsObjectBodiesBeforeTheyCanBeRetained() {
-        for (var body : new Object[] {42, new StringBuilder("mutable"), java.util.Map.of("key", "value")}) {
+        for (var body : new Object[] {42, new StringBuilder("mutable"), Map.of("key", "value")}) {
             assertThatIllegalArgumentException().isThrownBy(() -> Response.of(200, body))
                     .withMessageContaining("Context.json or Context.encode");
         }
@@ -93,23 +95,23 @@ class ResponseTest {
         assertThat(response.body()).isEqualTo("hello");
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void buildsRedirectsAndLocationsWithoutHeaderInjection() {
         for (int status : new int[] {301, 302, 303, 307, 308}) {
             var redirect = Response.redirect(status, "/next?x=1");
-            org.assertj.core.api.Assertions.assertThat(redirect.status()).isEqualTo(status);
-            org.assertj.core.api.Assertions.assertThat(redirect.body()).isNull();
-            org.assertj.core.api.Assertions.assertThat(redirect.headers()).containsEntry("Location", "/next?x=1");
+            Assertions.assertThat(redirect.status()).isEqualTo(status);
+            Assertions.assertThat(redirect.body()).isNull();
+            Assertions.assertThat(redirect.headers()).containsEntry("Location", "/next?x=1");
         }
         var created = Response.of(201, "{}").withLocation("https://example.com/items/1");
-        org.assertj.core.api.Assertions.assertThat(created.headers()).containsEntry("location", "https://example.com/items/1");
+        Assertions.assertThat(created.headers()).containsEntry("location", "https://example.com/items/1");
         for (int status : new int[] {200, 304, 300, 400}) {
-            org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+            Assertions.assertThatIllegalArgumentException()
                     .isThrownBy(() -> Response.redirect(status, "/"));
         }
         for (var location : new String[] {"", "/a\r\nSet-Cookie: x=1", "/a\nb", "/a b", "/\"quoted\"", "/<x>",
                 "/a\\b", "/caf\u00e9", "/bad%zz", "/" + "x".repeat(2048)}) {
-            org.assertj.core.api.Assertions.assertThatIllegalArgumentException().as(location)
+            Assertions.assertThatIllegalArgumentException().as(location)
                     .isThrownBy(() -> Response.redirect(302, location));
         }
     }

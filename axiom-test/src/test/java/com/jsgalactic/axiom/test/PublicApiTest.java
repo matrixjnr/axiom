@@ -13,6 +13,7 @@ import java.lang.reflect.WildcardType;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.jar.JarFile;
 import org.junit.jupiter.api.Test;
@@ -54,7 +55,7 @@ class PublicApiTest {
 
     @Test
     void rejectsThirdPartyAndInternalSignatureTypes() throws Exception {
-        assertThatThrownBy(() -> check(org.junit.jupiter.api.Test.class, new HashSet<>()))
+        assertThatThrownBy(() -> check(Test.class, new HashSet<>()))
                 .isInstanceOf(AssertionError.class).hasMessageContaining("third-party");
         var internal = Class.forName("com.jsgalactic.axiom.server.internal.DefaultApplicationProvider");
         assertThatThrownBy(() -> check(internal, new HashSet<>()))
@@ -65,7 +66,7 @@ class PublicApiTest {
     }
 
     private static final class GenericFixture {
-        java.util.List<? extends org.junit.jupiter.api.Test> callbacks;
+        List<? extends Test> callbacks;
     }
     private static boolean exported(int modifiers) {
         return Modifier.isPublic(modifiers) || Modifier.isProtected(modifiers);

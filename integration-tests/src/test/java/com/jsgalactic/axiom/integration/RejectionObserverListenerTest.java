@@ -8,6 +8,8 @@ import com.jsgalactic.axiom.error.InternalServerErrorException;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.RejectionObserver;
 import com.jsgalactic.axiom.lifecycle.Server;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -48,7 +50,7 @@ class RejectionObserverListenerTest {
         app.use((ctx, next) -> { throw new AssertionError("Middleware must not see listener rejections"); });
         app.get("/boom", ctx -> { throw new ArithmeticException("secret detail"); });
         app.post("/upload", ctx -> "ok");
-        server = app.listen(new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0),
+        server = app.listen(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
                 ListenerOptions.builder().rejectionObserver(observer).build());
     }
 
@@ -84,7 +86,7 @@ class RejectionObserverListenerTest {
         app = Axiom.create();
         app.get("/boom", ctx -> { throw new ArithmeticException("secret detail"); });
         app.get("/chosen", ctx -> { throw new InternalServerErrorException(); });
-        server = app.listen(new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0),
+        server = app.listen(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
                 ListenerOptions.builder().rejectionObserver((s, c, id) -> seen.add(new Seen(s, c, id))).build());
         assertThat(request("GET /chosen HTTP/1.1\r\nHost: x\r\n\r\n").status()).isEqualTo(500);
         assertThat(request("GET /missing HTTP/1.1\r\nHost: x\r\n\r\n").status()).isEqualTo(404);

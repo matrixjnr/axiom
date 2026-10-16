@@ -9,9 +9,11 @@ import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.routing.Route;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.FutureTask;
@@ -197,7 +199,7 @@ class DispatchMetricsTest {
         var dispatcher = new RequestDispatcher(policy, metrics);
         try {
             var start = new CountDownLatch(1);
-            var results = java.util.Collections.synchronizedList(new ArrayList<java.util.concurrent.CompletableFuture<Integer>>());
+            var results = Collections.synchronizedList(new ArrayList<CompletableFuture<Integer>>());
             var refused = new AtomicInteger();
             var workers = new ArrayList<Thread>();
             for (int t = 0; t < threads; t++) {

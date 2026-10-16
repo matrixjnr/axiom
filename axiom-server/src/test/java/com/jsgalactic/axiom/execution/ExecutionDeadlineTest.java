@@ -7,6 +7,7 @@ import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -31,8 +32,8 @@ class ExecutionDeadlineTest {
     }
 
     @Test void requestDeadlineWinsOverQueueBudgetBeforePromotion() throws Exception {
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        var release = new java.util.concurrent.CountDownLatch(1);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
         var clock = new AtomicLong();
         var queuedContext = ExecutionContext.create(Duration.ofHours(1), clock::get);
         var dispatcher = new RequestDispatcher(new AdmissionPolicy(1, 1, Duration.ofDays(1)));

@@ -7,6 +7,7 @@ import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.error.InternalServerErrorException;
 import com.jsgalactic.axiom.error.NotFoundException;
 import com.jsgalactic.axiom.lifecycle.Server;
+import com.jsgalactic.axiom.test.TestClient;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -158,7 +159,7 @@ class ErrorHandlerListenerTest {
             memoryApp.get("/unmapped", ctx -> { throw new ArithmeticException(POISON); });
             memoryApp.get("/null", ctx -> { throw new IllegalStateException(POISON); });
             memoryApp.error(IllegalStateException.class, (ctx, failure) -> null);
-            try (var client = com.jsgalactic.axiom.test.TestClient.startMappingFailures(memoryApp)) {
+            try (var client = TestClient.startMappingFailures(memoryApp)) {
                 var memory = client.get(path);
                 assertThat(memory.status()).as(path).isEqualTo(wire.status());
                 assertThat(memory.headers().get("Content-Type")).as(path).isEqualTo(wire.contentType());

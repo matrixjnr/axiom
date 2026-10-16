@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.http.Request;
+import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.routing.Route;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -79,7 +82,7 @@ class TestClientMiddlewareTest {
         });
         app.get("/items/:id", ctx -> "item " + ctx.path("id"));
         try (var client = TestClient.start(app)) {
-            var responses = new java.util.ArrayList<java.util.concurrent.CompletableFuture<com.jsgalactic.axiom.http.Response>>();
+            var responses = new ArrayList<CompletableFuture<Response>>();
             for (int i = 0; i < requests; i++) { responses.add(client.submit(Request.get("/items/" + i))); }
             // Every request is inside the same middleware instance before any continues.
             assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();

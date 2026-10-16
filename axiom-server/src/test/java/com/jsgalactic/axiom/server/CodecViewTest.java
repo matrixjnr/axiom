@@ -9,6 +9,7 @@ import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.sun.management.ThreadMXBean;
 import java.lang.management.ManagementFactory;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -80,7 +81,7 @@ class CodecViewTest {
     }
 
     @Test void passesTheBodyAsAReadOnlyViewWithoutCopyingIt(@TempDir Path services) throws Exception {
-        var threads = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
+        var threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
         boolean measurable = threads.isThreadAllocatedMemorySupported() && threads.isThreadAllocatedMemoryEnabled();
         if (Boolean.getBoolean("axiom.requireAllocationTests")) {
             assertThat(measurable).as("thread allocation measurement is required by axiom.requireAllocationTests").isTrue();

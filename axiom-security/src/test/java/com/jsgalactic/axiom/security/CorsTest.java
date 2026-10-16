@@ -5,10 +5,12 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.error.UnauthorizedException;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.test.TestClient;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.HashMap;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -54,7 +56,7 @@ class CorsTest {
     void decoratesResponsesMappedFromExceptionsLikeOthers() throws Exception {
         var app = Axiom.create();
         app.use(strict().build());
-        app.get("/denied", ctx -> { throw new com.jsgalactic.axiom.error.UnauthorizedException("Bearer realm=\"api\""); });
+        app.get("/denied", ctx -> { throw new UnauthorizedException("Bearer realm=\"api\""); });
         try (var client = TestClient.start(app)) {
             var denied = client.execute(request("GET", "/denied", "Origin", APP));
             assertThat(denied.status()).isEqualTo(401);
@@ -109,7 +111,7 @@ class CorsTest {
             assertNoCorsHeaders(client.execute(preflight("/notes", APP, "GET", "Content-Type,,")));
             assertNoCorsHeaders(client.execute(preflight("/notes", APP, "GET", "Bad Header")));
             assertNoCorsHeaders(client.execute(preflight("/notes", APP, "GET", "*")));
-            var manyHeaders = String.join(",", java.util.Collections.nCopies(65, "content-type"));
+            var manyHeaders = String.join(",", Collections.nCopies(65, "content-type"));
             assertNoCorsHeaders(client.execute(preflight("/notes", APP, "GET", manyHeaders)));
         }
     }

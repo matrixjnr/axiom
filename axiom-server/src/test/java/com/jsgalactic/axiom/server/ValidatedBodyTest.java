@@ -14,6 +14,7 @@ import com.jsgalactic.axiom.http.Response;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -73,7 +74,7 @@ class ValidatedBodyTest {
 
     @Test
     void leavesTheFieldOutForViolationsOfTheWholeValue() throws Exception {
-        BodyValidator<Item> whole = item -> java.util.List.of(new Violation("", "out_of_stock"),
+        BodyValidator<Item> whole = item -> List.of(new Violation("", "out_of_stock"),
                 new Violation("quantity", "min"));
         try (var app = app(whole)) {
             var response = app.handle(post("application/json", "name=pen;quantity=0"));

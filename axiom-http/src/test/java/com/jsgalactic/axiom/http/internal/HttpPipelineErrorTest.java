@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
+import com.jsgalactic.axiom.http.HttpStatus;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
@@ -11,6 +12,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpResponseEncoder;
 import io.netty.handler.timeout.IdleStateEvent;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * A listener error on a later pipelined request must not abort earlier work: earlier requests
@@ -102,7 +105,7 @@ class HttpPipelineErrorTest {
             assertThat(replies.get(0).text()).isEqualTo("slow:4");
             assertThat(replies.get(1).text()).isEqualTo("next");
             assertThat(replies.get(0).headers()).doesNotContainKey("connection");
-            HttpStatusMappingTest.assertProblem(replies.get(2), status, com.jsgalactic.axiom.http.HttpStatus.defaultCode(status));
+            HttpStatusMappingTest.assertProblem(replies.get(2), status, HttpStatus.defaultCode(status));
             assertThat(replies.get(2).headers()).containsEntry("connection", "close");
             assertThat(interrupted).isFalse();
             assertThat(after).isFalse();
@@ -110,7 +113,7 @@ class HttpPipelineErrorTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @org.junit.jupiter.params.provider.ValueSource(strings = {
+    @ValueSource(strings = {
             "Transfer-Encoding: chunked\r\nTransfer-Encoding: gzip",
             "Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked",
             "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked",
@@ -135,7 +138,7 @@ class HttpPipelineErrorTest {
      * for 501. Nothing after it is read as a request.
      */
     @ParameterizedTest(name = "{0}")
-    @org.junit.jupiter.params.provider.ValueSource(strings = {
+    @ValueSource(strings = {
             "Transfer-Encoding: gzip, chunked",
             "Transfer-Encoding: identity, chunked",
             "Transfer-Encoding: x-custom ,chunked",
@@ -154,7 +157,7 @@ class HttpPipelineErrorTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @org.junit.jupiter.params.provider.ValueSource(strings = {
+    @ValueSource(strings = {
             "Transfer-Encoding: gzip, chunked",
             "Transfer-Encoding: identity, chunked"})
     void unsupportedCodingBehindARunningRequestIsAnsweredAfterIt(String field) throws Exception {
@@ -170,7 +173,7 @@ class HttpPipelineErrorTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @org.junit.jupiter.params.provider.ValueSource(strings = {
+    @ValueSource(strings = {
             "Transfer-Encoding: chunked\r\nTransfer-Encoding: gzip",
             "Transfer-Encoding: gzip\r\nTransfer-Encoding: chunked",
             "Transfer-Encoding: chunked, chunked"})
@@ -345,7 +348,7 @@ class HttpPipelineErrorTest {
 
     /** Runs tasks posted by handler threads and collects the output until the channel closes. */
     static List<Reply> repliesUntilClosed(EmbeddedChannel channel) {
-        var bytes = new java.io.ByteArrayOutputStream();
+        var bytes = new ByteArrayOutputStream();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (true) {
             channel.runPendingTasks();

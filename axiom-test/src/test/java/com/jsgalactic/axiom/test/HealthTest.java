@@ -6,10 +6,12 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.error.UnauthorizedException;
+import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.observability.Health;
 import com.jsgalactic.axiom.observability.Health.Status;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,7 +37,7 @@ class HealthTest {
         var ready = health.readiness();
         assertThat(ready.status()).isEqualTo(Status.DOWN);
         assertThat(ready.checks()).containsExactly(
-                java.util.Map.entry("database", Status.UP), java.util.Map.entry("cache", Status.DOWN));
+                Map.entry("database", Status.UP), Map.entry("cache", Status.DOWN));
         assertThat(ready.toJson()).isEqualTo("{\"status\":\"DOWN\",\"checks\":{\"database\":\"UP\",\"cache\":\"DOWN\"}}");
         app.close();
     }
@@ -159,8 +161,8 @@ class HealthTest {
         Health.builder(app).build().register(app, guard);
         try (var client = TestClient.start(app)) {
             assertThat(client.get("/health/live").status()).isEqualTo(401);
-            var response = client.execute(new com.jsgalactic.axiom.http.Request("GET", "/health/ready")
-                    .withHeaders(java.util.Map.of("X-Ops", "1")));
+            var response = client.execute(new Request("GET", "/health/ready")
+                    .withHeaders(Map.of("X-Ops", "1")));
             assertThat(response.status()).isEqualTo(200);
             assertThat(response.headers()).containsEntry("Content-Type", "application/json")
                     .containsEntry("Cache-Control", "no-store");

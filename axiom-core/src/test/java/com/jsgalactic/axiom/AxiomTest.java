@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.application.spi.ApplicationProvider;
+import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,7 +26,7 @@ class AxiomTest {
                 FirstProvider.class.getName() + "\n" + SecondProvider.class.getName() + "\n");
         var thread = Thread.currentThread();
         var previous = thread.getContextClassLoader();
-        try (var loader = new URLClassLoader(new java.net.URL[] {directory.toUri().toURL()}, previous)) {
+        try (var loader = new URLClassLoader(new URL[] {directory.toUri().toURL()}, previous)) {
             thread.setContextClassLoader(loader);
             assertThatIllegalStateException().isThrownBy(Axiom::create)
                     .withMessageContaining("Multiple Axiom runtime providers");

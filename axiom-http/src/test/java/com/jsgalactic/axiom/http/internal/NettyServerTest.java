@@ -3,9 +3,13 @@ package com.jsgalactic.axiom.http.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.embedded.EmbeddedChannel;
 import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Tag;
@@ -48,7 +52,7 @@ class NettyServerTest {
                 // The kernel may round the request up (Linux doubles it), never below it.
                 assertThat(fixed.listener.config().getOption(ChannelOption.SO_RCVBUF)).isBetween(8192, 4 * 8192);
                 assertThat(plain.connections()).isZero();
-                try (var client = new java.net.Socket()) {
+                try (var client = new Socket()) {
                     client.connect(plain.localAddress(), 30_000);
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                     while (plain.connections() == 0) {
@@ -116,8 +120,8 @@ class NettyServerTest {
     }
 
     private static void reject(DuplexEmbeddedChannel channel) {
-        channel.writeInbound(io.netty.buffer.Unpooled.copiedBuffer("GARBAGE\r\n\r\n", java.nio.charset.StandardCharsets.US_ASCII));
-        for (io.netty.buffer.ByteBuf written; (written = channel.readOutbound()) != null;) { written.release(); }
+        channel.writeInbound(Unpooled.copiedBuffer("GARBAGE\r\n\r\n", StandardCharsets.US_ASCII));
+        for (ByteBuf written; (written = channel.readOutbound()) != null;) { written.release(); }
         assertThat(channel.outputShutdown).as("lingering").isTrue();
     }
 

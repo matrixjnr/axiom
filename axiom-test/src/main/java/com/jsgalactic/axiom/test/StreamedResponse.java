@@ -8,6 +8,9 @@ import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -192,7 +195,7 @@ public final class StreamedResponse implements AutoCloseable {
         private final ExecutionContext execution;
         private final StreamBuffering buffering;
         private final StreamMetrics.Scope metrics;
-        private final java.util.List<Runnable> shutdownActions = new java.util.ArrayList<>();
+        private final List<Runnable> shutdownActions = new ArrayList<>();
         private Reason aborted;
         private long written;
         /** Bytes queued and not yet taken by the reader. */
@@ -218,7 +221,7 @@ public final class StreamedResponse implements AutoCloseable {
                 for (int sent = 0; sent < length;) {
                     int piece = (int) Math.min(buffering.pieceBytes(), (long) length - sent);
                     awaitWritable();
-                    chunks.add(java.util.Arrays.copyOfRange(bytes, offset + sent, offset + sent + piece));
+                    chunks.add(Arrays.copyOfRange(bytes, offset + sent, offset + sent + piece));
                     unread += piece;
                     if (unread >= buffering.highWaterBytes()) { writable = false; }
                     written += piece;
@@ -280,12 +283,12 @@ public final class StreamedResponse implements AutoCloseable {
         }
 
         void beginShutdown() {
-            java.util.List<Runnable> actions;
+            List<Runnable> actions;
             lock.lock();
             try {
                 if (shutdown) { return; }
                 shutdown = true;
-                actions = java.util.List.copyOf(shutdownActions);
+                actions = List.copyOf(shutdownActions);
                 shutdownActions.clear();
             } finally {
                 lock.unlock();

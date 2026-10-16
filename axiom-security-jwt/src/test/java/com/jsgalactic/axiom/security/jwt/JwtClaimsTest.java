@@ -9,14 +9,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.jsgalactic.axiom.error.UnauthorizedException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /** Additional claims on the identity, and the token check hook for revocation and jti replay. */
@@ -145,14 +149,14 @@ class JwtClaimsTest {
         var start = new CountDownLatch(1);
         var accepted = new AtomicInteger();
         try (var executor = Executors.newFixedThreadPool(threads)) {
-            var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            var futures = new ArrayList<Future<?>>();
             for (int i = 0; i < threads; i++) {
                 futures.add(executor.submit(() -> {
                     start.await();
                     try {
                         jwt.verify(token);
                         accepted.incrementAndGet();
-                    } catch (com.jsgalactic.axiom.error.UnauthorizedException replayed) {
+                    } catch (UnauthorizedException replayed) {
                         // expected for every thread but one
                     }
                     return null;
@@ -176,8 +180,8 @@ class JwtClaimsTest {
 
     @Test
     void checkAndMapperRegistrationRejectsNull() {
-        org.assertj.core.api.Assertions.assertThatNullPointerException().isThrownBy(() -> hmac().tokenCheck(null));
-        org.assertj.core.api.Assertions.assertThatNullPointerException().isThrownBy(() -> hmac().attributes(null));
+        Assertions.assertThatNullPointerException().isThrownBy(() -> hmac().tokenCheck(null));
+        Assertions.assertThatNullPointerException().isThrownBy(() -> hmac().attributes(null));
         assertThat(List.of(1)).hasSize(1);
     }
 }

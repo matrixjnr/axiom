@@ -1,5 +1,6 @@
 package com.jsgalactic.axiom.routing;
 
+import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
@@ -148,7 +149,7 @@ public final class RouteDoc {
         for (var argument : copy) {
             Objects.requireNonNull(argument, "argument");
         }
-        return new java.lang.reflect.ParameterizedType() {
+        return new ParameterizedType() {
             @Override public Type[] getActualTypeArguments() { return copy.clone(); }
             @Override public Type getRawType() { return raw; }
             @Override public Type getOwnerType() { return raw.getDeclaringClass(); }

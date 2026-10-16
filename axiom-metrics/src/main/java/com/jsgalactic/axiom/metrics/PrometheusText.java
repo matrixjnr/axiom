@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.metrics;
 
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.http.Response;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
 
@@ -134,6 +135,6 @@ public final class PrometheusText {
     }
 
     private static String bound(long nanos) {
-        return java.math.BigDecimal.valueOf(nanos, 9).stripTrailingZeros().toPlainString();
+        return BigDecimal.valueOf(nanos, 9).stripTrailingZeros().toPlainString();
     }
 }

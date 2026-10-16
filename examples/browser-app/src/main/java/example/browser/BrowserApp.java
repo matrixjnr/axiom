@@ -12,8 +12,11 @@ import com.jsgalactic.axiom.security.Security;
 import com.jsgalactic.axiom.security.SecurityHeaders;
 import com.jsgalactic.axiom.security.Sessions;
 import com.jsgalactic.axiom.security.TrustedProxies;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.BiPredicate;
 
 /**
@@ -78,9 +81,9 @@ public final class BrowserApp {
      * @throws Exception if the listener cannot start
      */
     public static void main(String[] args) throws Exception {
-        var code = java.util.UUID.randomUUID().toString();
-        var app = create((user, supplied) -> user.equals("demo") && java.security.MessageDigest.isEqual(
-                code.getBytes(java.nio.charset.StandardCharsets.UTF_8), supplied.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        var code = UUID.randomUUID().toString();
+        var app = create((user, supplied) -> user.equals("demo") && MessageDigest.isEqual(
+                code.getBytes(StandardCharsets.UTF_8), supplied.getBytes(StandardCharsets.UTF_8)),
                 TrustedProxies.none()).closeOnJvmShutdown();
         var server = app.listen(8080);
         System.out.println("Listening on http://127.0.0.1:" + server.localAddress().getPort() + "/ ; user demo, X-Login-Code " + code);

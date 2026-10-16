@@ -19,12 +19,21 @@ import com.jsgalactic.axiom.validation.jakarta.Fixtures.Item;
 import com.jsgalactic.axiom.validation.jakarta.Fixtures.Order;
 import com.jsgalactic.axiom.validation.jakarta.Fixtures.Period;
 import com.jsgalactic.axiom.validation.jakarta.Fixtures.Publishing;
+import jakarta.validation.constraints.FutureOrPresent;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import jakarta.validation.groups.Default;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import org.hibernate.validator.constraints.URL;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 
@@ -91,7 +100,7 @@ class JakartaValidationTest {
         try (var publishing = JakartaValidation.create(Publishing.class)) {
             assertThat(publishing.validate(draft)).containsExactly(new Violation("body", "not_blank"));
         }
-        try (var both = JakartaValidation.create(jakarta.validation.groups.Default.class, Publishing.class)) {
+        try (var both = JakartaValidation.create(Default.class, Publishing.class)) {
             assertThat(both.validate(draft)).hasSize(2);
         }
         assertThatThrownBy(() -> JakartaValidation.create((Class<?>) null)).isInstanceOf(NullPointerException.class);
@@ -116,13 +125,13 @@ class JakartaValidationTest {
 
     @Test
     void cascadesThroughValidOnAContainerAndLeavesTheProvidersDeprecationWarning() {
-        var records = new ArrayList<java.util.logging.LogRecord>();
-        var handler = new java.util.logging.Handler() {
-            @Override public void publish(java.util.logging.LogRecord record) { records.add(record); }
+        var records = new ArrayList<LogRecord>();
+        var handler = new Handler() {
+            @Override public void publish(LogRecord record) { records.add(record); }
             @Override public void flush() { }
             @Override public void close() { }
         };
-        var root = java.util.logging.Logger.getLogger("");
+        var root = Logger.getLogger("");
         root.addHandler(handler);
         try (var fresh = JakartaValidation.create()) {
             var violations = fresh.validate(new Fixtures.Legacy(List.of(new Item(" ", 1))));
@@ -132,7 +141,7 @@ class JakartaValidationTest {
         }
         // The provider's deprecation warning is left alone on purpose: it points at the annotation to fix.
         assertThat(records).anySatisfy(record -> {
-            assertThat(record.getLevel()).isEqualTo(java.util.logging.Level.WARNING);
+            assertThat(record.getLevel()).isEqualTo(Level.WARNING);
             assertThat(record.getMessage()).startsWith("HV000271").contains("deprecated");
         });
     }
@@ -168,14 +177,14 @@ class JakartaValidationTest {
         assertThat(failure.getMessage()).isEqualTo("500 internal_server_error");
         assertThat(failure.violations()).isEmpty();
         assertThat(failure.getCause()).as("kept for logs only").isNotNull();
-        record Misdeclared(@jakarta.validation.constraints.Size(max = 1) Integer number) {}
+        record Misdeclared(@Size(max = 1) Integer number) {}
         assertThatThrownBy(() -> VALIDATION.validate(new Misdeclared(5)))
                 .isInstanceOf(InternalServerErrorException.class).hasMessage("500 internal_server_error");
     }
 
     @Test
     void capsAndOrdersViolationsDeterministically() {
-        record Many(List<@jakarta.validation.constraints.NotBlank String> names) {}
+        record Many(List<@NotBlank String> names) {}
         var violations = VALIDATION.validate(new Many(Collections.nCopies(500, "")));
         assertThat(violations).hasSize(Validation.MAX_VIOLATIONS);
         assertThat(violations).isSortedAccordingTo(
@@ -204,11 +213,11 @@ class JakartaValidationTest {
 
     @Test
     void derivesSnakeCaseCodesFromAnnotationNames() {
-        assertThat(ConstraintCodes.of(jakarta.validation.constraints.NotBlank.class)).isEqualTo("not_blank");
-        assertThat(ConstraintCodes.of(jakarta.validation.constraints.FutureOrPresent.class))
+        assertThat(ConstraintCodes.of(NotBlank.class)).isEqualTo("not_blank");
+        assertThat(ConstraintCodes.of(FutureOrPresent.class))
                 .isEqualTo("future_or_present");
-        assertThat(ConstraintCodes.of(org.hibernate.validator.constraints.URL.class)).isEqualTo("url");
+        assertThat(ConstraintCodes.of(URL.class)).isEqualTo("url");
         assertThat(ConstraintCodes.of(Fixtures.URLSafeID.class)).isEqualTo("url_safe_id");
-        assertThat(ConstraintCodes.of(jakarta.validation.constraints.Size.class)).isEqualTo("size");
+        assertThat(ConstraintCodes.of(Size.class)).isEqualTo("size");
     }
 }

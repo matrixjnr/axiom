@@ -17,6 +17,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -153,7 +154,7 @@ class ShutdownHookTest {
         var hooks = new Hooks();
         var app = new DefaultApplication(hooks);
         app.start();
-        var drained = new java.util.concurrent.atomic.AtomicInteger();
+        var drained = new AtomicInteger();
         app.onDrain(drained::incrementAndGet);
         app.drainPause(delay -> { throw new AssertionError("must not pause for a zero delay"); });
         assertThatIllegalArgumentException().isThrownBy(() -> app.closeOnJvmShutdown(Duration.ofSeconds(-1)));
@@ -172,7 +173,7 @@ class ShutdownHookTest {
         var hooks = new Hooks();
         var app = new DefaultApplication(hooks);
         app.start();
-        var drained = new java.util.concurrent.atomic.AtomicInteger();
+        var drained = new AtomicInteger();
         app.onDrain(drained::incrementAndGet);
         var health = Health.builder(app).build();
         app.closeOnJvmShutdown(Duration.ofSeconds(1));

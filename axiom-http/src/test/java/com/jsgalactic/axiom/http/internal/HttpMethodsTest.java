@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.http.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -153,7 +154,7 @@ class HttpMethodsTest {
         try (var fixture = new Fixture()) {
             fixture.app.route("PROPFIND", "/dav", ctx -> "propfind");
             fixture.app.route("QUERY", "/search", ctx -> "query " + new String(ctx.request().body().bytes(),
-                    java.nio.charset.StandardCharsets.UTF_8));
+                    StandardCharsets.UTF_8));
             try (var wire = new Wire(fixture.listen())) {
                 wire.write("QUERY /search HTTP/1.1\r\nHost: a\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nq=abc");
                 assertThat(wire.read(false).text()).isEqualTo("query q=abc");
@@ -234,7 +235,7 @@ class HttpMethodsTest {
     @Test void readsBodiesOfGetHeadDeleteAndOptionsAndNeverSendsAHeadBody() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.app.maxRequestBody(8);
-            fixture.app.get("/x", ctx -> "get " + new String(ctx.request().body().bytes(), java.nio.charset.StandardCharsets.UTF_8));
+            fixture.app.get("/x", ctx -> "get " + new String(ctx.request().body().bytes(), StandardCharsets.UTF_8));
             fixture.app.delete("/x", ctx -> "delete " + ctx.request().body().length());
             fixture.app.options("/explicit", ctx -> ctx.status(200).text("options " + ctx.request().body().length()));
             try (var wire = new Wire(fixture.listen())) {

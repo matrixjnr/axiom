@@ -3,8 +3,13 @@ package com.jsgalactic.axiom.http;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
+import com.sun.management.ThreadMXBean;
+import java.lang.management.ManagementFactory;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 class BodyTest {
@@ -65,25 +70,25 @@ class BodyTest {
 
     @Test void builderRefusesMisuseAndNeverExposesItsArray() {
         var builder = Body.builder("text/plain", 2);
-        org.assertj.core.api.Assertions.assertThatExceptionOfType(java.nio.BufferOverflowException.class)
+        Assertions.assertThatExceptionOfType(BufferOverflowException.class)
                 .isThrownBy(() -> builder.write(ByteBuffer.wrap(new byte[3])));
         assertThat(builder.length()).isZero();
         assertThatIllegalArgumentException().isThrownBy(() -> builder.write(ByteBuffer.wrap(new byte[2])).capacity(1));
         assertThatIllegalArgumentException().isThrownBy(() -> Body.builder(null, -1));
         var body = builder.build();
         assertThat(body.bytes()).containsExactly(0, 0);
-        org.assertj.core.api.Assertions.assertThatIllegalStateException().isThrownBy(builder::build);
-        org.assertj.core.api.Assertions.assertThatIllegalStateException().isThrownBy(() -> builder.write(ByteBuffer.allocate(0)));
+        Assertions.assertThatIllegalStateException().isThrownBy(builder::build);
+        Assertions.assertThatIllegalStateException().isThrownBy(() -> builder.write(ByteBuffer.allocate(0)));
         assertThatIllegalArgumentException().isThrownBy(() -> Body.builder("text/plain\r\nX: y", 0).build());
     }
 
     @Test void allocationShowsWhichAccessesCopyTheContent() {
-        var threads = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+        var threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
         boolean measurable = threads.isThreadAllocatedMemorySupported() && threads.isThreadAllocatedMemoryEnabled();
         if (Boolean.getBoolean("axiom.requireAllocationTests")) {
             assertThat(measurable).as("thread allocation measurement is required by axiom.requireAllocationTests").isTrue();
         }
-        org.junit.jupiter.api.Assumptions.assumeTrue(measurable);
+        Assumptions.assumeTrue(measurable);
         int size = 4 * 1024 * 1024;
         var chunk = ByteBuffer.wrap(new byte[size]);
         // Warm up the paths so class loading is not measured.

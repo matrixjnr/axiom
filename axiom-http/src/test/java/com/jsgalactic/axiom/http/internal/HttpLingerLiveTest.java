@@ -4,7 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -21,18 +26,18 @@ class HttpLingerLiveTest {
 
     @Test void largeResponseBeforeACloseReachesASlowReaderInFullWhileItKeepsSending() throws Exception {
         var body = new byte[128 * 1024];
-        new java.util.Random(3).nextBytes(body);
+        new Random(3).nextBytes(body);
         app.get("/big", ctx -> body);
         app.start();
         // Fixed buffers make the outcome independent of kernel defaults: the whole response fits in
         // the server's send buffer, so the server is done writing it at once, while far less than the
         // client's upload fits in the buffers on the way, so the client is still sending then.
         // A long linger and quiet period keep the test independent of machine load.
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofSeconds(60))
-                        .withLingerQuiet(java.time.Duration.ofSeconds(60))
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(Duration.ofSeconds(60))
+                        .withLingerQuiet(Duration.ofSeconds(60))
                         .withSocketBuffers(64 * 1024, 4 * body.length));
-        var client = new java.net.Socket();
+        var client = new Socket();
         Thread sender = null;
         try {
             // A small receive window makes the client a slow reader: most of the response is still
@@ -52,7 +57,7 @@ class HttpLingerLiveTest {
                 var piece = new byte[16 * 1024];
                 try {
                     for (int sent = 0; sent < 4 * 1024 * 1024; sent += piece.length) { out.write(piece); }
-                } catch (java.io.IOException closed) { /* Only the response matters. */ }
+                } catch (IOException closed) { /* Only the response matters. */ }
             });
             // The client reads nothing until it has sent everything: a server that closed early has
             // reset the connection by then, destroying the response it had not delivered yet.
@@ -80,8 +85,8 @@ class HttpLingerLiveTest {
         app.get("/", ctx -> "bye");
         app.start();
         // The total linger bound is far away: only the quiet period can end lingering.
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofHours(1)));
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(Duration.ofHours(1)));
         try (var wire = new Wire(server)) {
             wire.write("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n");
             assertThat(wire.read(false).text()).isEqualTo("bye");
@@ -98,10 +103,10 @@ class HttpLingerLiveTest {
         app.get("/", ctx -> "bye");
         app.start();
         // Neither the total linger bound nor the quiet period nor the grace period can end it.
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofHours(1))
-                        .withLingerQuiet(java.time.Duration.ofHours(1))
-                        .withShutdownGrace(java.time.Duration.ofHours(1)));
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(Duration.ofHours(1))
+                        .withLingerQuiet(Duration.ofHours(1))
+                        .withShutdownGrace(Duration.ofHours(1)));
         try (var wire = new Wire(server)) {
             wire.write("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n");
             assertThat(wire.read(false).text()).isEqualTo("bye");
@@ -121,9 +126,9 @@ class HttpLingerLiveTest {
         app.start();
         // The quiet period is the tuning knob for slow uploaders (lingerQuietTimeout); this one far
         // exceeds the pause, and the total bound is far away too.
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofHours(1))
-                        .withLingerQuiet(java.time.Duration.ofHours(1)));
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(Duration.ofHours(1))
+                        .withLingerQuiet(Duration.ofHours(1)));
         try (var wire = new Wire(server)) {
             // The declared body is over the limit, so the answer comes at once while the upload is
             // only begun.
@@ -147,9 +152,9 @@ class HttpLingerLiveTest {
         app.post("/", ctx -> "unreachable");
         app.start();
         // Only the quiet period can end lingering here, so a pause is what closes the connection.
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                TransportSettings.DEFAULTS.withLinger(java.time.Duration.ofHours(1))
-                        .withLingerQuiet(java.time.Duration.ofMillis(50)));
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withLinger(Duration.ofHours(1))
+                        .withLingerQuiet(Duration.ofMillis(50)));
         try (var wire = new Wire(server)) {
             wire.write("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 1000\r\n\r\n" + "x".repeat(100));
             assertThat(wire.read(false).status()).isEqualTo(413);

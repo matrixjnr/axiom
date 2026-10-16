@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.function.BiConsumer;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class ListenerOptionsTest {
@@ -133,7 +134,7 @@ class ListenerOptionsTest {
         var options = ListenerOptions.builder().rejectionObserver(observer).build();
         assertThat(options.rejectionObserver()).containsSame(observer);
         assertThat(options.toBuilder().maxConnections(5).build().rejectionObserver()).containsSame(observer);
-        org.assertj.core.api.Assertions.assertThatNullPointerException()
+        Assertions.assertThatNullPointerException()
                 .isThrownBy(() -> ListenerOptions.builder().rejectionObserver(null));
     }
 }

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The cookies of a request, parsed strictly from the {@code Cookie} header (RFC 6265bis section 4.2).
@@ -147,7 +148,7 @@ public final class Cookies {
      *
      * @return the names in header order
      */
-    public java.util.Set<String> names() {
+    public Set<String> names() {
         return cookies.keySet();
     }
 

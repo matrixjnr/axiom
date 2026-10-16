@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
+import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -47,7 +48,7 @@ class HttpPipelineErrorLiveTest {
 
     @Test void overTheNetworkADisconnectAfterMuchDiscardedInputStillInterruptsTheHandler() throws Exception {
         app.start();
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0));
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0));
         try {
             var wire = new Wire(server);
             wire.write(SLOW + "GARBAGE\r\n\r\n");
@@ -63,7 +64,7 @@ class HttpPipelineErrorLiveTest {
 
     @Test void overTheNetworkTheEarlierResponseArrivesBeforeTheErrorAndClose() throws Exception {
         app.start();
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0));
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0));
         try (var wire = new Wire(server)) {
             wire.write(SLOW + NEXT + "POST /after HTTP/1.1\r\nHost: a\r\nContent-Length: 17\r\n\r\n");
             assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
@@ -81,7 +82,7 @@ class HttpPipelineErrorLiveTest {
 
     @Test void overTheNetworkADisconnectBehindAnErrorInterruptsTheHandler() throws Exception {
         app.start();
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0));
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0));
         try {
             var wire = new Wire(server);
             wire.write(SLOW + "GARBAGE\r\n\r\n");

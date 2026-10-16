@@ -14,12 +14,16 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
@@ -34,7 +38,7 @@ class RateLimitTest {
 
         @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
 
-        @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
 
         @Override public Instant instant() { return Instant.ofEpochSecond(0, nanos.get()); }
     }
@@ -200,7 +204,7 @@ class RateLimitTest {
         var start = new CountDownLatch(1);
         var allowed = new AtomicInteger();
         try (var pool = Executors.newFixedThreadPool(threads)) {
-            var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            var futures = new ArrayList<Future<?>>();
             for (int t = 0; t < threads; t++) {
                 futures.add(pool.submit(() -> {
                     start.await();
@@ -225,7 +229,7 @@ class RateLimitTest {
     }
 
     private static Request from(String path, String address, String... headers) throws Exception {
-        var map = new java.util.HashMap<String, String>();
+        var map = new HashMap<String, String>();
         for (int i = 0; i < headers.length; i += 2) { map.put(headers[i], headers[i + 1]); }
         return Request.fromTarget("GET", path).withHeaders(map)
                 .withRemoteAddress(new InetSocketAddress(InetAddress.getByName(address), 5000));

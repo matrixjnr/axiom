@@ -37,6 +37,7 @@ import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -45,6 +46,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -147,7 +149,7 @@ class BodiesAndErrorsTest {
     }
 
     @Test void ignoresAcceptForUnsafeMethodsSoSideEffectsAreNeverFollowedBy406() throws Exception {
-        var created = new java.util.concurrent.atomic.AtomicInteger();
+        var created = new AtomicInteger();
         try (var app = Axiom.create()) {
             app.get("/notes", ctx -> ctx.json(new Note("n", 1)));
             for (var method : new String[] {"POST", "PUT", "PATCH", "DELETE", "PROPFIND"}) {
@@ -271,7 +273,7 @@ class BodiesAndErrorsTest {
         Files.writeString(file, OtherJsonCodec.class.getName() + "\n");
         var thread = Thread.currentThread();
         var original = thread.getContextClassLoader();
-        try (var loader = new URLClassLoader(new java.net.URL[] {services.toUri().toURL()}, original);
+        try (var loader = new URLClassLoader(new URL[] {services.toUri().toURL()}, original);
                 var app = Axiom.create()) {
             app.get("/", ctx -> "ok");
             thread.setContextClassLoader(loader);

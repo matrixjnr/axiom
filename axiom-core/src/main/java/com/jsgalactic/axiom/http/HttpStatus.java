@@ -1,5 +1,7 @@
 package com.jsgalactic.axiom.http;
 
+import java.util.Locale;
+
 /**
  * Status codes used by Axiom applications and runtimes, with their RFC 9110 reason phrases.
  * Plain {@code int} constants keep {@link Response} and handler code free of wrapper types.
@@ -104,6 +106,6 @@ public final class HttpStatus {
      * @return safe error code
      */
     public static String defaultCode(int status) {
-        return reasonPhrase(status).toLowerCase(java.util.Locale.ROOT).replace(' ', '_');
+        return reasonPhrase(status).toLowerCase(Locale.ROOT).replace(' ', '_');
     }
 }

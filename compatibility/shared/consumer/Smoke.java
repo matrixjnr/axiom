@@ -3,6 +3,7 @@ package consumer;
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
+import java.lang.reflect.Modifier;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -58,7 +59,7 @@ public final class Smoke {
         var headers = Map.of("Accept", "text/plain");
         var peer = new InetSocketAddress("127.0.0.1", 1234);
         var request = new Request("GET", "/", "q=1", headers, body, peer, true);
-        expect(!Request.class.isRecord() && java.lang.reflect.Modifier.isFinal(Request.class.getModifiers()), "Request shape");
+        expect(!Request.class.isRecord() && Modifier.isFinal(Request.class.getModifiers()), "Request shape");
         expect(request.method().equals("GET") && request.path().equals("/") && request.query().equals("q=1"), "request target");
         expect(request.headers().equals(headers) && request.body() == body, "request content");
         expect(request.remoteAddress().equals(peer) && request.tls() && request.isSecure(), "request transport");

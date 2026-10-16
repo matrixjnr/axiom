@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jsgalactic.axiom.http.Response;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 
 /** Pins the transport's response serialization table; a change here is a wire behavior change. */
@@ -44,7 +45,7 @@ class ResponseSerializationTest {
 
     @Test void contentLengthIsNotCounted() {
         // The transport owns Content-Length; a HEAD response carries one beside headers at the limit.
-        var headers = new java.util.TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        var headers = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
         headers.put("A", "v".repeat(8192 - 5));
         headers.put("content-length", "1048576");
         assertThat(ResponseSerialization.headersSendable(headers)).isTrue();

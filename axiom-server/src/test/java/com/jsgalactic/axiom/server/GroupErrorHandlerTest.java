@@ -16,9 +16,12 @@ import com.jsgalactic.axiom.error.Violation;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.routing.RouteGroup;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /** Group-scoped error handlers and the public problem-response helper. */
@@ -83,7 +86,7 @@ class GroupErrorHandlerTest {
             app.get("/plain", ctx -> "plain");
             app.error(IllegalStateException.class, (ctx, failure) -> Response.of(503, "app"));
             app.start();
-            var fail = java.util.Map.of("X-Fail", "1");
+            var fail = Map.of("X-Fail", "1");
             assertThat(app.handle(Request.get("/g/x").withHeaders(fail)).body()).isEqualTo("group");
             assertThat(app.handle(Request.get("/plain").withHeaders(fail)).body()).isEqualTo("app");
             // No route serves it: only the application's handlers apply.
@@ -127,7 +130,7 @@ class GroupErrorHandlerTest {
 
     @Test
     void registrationFollowsTheRulesOfRoutes() throws Exception {
-        var leaked = new java.util.concurrent.atomic.AtomicReference<com.jsgalactic.axiom.routing.RouteGroup>();
+        var leaked = new AtomicReference<RouteGroup>();
         try (var app = Axiom.create()) {
             app.group("/g", g -> {
                 leaked.set(g);

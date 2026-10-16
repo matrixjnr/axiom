@@ -3,8 +3,15 @@ package com.jsgalactic.axiom.test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.error.InternalServerErrorException;
 import com.jsgalactic.axiom.http.Request;
+import com.jsgalactic.axiom.observability.TraceContext;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 class TraceContextTest {
@@ -29,7 +36,7 @@ class TraceContextTest {
     @Test void ignoresAbsentAndMalformedHeadersWithoutFailingTheRequest() throws Exception {
         assertThat(call(null)).isEqualTo("none");
         assertThat(call("not-a-traceparent")).isEqualTo("none");
-        assertThat(call(VALID.toUpperCase(java.util.Locale.ROOT))).isEqualTo("none");
+        assertThat(call(VALID.toUpperCase(Locale.ROOT))).isEqualTo("none");
         assertThat(call(VALID + "-extra")).isEqualTo("none");
     }
 
@@ -67,7 +74,7 @@ class TraceContextTest {
             assertThat(response.headers()).doesNotContainKey("traceresponse");
         }
         var traced = Axiom.create();
-        traced.use(com.jsgalactic.axiom.observability.TraceContext.responseHeader());
+        traced.use(TraceContext.responseHeader());
         traced.get("/x", ctx -> "ok");
         try (var client = TestClient.start(traced)) {
             var response = client.execute(new Request("GET", "/x").withHeaders(Map.of("traceparent", VALID)));
@@ -93,17 +100,17 @@ class TraceContextTest {
     }
 
     @Test void theFrameworksOwnLogMessagesCarryTheTraceIdNextToTheRequestId() throws Exception {
-        var records = new java.util.concurrent.CopyOnWriteArrayList<java.util.logging.LogRecord>();
-        var handler = new java.util.logging.Handler() {
-            @Override public void publish(java.util.logging.LogRecord record) { records.add(record); }
+        var records = new CopyOnWriteArrayList<LogRecord>();
+        var handler = new Handler() {
+            @Override public void publish(LogRecord record) { records.add(record); }
             @Override public void flush() { }
             @Override public void close() { }
         };
-        var logger = java.util.logging.Logger.getLogger("com.jsgalactic.axiom.failures");
+        var logger = Logger.getLogger("com.jsgalactic.axiom.failures");
         logger.addHandler(handler);
         try {
             var app = Axiom.create();
-            app.get("/boom", ctx -> { throw new com.jsgalactic.axiom.error.InternalServerErrorException("boom"); });
+            app.get("/boom", ctx -> { throw new InternalServerErrorException("boom"); });
             try (var client = TestClient.start(app)) {
                 assertThat(client.execute(new Request("GET", "/boom").withHeaders(Map.of("traceparent", VALID))).status())
                         .isEqualTo(500);
@@ -112,7 +119,7 @@ class TraceContextTest {
         } finally {
             logger.removeHandler(handler);
         }
-        var messages = records.stream().map(java.util.logging.LogRecord::getMessage).toList();
+        var messages = records.stream().map(LogRecord::getMessage).toList();
         assertThat(messages).anyMatch(message -> message.contains(" trace=" + TRACE_ID + " failed with 500"));
         assertThat(messages).anyMatch(message -> !message.contains("trace=") && message.contains("failed with 500"));
     }

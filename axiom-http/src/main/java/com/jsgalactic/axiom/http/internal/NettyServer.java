@@ -22,6 +22,7 @@ import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpResponseEncoder;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.IdleStateHandler;
+import io.netty.util.concurrent.Future;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
@@ -285,7 +286,7 @@ final class NettyServer implements Server {
         io.shutdownGracefully(0, 5, TimeUnit.SECONDS);
     }
 
-    private static CompletableFuture<Void> completion(io.netty.util.concurrent.Future<?> future) {
+    private static CompletableFuture<Void> completion(Future<?> future) {
         var result = new CompletableFuture<Void>();
         future.addListener(done -> {
             if (done.isSuccess()) { result.complete(null); }

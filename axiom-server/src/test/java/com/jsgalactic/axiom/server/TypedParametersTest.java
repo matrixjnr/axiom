@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.Request;
+import com.jsgalactic.axiom.http.Response;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,7 @@ class TypedParametersTest {
         }
     }
 
-    private static void assertProblem(com.jsgalactic.axiom.http.Response response, String code, String input) {
+    private static void assertProblem(Response response, String code, String input) {
         assertThat(response.status()).isEqualTo(400);
         assertThat(response.headers()).containsEntry("Content-Type", "application/problem+json");
         var body = new String((byte[]) response.body(), StandardCharsets.UTF_8);

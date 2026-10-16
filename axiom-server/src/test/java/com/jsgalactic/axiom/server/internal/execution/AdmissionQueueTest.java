@@ -20,6 +20,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class AdmissionQueueTest {
@@ -48,8 +49,8 @@ class AdmissionQueueTest {
     }
 
     @Test void releasesCapacityBeforeCompletionCallbacksRun() {
-        try (var f = new Fixture(com.jsgalactic.axiom.execution.AdmissionPolicy.reject(1))) {
-            var followUp = new java.util.concurrent.atomic.AtomicReference<Object>();
+        try (var f = new Fixture(AdmissionPolicy.reject(1))) {
+            var followUp = new AtomicReference<Object>();
             var first = f.dispatcher.submit(context(), () -> "first");
             first.result().thenAccept(v -> {
                 try { followUp.set(f.dispatcher.submit(context(), () -> "second")); }

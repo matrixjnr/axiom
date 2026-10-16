@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.application.Application;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -24,8 +26,8 @@ class HttpContinueLiveTest {
         app.start();
         // A response bound far shorter than the test could exceed by accident would still not fire:
         // a taken write leaves no deadline behind (see the frozen-time test).
-        var server = NettyServer.bind(app, new java.net.InetSocketAddress("127.0.0.1", 0),
-                TransportSettings.DEFAULTS.withResponseTimeout(java.time.Duration.ofSeconds(30)));
+        var server = NettyServer.bind(app, new InetSocketAddress("127.0.0.1", 0),
+                TransportSettings.DEFAULTS.withResponseTimeout(Duration.ofSeconds(30)));
         try (var wire = new Wire(server)) {
             wire.write("POST /echo HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n");
             assertThat(wire.line()).isEqualTo("HTTP/1.1 100 Continue");

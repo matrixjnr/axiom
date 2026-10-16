@@ -5,12 +5,15 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
@@ -22,7 +25,7 @@ import javax.net.ssl.TrustManagerFactory;
  */
 final class TlsFixture implements AutoCloseable {
     /** Random per run; protects only the throwaway test keystores. */
-    private static final char[] PASSWORD = java.util.UUID.randomUUID().toString().toCharArray();
+    private static final char[] PASSWORD = UUID.randomUUID().toString().toCharArray();
     private final Path directory;
     private int sequence;
 
@@ -66,8 +69,8 @@ final class TlsFixture implements AutoCloseable {
 
     /** Copies an identity's PEM files over the given paths, as a certificate renewal would. */
     static void install(Identity identity, Path chain, Path key) throws IOException {
-        Files.copy(identity.chain(), chain, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        Files.copy(identity.key(), key, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Files.copy(identity.chain(), chain, StandardCopyOption.REPLACE_EXISTING);
+        Files.copy(identity.key(), key, StandardCopyOption.REPLACE_EXISTING);
     }
 
     /** A PEM file of the given certificates. */
@@ -86,7 +89,7 @@ final class TlsFixture implements AutoCloseable {
         anchors.setCertificateEntry("server", trusted);
         var trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
         trust.init(anchors);
-        javax.net.ssl.KeyManager[] keys = null;
+        KeyManager[] keys = null;
         if (presented != null) { keys = keyManagers(presented); }
         var context = SSLContext.getInstance("TLS");
         context.init(keys, trust.getTrustManagers(), null);
@@ -94,7 +97,7 @@ final class TlsFixture implements AutoCloseable {
     }
 
     /** The identity's keystore as key managers, for a server context supplier or a client certificate. */
-    static javax.net.ssl.KeyManager[] keyManagers(Identity identity) throws Exception {
+    static KeyManager[] keyManagers(Identity identity) throws Exception {
         var store = KeyStore.getInstance("PKCS12");
         try (InputStream in = Files.newInputStream(identity.keystore())) { store.load(in, PASSWORD); }
         var factory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());

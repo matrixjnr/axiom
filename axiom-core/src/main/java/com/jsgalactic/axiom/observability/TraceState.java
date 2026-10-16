@@ -1,6 +1,7 @@
 package com.jsgalactic.axiom.observability;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -64,7 +65,7 @@ public record TraceState(List<Member> members) {
     public TraceState {
         members = List.copyOf(members);
         if (members.size() > MAX_MEMBERS) { throw new IllegalArgumentException("Too many tracestate members"); }
-        var keys = new java.util.HashSet<String>();
+        var keys = new HashSet<String>();
         for (var member : members) {
             if (!keys.add(member.key())) { throw new IllegalArgumentException("Duplicate tracestate key"); }
         }

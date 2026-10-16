@@ -12,8 +12,10 @@ import com.jsgalactic.axiom.error.ConflictException;
 import com.jsgalactic.axiom.error.NotFoundException;
 import com.jsgalactic.axiom.error.ValidationException;
 import com.jsgalactic.axiom.error.Violation;
+import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,7 +56,7 @@ class ErrorHandlerTest {
         try (var app = Axiom.create()) {
             app.get("/number", ctx -> Integer.parseInt("x"));
             app.get("/state", ctx -> { throw new IllegalStateException(); });
-            app.get("/checked", ctx -> { throw new java.io.IOException(); });
+            app.get("/checked", ctx -> { throw new IOException(); });
             app.error(Exception.class, (ctx, failure) -> Response.of(500, "exception"));
             app.error(RuntimeException.class, (ctx, failure) -> Response.of(500, "runtime"));
             app.error(IllegalArgumentException.class, (ctx, failure) -> Response.of(400, "argument"));
@@ -240,7 +242,7 @@ class ErrorHandlerTest {
             app.post("/upload", ctx -> "stored");
             app.error(AxiomException.class, (ctx, failure) -> Response.of(599, "mapped"));
             app.start();
-            var large = new Request("POST", "/upload").withBody(com.jsgalactic.axiom.http.Body.of("text/plain", new byte[1]));
+            var large = new Request("POST", "/upload").withBody(Body.of("text/plain", new byte[1]));
             assertThat(app.handle(large).status()).isEqualTo(413);
             assertThat(app.handle(Request.get("/missing")).status()).isEqualTo(404);
         }

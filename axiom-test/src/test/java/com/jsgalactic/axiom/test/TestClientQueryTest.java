@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.InvalidRequestPathException;
 import com.jsgalactic.axiom.http.Request;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 class TestClientQueryTest {
@@ -15,7 +16,7 @@ class TestClientQueryTest {
         var app = Axiom.create();
         app.get("/search", ctx -> ctx.query("q").orElse("none") + "|" + ctx.queryAll("tag") + "|" + ctx.path());
         app.post("/items/:id", ctx -> ctx.path("id") + "|" + ctx.query("dry").orElse("no") + "|"
-                + new String(ctx.request().body().bytes(), java.nio.charset.StandardCharsets.UTF_8));
+                + new String(ctx.request().body().bytes(), StandardCharsets.UTF_8));
         app.put("/items/:id", ctx -> ctx.query("v").orElseThrow());
         app.patch("/items/:id", ctx -> ctx.query("v").orElseThrow());
         try (var client = TestClient.start(app)) {

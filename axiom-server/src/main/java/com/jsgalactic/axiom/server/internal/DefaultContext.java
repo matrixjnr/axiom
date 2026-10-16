@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.server.internal;
 
 import com.jsgalactic.axiom.context.Context;
 import com.jsgalactic.axiom.context.SecurityIdentity;
+import com.jsgalactic.axiom.error.AxiomException;
 import com.jsgalactic.axiom.error.DecodeException;
 import com.jsgalactic.axiom.error.UnsupportedMediaTypeException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
@@ -11,6 +12,8 @@ import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.routing.Route;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The context of one request. For a request no route serves ({@code match} is null), global
@@ -25,7 +28,7 @@ final class DefaultContext implements Context {
     private int status = 200;
     private boolean explicitStatus;
     private SecurityIdentity identity;
-    private java.util.Optional<TraceContext> traceContext;
+    private Optional<TraceContext> traceContext;
 
     private final Codecs codecs;
     /** Middleware on the stack of this request's chain, outermost first; see {@link Pipeline}. */
@@ -78,14 +81,14 @@ final class DefaultContext implements Context {
     }
 
     @Override
-    public java.util.Optional<Route> matchedRoute() {
-        return match == null ? java.util.Optional.empty() : java.util.Optional.of(match.route());
+    public Optional<Route> matchedRoute() {
+        return match == null ? Optional.empty() : Optional.of(match.route());
     }
 
     @Override
     public String path(String name) {
         if (match == null) {
-            throw new IllegalArgumentException("Unknown path parameter: " + java.util.Objects.requireNonNull(name, "name"));
+            throw new IllegalArgumentException("Unknown path parameter: " + Objects.requireNonNull(name, "name"));
         }
         return match.parameter(name);
     }
@@ -100,17 +103,17 @@ final class DefaultContext implements Context {
 
     /** Parsed on first use; the context is thread-confined, so no synchronization is needed. */
     @Override
-    public java.util.Optional<TraceContext> traceContext() {
+    public Optional<TraceContext> traceContext() {
         if (traceContext == null) { traceContext = Context.super.traceContext(); }
         return traceContext;
     }
 
     @Override
-    public java.util.Optional<SecurityIdentity> identity() { return java.util.Optional.ofNullable(identity); }
+    public Optional<SecurityIdentity> identity() { return Optional.ofNullable(identity); }
 
     @Override
     public Context identity(SecurityIdentity identity) {
-        java.util.Objects.requireNonNull(identity, "identity");
+        Objects.requireNonNull(identity, "identity");
         if (this.identity != null) {
             throw new IllegalStateException("This request already has a security identity; it can be set only once");
         }
@@ -120,7 +123,7 @@ final class DefaultContext implements Context {
 
     @Override
     public <T> T body(Class<T> type) {
-        java.util.Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(type, "type");
         var body = request.body();
         if (body.isEmpty()) { throw new DecodeException("empty_body"); }
         var mediaType = body.mediaType();
@@ -151,8 +154,8 @@ final class DefaultContext implements Context {
     }
 
     @Override
-    public Response problem(com.jsgalactic.axiom.error.AxiomException failure) {
-        return Problems.response(java.util.Objects.requireNonNull(failure, "failure"), execution.requestId());
+    public Response problem(AxiomException failure) {
+        return Problems.response(Objects.requireNonNull(failure, "failure"), execution.requestId());
     }
 
     @Override
@@ -163,8 +166,8 @@ final class DefaultContext implements Context {
 
     @Override
     public Response encode(String contentType, Object value) {
-        java.util.Objects.requireNonNull(value, "value");
-        java.util.Objects.requireNonNull(contentType, "contentType");
+        Objects.requireNonNull(value, "value");
+        Objects.requireNonNull(contentType, "contentType");
         validateBodyStatus(value);
         // Validate the header before invoking application codec code.
         Response.of(status, null).withHeader("Content-Type", contentType);

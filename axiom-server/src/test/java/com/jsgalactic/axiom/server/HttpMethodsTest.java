@@ -8,6 +8,8 @@ import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.routing.Route;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -84,7 +86,7 @@ class HttpMethodsTest {
             app.options("/with-options", ctx -> "explicit");
             app.get("/with-options", ctx -> "get");
             app.start();
-            for (var path : java.util.List.of("/submit", "/items/7", "/items/7/x", "/with-options")) {
+            for (var path : List.of("/submit", "/items/7", "/items/7/x", "/with-options")) {
                 var mismatch = app.handle(new Request("PUT", path));
                 assertThat(mismatch.status()).as(path).isEqualTo(405);
                 assertThat(mismatch.headers().get("Allow")).as(path).contains("OPTIONS");
@@ -170,7 +172,7 @@ class HttpMethodsTest {
             app.get("/dav", ctx -> "dav");
             app.recognizeMethods("PROPFIND", "get").recognizeMethods("MKCOL", "GET");
             app.start();
-            for (var method : java.util.List.of("PROPFIND", "get", "MKCOL", "GET")) {
+            for (var method : List.of("PROPFIND", "get", "MKCOL", "GET")) {
                 assertThat(app.handle(new Request(method, "/missing")).status()).as(method).isEqualTo(404);
             }
             // Declaring changes nothing else: an undeclared method is still 501 when unrouted.
@@ -267,11 +269,11 @@ class HttpMethodsTest {
             app.get("/x", ctx -> "x");
             app.start();
             var request = new Request("TRACE", "/x", Map.of("Cookie", "session=secret"),
-                    Body.of("text/plain", "body-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                    Body.of("text/plain", "body-secret".getBytes(StandardCharsets.UTF_8)));
             var trace = app.handle(request);
             assertThat(trace.status()).isEqualTo(405);
             assertThat(trace.headers()).containsEntry("Allow", "GET, HEAD, OPTIONS");
-            assertThat(new String((byte[]) trace.body(), java.nio.charset.StandardCharsets.UTF_8))
+            assertThat(new String((byte[]) trace.body(), StandardCharsets.UTF_8))
                     .doesNotContain("secret").doesNotContain("Cookie").doesNotContain("TRACE");
             assertThat(app.handle(new Request("TRACE", "/missing")).status()).isEqualTo(404);
         }
@@ -321,7 +323,7 @@ class HttpMethodsTest {
                 assertThat(unknown.status()).as(method).isEqualTo(501);
                 assertThat(unknown.headers()).as(method).doesNotContainKey("Allow")
                         .containsEntry("Content-Type", "application/problem+json");
-                assertThat(new String((byte[]) unknown.body(), java.nio.charset.StandardCharsets.UTF_8))
+                assertThat(new String((byte[]) unknown.body(), StandardCharsets.UTF_8))
                         .contains("\"code\":\"not_implemented\"").doesNotContain(method);
             }
             assertThat(app.resolve(new Request("FOO", "/missing"))).isEmpty();

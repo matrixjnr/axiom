@@ -6,10 +6,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jsgalactic.axiom.codec.spi.BodyCodec;
 import com.jsgalactic.axiom.error.DecodeException;
+import com.sun.management.ThreadMXBean;
+import java.io.ByteArrayOutputStream;
+import java.lang.management.ManagementFactory;
+import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -148,7 +155,7 @@ class JacksonBodyCodecTest {
     }
 
     private static byte[] concat(byte[]... parts) {
-        var out = new java.io.ByteArrayOutputStream();
+        var out = new ByteArrayOutputStream();
         for (var part : parts) { out.writeBytes(part); }
         return out.toByteArray();
     }
@@ -188,18 +195,18 @@ class JacksonBodyCodecTest {
     }
 
     @Test void decodesFromAReadOnlyViewWithoutCopyingIt() {
-        var threads = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+        var threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
         boolean measurable = threads.isThreadAllocatedMemorySupported() && threads.isThreadAllocatedMemoryEnabled();
         if (Boolean.getBoolean("axiom.requireAllocationTests")) {
             assertThat(measurable).as("thread allocation measurement is required by axiom.requireAllocationTests").isTrue();
         }
-        org.junit.jupiter.api.Assumptions.assumeTrue(measurable);
+        Assumptions.assumeTrue(measurable);
         int padding = 8 * 1024 * 1024;
         var content = new byte[padding + 64];
-        java.util.Arrays.fill(content, (byte) ' ');
+        Arrays.fill(content, (byte) ' ');
         var json = utf8("xx{\"name\":\"view\",\"quantity\":3}");
         System.arraycopy(json, 0, content, 0, json.length);
-        var view = java.nio.ByteBuffer.wrap(content).position(2).asReadOnlyBuffer();
+        var view = ByteBuffer.wrap(content).position(2).asReadOnlyBuffer();
         codec.decode(view.duplicate(), Item.class); // Loads and links the decoding path before measuring.
 
         long before = threads.getCurrentThreadAllocatedBytes();
@@ -209,7 +216,7 @@ class JacksonBodyCodecTest {
         assertThat(item).isEqualTo(new Item("view", 3));
         assertThat(allocated).as("bytes allocated while decoding a %d-byte body", content.length).isLessThan(padding / 8);
         assertDecodeFailure(utf8("xx{\"name\":\"a\",\"name\":\"b\",\"quantity\":1}"), Item.class, "malformed_json", null);
-        assertThatThrownBy(() -> codec.decode(java.nio.ByteBuffer.wrap(utf8("xx{\"name\":\"a\",\"name\":\"b\",\"quantity\":1}"))
+        assertThatThrownBy(() -> codec.decode(ByteBuffer.wrap(utf8("xx{\"name\":\"a\",\"name\":\"b\",\"quantity\":1}"))
                 .position(2).asReadOnlyBuffer(), Item.class))
                 .isInstanceOfSatisfying(DecodeException.class, failure -> assertThat(failure.code()).isEqualTo("duplicate_field"));
     }
@@ -248,7 +255,7 @@ class JacksonBodyCodecTest {
                 Measurement.class);
         assertThat(measurement).isEqualTo(new Measurement(1.5e300, null, 0.25f, 3f));
         assertThat(codec.decode(utf8("[1e400]"), List.class).getFirst())
-                .isEqualTo(new java.math.BigDecimal("1e400"));
+                .isEqualTo(new BigDecimal("1e400"));
         assertDecodeFailure(utf8("{\"value\":NaN}"), Measurement.class, "malformed_json", null);
     }
 }

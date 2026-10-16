@@ -2,6 +2,7 @@ package com.jsgalactic.axiom;
 
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.application.spi.ApplicationProvider;
+import java.util.Objects;
 import java.util.ServiceLoader;
 
 /** Creates applications using the runtime available on the application classpath. */
@@ -23,7 +24,7 @@ public final class Axiom {
         if (providers.size() != 1) {
             throw new IllegalStateException("Multiple Axiom runtime providers found; install exactly one.");
         }
-        return java.util.Objects.requireNonNull(providers.getFirst().get().create(),
+        return Objects.requireNonNull(providers.getFirst().get().create(),
                 "Application provider returned null");
     }
 }

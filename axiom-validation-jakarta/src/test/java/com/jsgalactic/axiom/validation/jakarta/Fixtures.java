@@ -11,6 +11,7 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 import jakarta.validation.Constraint;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
+import jakarta.validation.GroupSequence;
 import jakarta.validation.Payload;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
@@ -55,13 +56,13 @@ final class Fixtures {
     interface Costly {}
 
     /** A group sequence: validation stops at the first group with violations. */
-    @jakarta.validation.GroupSequence({Basic.class, Costly.class})
+    @GroupSequence({Basic.class, Costly.class})
     interface BasicThenCostly {}
 
     record Account(@NotBlank(groups = Basic.class) String name, @Size(min = 5, groups = Costly.class) String password) {}
 
     /** Redefines the default group as a sequence: the class's own constraints, then {@link Costly}. */
-    @jakarta.validation.GroupSequence({Sequenced.class, Costly.class})
+    @GroupSequence({Sequenced.class, Costly.class})
     record Sequenced(@NotBlank String name, @Size(min = 5, groups = Costly.class) String password) {}
 
     /** Cascades with {@code @Valid} on the container itself, the form Hibernate Validator deprecates. */

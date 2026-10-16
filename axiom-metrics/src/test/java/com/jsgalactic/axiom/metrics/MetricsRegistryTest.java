@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class MetricsRegistryTest {
@@ -105,7 +106,7 @@ class MetricsRegistryTest {
         var ready = new CountDownLatch(threads);
         var start = new CountDownLatch(1);
         var workers = new ArrayList<Thread>();
-        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var failure = new AtomicReference<Throwable>();
         for (int t = 0; t < threads; t++) {
             workers.add(Thread.ofPlatform().start(() -> {
                 try {

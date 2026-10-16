@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.context.SecurityIdentity;
 import com.jsgalactic.axiom.http.Request;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -25,10 +26,10 @@ class IdentityTest {
                     (ctx, failure) -> ctx.text("failed for " + ctx.identity().map(SecurityIdentity::principal).orElse("-")));
             app.start();
             assertThat(app.handle(Request.get("/me")).body()).isEqualTo("anonymous");
-            assertThat(app.handle(Request.get("/me").withHeaders(java.util.Map.of("X-User", "ada"))).body()).isEqualTo("ada");
+            assertThat(app.handle(Request.get("/me").withHeaders(Map.of("X-User", "ada"))).body()).isEqualTo("ada");
             // A fresh context per request: the previous identity does not leak into the next one.
             assertThat(app.handle(Request.get("/me")).body()).isEqualTo("anonymous");
-            assertThat(app.handle(Request.get("/fail").withHeaders(java.util.Map.of("X-User", "ada"))).body())
+            assertThat(app.handle(Request.get("/fail").withHeaders(Map.of("X-User", "ada"))).body())
                     .isEqualTo("failed for ada");
         }
     }

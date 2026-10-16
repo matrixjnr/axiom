@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteDoc;
+import java.lang.reflect.ParameterizedType;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -82,13 +83,13 @@ class RouteDocTest {
     record Page<T>(List<T> items) {}
 
     @Test void genericTypesAreBuiltFromTheirArguments() {
-        var type = (java.lang.reflect.ParameterizedType) RouteDoc.type(Page.class, Note.class);
+        var type = (ParameterizedType) RouteDoc.type(Page.class, Note.class);
         assertThat(type.getRawType()).isEqualTo(Page.class);
         assertThat(type.getActualTypeArguments()).containsExactly(Note.class);
         assertThat(type.getTypeName()).contains("Page<").contains("Note>");
         assertThat(type.toString()).isEqualTo(type.getTypeName());
         assertThat(type.getOwnerType()).isEqualTo(RouteDocTest.class);
-        assertThat(((java.lang.reflect.ParameterizedType) RouteDoc.listOf(String.class)).getRawType()).isEqualTo(List.class);
+        assertThat(((ParameterizedType) RouteDoc.listOf(String.class)).getRawType()).isEqualTo(List.class);
         assertThatIllegalArgumentException().isThrownBy(() -> RouteDoc.type(Page.class));
         assertThatIllegalArgumentException().isThrownBy(() -> RouteDoc.type(Note.class, String.class));
         assertThatIllegalArgumentException().isThrownBy(() -> RouteDoc.type(List.class, String.class, String.class));

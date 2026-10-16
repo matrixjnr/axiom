@@ -1,5 +1,7 @@
 package com.jsgalactic.axiom.validation.jakarta;
 
+import static jakarta.validation.Validation.byProvider;
+
 import com.jsgalactic.axiom.error.InternalServerErrorException;
 import com.jsgalactic.axiom.error.Violation;
 import com.jsgalactic.axiom.validation.FieldPath;
@@ -63,7 +65,7 @@ public final class JakartaValidation implements Validator<Object>, AutoCloseable
 
     private JakartaValidation(Class<?>[] groups) {
         this.groups = groups;
-        this.factory = jakarta.validation.Validation.byProvider(HibernateValidator.class)
+        this.factory = byProvider(HibernateValidator.class)
                 .providerResolver(() -> List.of(new HibernateValidator()))
                 .configure()
                 .ignoreXmlConfiguration()

@@ -1,5 +1,6 @@
 package com.jsgalactic.axiom.routing;
 
+import com.jsgalactic.axiom.context.ErrorHandler;
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
 import java.util.function.Consumer;
@@ -174,5 +175,5 @@ public interface RouteGroup {
      * @throws IllegalArgumentException if this scope already has a handler for the class
      * @throws IllegalStateException if configuration has ended
      */
-    <E extends Exception> RouteGroup error(Class<E> type, com.jsgalactic.axiom.context.ErrorHandler<? super E> handler);
+    <E extends Exception> RouteGroup error(Class<E> type, ErrorHandler<? super E> handler);
 }

@@ -2,6 +2,8 @@ package com.jsgalactic.axiom.http.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jsgalactic.axiom.context.Context;
+import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.ServerSentEvent;
@@ -9,6 +11,7 @@ import com.jsgalactic.axiom.http.StreamAbortedException;
 import com.jsgalactic.axiom.http.StreamAbortedException.Reason;
 import com.jsgalactic.axiom.http.StreamOutcome;
 import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -77,7 +80,7 @@ class HttpStreamTest {
             var wire = fixture.connect();
             wire.write("GET /blob HTTP/1.1\r\nHost: a\r\n\r\n");
             wire.head();
-            var all = new java.io.ByteArrayOutputStream();
+            var all = new ByteArrayOutputStream();
             int chunks = 0;
             for (byte[] next; (next = wire.chunk()) != null; chunks++) {
                 assertThat(next.length).isLessThanOrEqualTo(ChannelBodyWriter.PIECE);
@@ -210,11 +213,11 @@ class HttpStreamTest {
         var handled = new AtomicInteger();
         var decorated = new AtomicInteger();
         try (var fixture = new Fixture()) {
-            fixture.app.use(new com.jsgalactic.axiom.context.Middleware() {
-                @Override public Response handle(com.jsgalactic.axiom.context.Context ctx, Next next) throws Exception {
+            fixture.app.use(new Middleware() {
+                @Override public Response handle(Context ctx, Next next) throws Exception {
                     return next.run();
                 }
-                @Override public Response afterError(com.jsgalactic.axiom.context.Context ctx, Response response) {
+                @Override public Response afterError(Context ctx, Response response) {
                     decorated.incrementAndGet();
                     return response.withHeader("X-Decorated", "yes");
                 }

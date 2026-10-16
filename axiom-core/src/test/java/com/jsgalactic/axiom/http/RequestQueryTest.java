@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -61,7 +62,7 @@ class RequestQueryTest {
         assertThat(Request.fromTarget("GET", "/?" + longest).query("q")).isPresent();
         assertThatIllegalArgumentException().isThrownBy(() -> Request.fromTarget("GET", "/?" + longest + "x"))
                 .satisfies(failure -> assertThat(failure.getMessage()).doesNotContain("xxxx"));
-        var most = String.join("&", java.util.Collections.nCopies(Request.MAX_QUERY_PARAMETERS, "a=1"));
+        var most = String.join("&", Collections.nCopies(Request.MAX_QUERY_PARAMETERS, "a=1"));
         assertThat(Request.fromTarget("GET", "/?" + most).queryAll("a")).hasSize(Request.MAX_QUERY_PARAMETERS);
         // Empty pairs do not count against the parameter limit.
         assertThat(Request.fromTarget("GET", "/?" + most + "&&&").queryAll("a")).hasSize(Request.MAX_QUERY_PARAMETERS);

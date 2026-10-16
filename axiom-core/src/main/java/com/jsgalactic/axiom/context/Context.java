@@ -1,12 +1,15 @@
 package com.jsgalactic.axiom.context;
 
+import com.jsgalactic.axiom.error.AxiomException;
 import com.jsgalactic.axiom.error.BadRequestException;
 import com.jsgalactic.axiom.error.ValidationException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.internal.PercentDecoding;
 import com.jsgalactic.axiom.observability.TraceContext;
+import com.jsgalactic.axiom.observability.TraceState;
 import com.jsgalactic.axiom.routing.Route;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +82,7 @@ public interface Context {
      */
     default Optional<TraceContext> traceContext() {
         return TraceContext.parse(request().header(TraceContext.HEADER).orElse(null),
-                request().header(com.jsgalactic.axiom.observability.TraceState.HEADER).orElse(null));
+                request().header(TraceState.HEADER).orElse(null));
     }
 
     /**
@@ -347,12 +350,12 @@ public interface Context {
      * @throws UnsupportedOperationException if a custom context does not implement object encoding
      */
     default Response encode(String contentType, Object value) {
-        java.util.Objects.requireNonNull(contentType, "contentType");
-        java.util.Objects.requireNonNull(value, "value");
+        Objects.requireNonNull(contentType, "contentType");
+        Objects.requireNonNull(value, "value");
         if (!(value instanceof String) && !(value instanceof byte[])) {
             throw new UnsupportedOperationException("This context cannot encode object bodies");
         }
-        var type = com.jsgalactic.axiom.http.Body.of(contentType, new byte[0]).mediaType();
+        var type = Body.of(contentType, new byte[0]).mediaType();
         if (type.isEmpty() || type.get().indexOf('*') >= 0) {
             throw new IllegalArgumentException("Content-Type must contain an exact type/subtype");
         }
@@ -494,7 +497,7 @@ public interface Context {
      * @throws UnsupportedOperationException if this context cannot build it (the runtime's
      *         contexts can; this default exists for application test doubles)
      */
-    default Response problem(com.jsgalactic.axiom.error.AxiomException failure) {
+    default Response problem(AxiomException failure) {
         throw new UnsupportedOperationException("This context cannot build problem responses");
     }
 
@@ -518,7 +521,7 @@ public interface Context {
      * @return a response using the current status
      */
     default Response text(String text) {
-        return response(java.util.Objects.requireNonNull(text, "text"));
+        return response(Objects.requireNonNull(text, "text"));
     }
 
     /**

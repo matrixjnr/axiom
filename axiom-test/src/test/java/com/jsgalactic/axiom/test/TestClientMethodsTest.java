@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -96,7 +98,7 @@ class TestClientMethodsTest {
         app.delete("/x", ctx -> "delete");
         try (var client = TestClient.start(app)) {
             for (var header : new String[] {"X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override"}) {
-                var request = new Request("POST", "/x", java.util.Map.of(header, "DELETE"), com.jsgalactic.axiom.http.Body.empty());
+                var request = new Request("POST", "/x", Map.of(header, "DELETE"), Body.empty());
                 assertThat(client.execute(request).body()).as(header).isEqualTo("post");
             }
         }
@@ -108,14 +110,14 @@ class TestClientMethodsTest {
         app.maxRequestBody(4);
         app.get("/x", ctx -> "got " + ctx.request().body().length());
         try (var client = TestClient.start(app)) {
-            var body = com.jsgalactic.axiom.http.Body.of("text/plain", new byte[3]);
+            var body = Body.of("text/plain", new byte[3]);
             assertThat(client.execute(Request.get("/x").withBody(body)).body()).isEqualTo("got 3");
             var head = client.execute(new Request("HEAD", "/x").withBody(body));
             assertThat(head.body()).isNull();
             assertThat(head.headers()).containsEntry("Content-Length", "5");
             var options = client.execute(new Request("OPTIONS", "/x").withBody(body));
             assertThat(options.status()).isEqualTo(204);
-            var over = com.jsgalactic.axiom.http.Body.of("text/plain", new byte[5]);
+            var over = Body.of("text/plain", new byte[5]);
             assertThat(client.execute(Request.get("/x").withBody(over)).status()).isEqualTo(413);
             assertThat(client.execute(new Request("OPTIONS", "/x").withBody(over)).status()).isEqualTo(413);
         }

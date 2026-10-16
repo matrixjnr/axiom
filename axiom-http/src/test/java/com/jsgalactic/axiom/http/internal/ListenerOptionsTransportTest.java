@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jsgalactic.axiom.Axiom;
+import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import io.netty.buffer.ByteBuf;
@@ -15,6 +16,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Tag;
@@ -102,7 +104,7 @@ class ListenerOptionsTransportTest {
         try (var app = Axiom.create()) {
             app.start();
             var server = NettyServer.bind(app, LOOPBACK, TransportSettings.of(options));
-            var accepted = new java.util.ArrayList<EmbeddedChannel>();
+            var accepted = new ArrayList<EmbeddedChannel>();
             try {
                 for (int i = 0; i < cap; i++) {
                     var channel = new EmbeddedChannel();
@@ -127,7 +129,7 @@ class ListenerOptionsTransportTest {
         try (var app = Axiom.create()) {
             app.start();
             var server = NettyServer.bind(app, LOOPBACK, TransportSettings.of(options));
-            var accepted = new java.util.ArrayList<DuplexEmbeddedChannel>();
+            var accepted = new ArrayList<DuplexEmbeddedChannel>();
             try {
                 for (int i = 0; i < 4; i++) {
                     var channel = new DuplexEmbeddedChannel();
@@ -155,7 +157,7 @@ class ListenerOptionsTransportTest {
         try (var app = Axiom.create().metrics(probe)) {
             app.start();
             var server = NettyServer.bind(app, LOOPBACK, TransportSettings.of(options));
-            var accepted = new java.util.ArrayList<DuplexEmbeddedChannel>();
+            var accepted = new ArrayList<DuplexEmbeddedChannel>();
             try {
                 for (int i = 0; i < 3; i++) {
                     var channel = new DuplexEmbeddedChannel();
@@ -378,7 +380,7 @@ class ListenerOptionsTransportTest {
     private record Lingering(EmbeddedChannel channel, HttpConnection connection) { }
 
     /** A connection that has answered a malformed request and now lingers. */
-    private static Lingering lingering(com.jsgalactic.axiom.application.Application app, RequestDispatcher executor,
+    private static Lingering lingering(Application app, RequestDispatcher executor,
             TransportSettings settings, ConnectionSlots.Slot slot) {
         var channel = new DuplexEmbeddedChannel();
         channel.freezeTime();
