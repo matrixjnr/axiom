@@ -5,7 +5,7 @@ jmh = "1.37"
 netty = "4.2.19.Final"
 jackson = "2.22.3"
 jakarta-validation = "3.1.1"
-hibernate-validator = "9.1.4.Final"
+hibernate-validator = "9.1.5.Final"
 # JaCoCo agent and report tool, used through the Gradle jacoco plugin (toolVersion).
 jacoco = "0.8.15"
 # Swagger UI static files, packaged as a WebJar and served by axiom-openapi-ui (no CDN at run time).
