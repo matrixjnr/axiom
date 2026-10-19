@@ -9,7 +9,7 @@ hibernate-validator = "9.1.4.Final"
 # JaCoCo agent and report tool, used through the Gradle jacoco plugin (toolVersion).
 jacoco = "0.8.15"
 # Swagger UI static files, packaged as a WebJar and served by axiom-openapi-ui (no CDN at run time).
-swagger-ui = "5.33.1"
+swagger-ui = "5.33.2"
 # Checkstyle, used through the Gradle checkstyle plugin (toolVersion).
 checkstyle = "14.3.0"
 japicmp = "0.26.3"
