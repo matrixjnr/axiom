@@ -12,7 +12,7 @@ jacoco = "0.8.15"
 swagger-ui = "5.33.1"
 # Checkstyle, used through the Gradle checkstyle plugin (toolVersion).
 checkstyle = "14.3.0"
-japicmp = "0.26.3"
+japicmp = "0.26.5"
 asm = "9.11"
 
 [libraries]
