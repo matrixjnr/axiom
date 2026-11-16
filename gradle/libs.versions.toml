@@ -2,18 +2,18 @@
 junit = "6.1.3"
 assertj = "3.27.7"
 jmh = "1.37"
-netty = "4.2.19.Final"
-jackson = "2.22.3"
+netty = "4.2.20.Final"
+jackson = "2.23.0"
 jakarta-validation = "3.1.1"
-hibernate-validator = "9.1.4.Final"
+hibernate-validator = "9.1.6.Final"
 # JaCoCo agent and report tool, used through the Gradle jacoco plugin (toolVersion).
 jacoco = "0.8.15"
 # Swagger UI static files, packaged as a WebJar and served by axiom-openapi-ui (no CDN at run time).
-swagger-ui = "5.33.1"
+swagger-ui = "5.34.1"
 # Checkstyle, used through the Gradle checkstyle plugin (toolVersion).
 checkstyle = "14.3.0"
-japicmp = "0.26.3"
-asm = "9.11"
+japicmp = "0.27.0"
+asm = "9.11.1"
 
 [libraries]
 japicmp = { module = "com.github.siom79.japicmp:japicmp", version.ref = "japicmp" }
