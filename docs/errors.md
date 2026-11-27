@@ -339,9 +339,12 @@ target is safe: never redirect to a client-supplied URL without checking it.
 
 ## Not covered
 
-Some statuses are deliberately not modeled: 1xx other than the listener's own
-`100 Continue` (no 101 upgrades or 103 hints), 206 and 416 (no range requests),
-conditional-request evaluation (applications may still return 304, 412 and 428
-themselves), 300 and 305, WebDAV statuses (207, 423, 424, 507 and others), 418,
+Some statuses have no dedicated exception: 1xx other than the listener's own
+`100 Continue` (no 101 upgrades or 103 hints), 206 and 416, which the opt-in
+[conditional and range middleware](http.md#conditional-and-range-requests)
+produces, 300 and 305, WebDAV statuses (207, 423, 424, 507 and others), 418,
 421, 425, 451 and 511. Applications can use any final status with
-`Response.of(status, body)` or a custom `AxiomException` subclass.
+`Response.of(status, body)` or a custom `AxiomException` subclass. For the
+conditional statuses, `PreconditionFailedException` answers 412 and
+`PreconditionRequiredException` answers 428; a bodiless 304 is returned with
+`Response.of(304, null)`.

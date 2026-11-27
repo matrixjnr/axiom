@@ -12,6 +12,8 @@ public final class HttpStatus {
     /** 202 Accepted. */ public static final int ACCEPTED = 202;
     /** 204 No Content; never carries a body. */ public static final int NO_CONTENT = 204;
     /** 205 Reset Content; never carries a body. */ public static final int RESET_CONTENT = 205;
+    /** 206 Partial Content; carries one range or a multipart/byteranges body. */
+    public static final int PARTIAL_CONTENT = 206;
     /** 301 Moved Permanently. */ public static final int MOVED_PERMANENTLY = 301;
     /** 302 Found. */ public static final int FOUND = 302;
     /** 303 See Other. */ public static final int SEE_OTHER = 303;
@@ -32,6 +34,8 @@ public final class HttpStatus {
     /** 413 Content Too Large. */ public static final int CONTENT_TOO_LARGE = 413;
     /** 414 URI Too Long. */ public static final int URI_TOO_LONG = 414;
     /** 415 Unsupported Media Type. */ public static final int UNSUPPORTED_MEDIA_TYPE = 415;
+    /** 416 Range Not Satisfiable; carries Content-Range with an asterisk. */
+    public static final int RANGE_NOT_SATISFIABLE = 416;
     /** 417 Expectation Failed. */ public static final int EXPECTATION_FAILED = 417;
     /** 422 Unprocessable Content. */ public static final int UNPROCESSABLE_CONTENT = 422;
     /** 428 Precondition Required. */ public static final int PRECONDITION_REQUIRED = 428;
@@ -62,6 +66,7 @@ public final class HttpStatus {
             case ACCEPTED -> "Accepted";
             case NO_CONTENT -> "No Content";
             case RESET_CONTENT -> "Reset Content";
+            case PARTIAL_CONTENT -> "Partial Content";
             case MOVED_PERMANENTLY -> "Moved Permanently";
             case FOUND -> "Found";
             case SEE_OTHER -> "See Other";
@@ -82,6 +87,7 @@ public final class HttpStatus {
             case CONTENT_TOO_LARGE -> "Content Too Large";
             case URI_TOO_LONG -> "URI Too Long";
             case UNSUPPORTED_MEDIA_TYPE -> "Unsupported Media Type";
+            case RANGE_NOT_SATISFIABLE -> "Range Not Satisfiable";
             case EXPECTATION_FAILED -> "Expectation Failed";
             case UNPROCESSABLE_CONTENT -> "Unprocessable Content";
             case PRECONDITION_REQUIRED -> "Precondition Required";

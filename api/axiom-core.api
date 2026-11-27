@@ -593,6 +593,63 @@ public interface com.jsgalactic.axiom.http.BodyWriter {
     descriptor: (Ljava/lang/String;)V
 }
 
+public final class com.jsgalactic.axiom.http.ByteRange extends java.lang.Record {
+  public com.jsgalactic.axiom.http.ByteRange(long, long);
+    descriptor: (JJ)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String contentRange(long);
+    descriptor: (J)Ljava/lang/String;
+  public long first();
+    descriptor: ()J
+  public long last();
+    descriptor: ()J
+  public long length();
+    descriptor: ()J
+}
+
+public final class com.jsgalactic.axiom.http.ByteRanges extends java.lang.Record {
+  public com.jsgalactic.axiom.http.ByteRanges(java.util.List<com.jsgalactic.axiom.http.ByteRange>);
+    descriptor: (Ljava/util/List;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.util.List<com.jsgalactic.axiom.http.ByteRange> ranges();
+    descriptor: ()Ljava/util/List;
+  public static final int MAX_RANGES = 8;
+    descriptor: I
+  public static java.util.Optional<com.jsgalactic.axiom.http.ByteRanges> parse(java.lang.String, long);
+    descriptor: (Ljava/lang/String;J)Ljava/util/Optional;
+}
+
+public final class com.jsgalactic.axiom.http.EntityTag extends java.lang.Record {
+  public boolean strongMatches(com.jsgalactic.axiom.http.EntityTag);
+    descriptor: (Lcom/jsgalactic/axiom/http/EntityTag;)Z
+  public boolean weak();
+    descriptor: ()Z
+  public boolean weakMatches(com.jsgalactic.axiom.http.EntityTag);
+    descriptor: (Lcom/jsgalactic/axiom/http/EntityTag;)Z
+  public com.jsgalactic.axiom.http.EntityTag(boolean, java.lang.String);
+    descriptor: (ZLjava/lang/String;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public java.lang.String opaqueTag();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public static java.util.Optional<com.jsgalactic.axiom.http.EntityTag> parse(java.lang.String);
+    descriptor: (Ljava/lang/String;)Ljava/util/Optional;
+}
+
 public interface com.jsgalactic.axiom.http.EventSink {
   public abstract long bytesWritten();
     descriptor: ()J
@@ -615,6 +672,17 @@ public interface com.jsgalactic.axiom.http.EventSink {
 public interface com.jsgalactic.axiom.http.EventStreamBody {
   public abstract void run(com.jsgalactic.axiom.http.EventSink) throws java.lang.Exception;
     descriptor: (Lcom/jsgalactic/axiom/http/EventSink;)V
+}
+
+public final class com.jsgalactic.axiom.http.HttpPreconditions {
+  public static com.jsgalactic.axiom.context.Middleware conditional();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public static com.jsgalactic.axiom.context.Middleware preconditionRequired();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public static com.jsgalactic.axiom.http.Response evaluate(com.jsgalactic.axiom.http.Request, com.jsgalactic.axiom.http.Response);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;Lcom/jsgalactic/axiom/http/Response;)Lcom/jsgalactic/axiom/http/Response;
+  public static final java.lang.String BOUNDARY = "axiom-byteranges-boundary";
+    descriptor: Ljava/lang/String;
 }
 
 public final class com.jsgalactic.axiom.http.HttpStatus {
@@ -662,11 +730,15 @@ public final class com.jsgalactic.axiom.http.HttpStatus {
     descriptor: I
   public static final int OK = 200;
     descriptor: I
+  public static final int PARTIAL_CONTENT = 206;
+    descriptor: I
   public static final int PERMANENT_REDIRECT = 308;
     descriptor: I
   public static final int PRECONDITION_FAILED = 412;
     descriptor: I
   public static final int PRECONDITION_REQUIRED = 428;
+    descriptor: I
+  public static final int RANGE_NOT_SATISFIABLE = 416;
     descriptor: I
   public static final int REQUEST_HEADER_FIELDS_TOO_LARGE = 431;
     descriptor: I
