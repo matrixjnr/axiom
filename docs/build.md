@@ -435,6 +435,8 @@ the Gradle cache of `gradle/actions/setup-gradle`:
 | `unit` | `./gradlew <module>:test -Daxiom.requireAllocationTests=true -Daxiom.collectCoverage=true`, one job per module listed by `matrix`; uploads the module's test report on failure and its `test.exec` as `jacoco-unit-<module>` | 20 min |
 | `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true -Daxiom.collectCoverage=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure and all `integrationTest.exec` files as `jacoco-integration` | 30 min |
 | `quality` | downloads the `jacoco-*` artifacts, runs `./gradlew aggregateCoverage`, uploads `build/reports/jacoco/aggregateCoverage/` (XML and HTML) as `coverage-report`, then the hello smoke run `./gradlew :examples:hello:run --args="--smoke"` | 30 min |
+| `stress` | repeats `:axiom-http:integrationTest` three times with every CPU busy; diagnostic only, not needed by `check` | 30 min |
+| `cross-os` | runs `:axiom-http:integrationTest` on macOS and Windows runners so the socket-buffer assumptions are exercised beyond Linux; diagnostic only | 30 min |
 | `check` | needs `build`, `matrix`, `unit`, `integration` and `quality` and fails unless each succeeded (it runs even when one failed or was cancelled) | 5 min |
 | `commits` | pull requests only: `./gradlew clean check` on each commit (below) | 90 min |
 
