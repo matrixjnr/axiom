@@ -42,17 +42,39 @@ public final class Response {
 
     /**
      * The body of a streamed response: what writes it, the most bytes it may write, its own
-     * lifetime (null for the request deadline) and the observers told how it ended.
+     * lifetime (null for the request deadline), the observers told how it ended, and, for a
+     * representation of known length, that length and a writer that can produce any of its slices.
      */
     private record Streaming(StreamBody writer, long maxBytes, Duration lifetime,
-            List<Consumer<StreamOutcome>> observers) {
-        Streaming withWriter(StreamBody replacement) { return new Streaming(replacement, maxBytes, lifetime, observers); }
-        Streaming withLifetime(Duration replacement) { return new Streaming(writer, maxBytes, replacement, observers); }
+            List<Consumer<StreamOutcome>> observers, Long length, SliceWriter slices) {
+        Streaming withWriter(StreamBody replacement) {
+            return new Streaming(replacement, maxBytes, lifetime, observers, length, slices);
+        }
+        Streaming withLifetime(Duration replacement) {
+            return new Streaming(writer, maxBytes, replacement, observers, length, slices);
+        }
         Streaming withObserver(Consumer<StreamOutcome> observer) {
             var all = new ArrayList<>(observers);
             all.add(observer);
-            return new Streaming(writer, maxBytes, lifetime, List.copyOf(all));
+            return new Streaming(writer, maxBytes, lifetime, List.copyOf(all), length, slices);
         }
+    }
+
+    /**
+     * Writes one inclusive slice of a stream whose total representation length is known. Used by
+     * range evaluation on responses built with {@link #slicedStream}; not application API.
+     */
+    @FunctionalInterface
+    interface SliceWriter {
+        /**
+         * Writes the bytes from {@code first} through {@code last}, inclusive.
+         *
+         * @param out destination
+         * @param first first byte offset
+         * @param last last byte offset, inclusive
+         * @throws Exception if the slice cannot be written
+         */
+        void writeTo(BodyWriter out, long first, long last) throws Exception;
     }
 
     private Response(int status, Object body, Map<String, String> headers) {
@@ -125,7 +147,44 @@ public final class Response {
     public static Response stream(int status, String contentType, long maxBytes, StreamBody body) {
         Objects.requireNonNull(body, "body");
         if (maxBytes <= 0) { throw new IllegalArgumentException("Stream limit must be positive"); }
-        return new Response(status, new Streaming(body, maxBytes, null, List.of()), Map.of()).withHeader("Content-Type", contentType);
+        return new Response(status, new Streaming(body, maxBytes, null, List.of(), null, null), Map.of())
+                .withHeader("Content-Type", contentType);
+    }
+
+    /**
+     * Creates a streamed response of a representation whose total length is known and whose bytes
+     * can be written as any inclusive slice. Conditional and range middleware can evaluate it as
+     * it evaluates a buffered body, producing 206 and 416 without buffering the representation.
+     * A slice writer must write exactly the requested bytes and must be safe to call more than
+     * once; it is called after the response head has been sent, with the same cancellation rules
+     * as any {@link StreamBody}.
+     *
+     * @param status final HTTP status (200-599) other than 204, 205 and 304
+     * @param contentType Content-Type header value
+     * @param length total representation length, not negative
+     * @param maxBytes most body bytes the stream may write; positive
+     * @param slices writes an inclusive slice of the representation
+     * @return a streamed response with a known representation length
+     * @throws IllegalArgumentException for a status that cannot carry a body, a negative length,
+     *         a non-positive cap or an invalid content type
+     */
+    static Response slicedStream(int status, String contentType, long length, long maxBytes, SliceWriter slices) {
+        Objects.requireNonNull(slices, "slices");
+        if (length < 0) { throw new IllegalArgumentException("Representation length cannot be negative"); }
+        if (maxBytes <= 0) { throw new IllegalArgumentException("Stream limit must be positive"); }
+        StreamBody writer = out -> slices.writeTo(out, 0, length - 1);
+        var streaming = new Streaming(writer, maxBytes, null, List.of(), length, slices);
+        return new Response(status, streaming, Map.of()).withHeader("Content-Type", contentType);
+    }
+
+    /** Returns the known total length of a sliced stream, or null for any other response. */
+    Long representationLength() {
+        return body instanceof Streaming stream ? stream.length : null;
+    }
+
+    /** Returns the slice writer of a sliced stream, or null for any other response. */
+    SliceWriter sliceWriter() {
+        return body instanceof Streaming stream ? stream.slices : null;
     }
 
     /**

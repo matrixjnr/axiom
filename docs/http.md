@@ -251,19 +251,61 @@ validators (`Content-Location`, `ETag`, `Expires`, `Vary`, `Cache-Control`,
 `Last-Modified`).
 
 Evaluation applies to buffered responses after encoding: byte arrays, and
-strings read as UTF-8 bytes. **Streamed responses are deliberately left
-unchanged.** A stream has no total length, so neither a byte range nor a 416
-with `bytes */length` can be defined for it; an application that needs ranges
-over a large body must slice the data itself before streaming it. A multipart
-body also counts toward the [1 MiB buffered response limit](#resource-limits),
-so a request for many overlapping ranges can exceed it; cap the ranges or slice
-the data in the application for large bodies.
+strings read as UTF-8 bytes. It also applies to a stream whose response declares
+a total representation length and a slice writer, such as the files served by
+[`StaticFiles`](#serving-static-files): ranges are written from those slices, so
+206 and 416 need no buffer. An **ordinary stream is deliberately left
+unchanged.** A stream without a declared length has no total against which a
+byte range or a 416 with `bytes */length` can be defined; an application that
+needs ranges over such a body must slice the data itself before streaming it. A
+multipart body over a buffered response also counts toward the
+[1 MiB buffered response limit](#resource-limits), so a request for many overlapping
+ranges can exceed it; cap the ranges or slice the data in the application for
+large bodies.
 
 `HttpPreconditions.preconditionRequired()` answers **428** with code
 `precondition_required` when an unsafe method (anything other than GET, HEAD,
 OPTIONS or TRACE) carries none of `If-Match`, `If-None-Match` or
 `If-Unmodified-Since`. Registering either middleware has no effect on requests
 that carry no conditional fields, and both are immutable and thread-safe.
+
+## Serving static files
+
+`StaticFiles` in `axiom-core` is an opt-in handler for files from a directory or
+a classpath location. There is no new dependency, no transport hook and no
+server mode: register it on a route with a terminal wildcard and, when
+conditional and range answers are wanted, register the middleware above.
+
+```java
+app.use(HttpPreconditions.conditional()); // optional: 304, 412, 206 and 416 for files
+app.get("/assets/*path", StaticFiles.directory(Path.of("public")).build());
+app.get("/ui/*path", StaticFiles.classpath("web/ui")
+        .maxFileSize(8L * 1024 * 1024)
+        .cacheControl("public, max-age=3600")
+        .build());
+```
+
+The wildcard capture (named `path` by default, change it with `capture(name)`)
+is the file path. It passes the [raw-path policy](routing.md#raw-paths-and-ownership)
+before any file system access: empty and dot segments, backslashes, controls and
+NUL, malformed escapes and encoded dot, slash, backslash or NUL answer 400.
+Remaining escapes are decoded once as strict UTF-8, then normalized and checked
+for containment; symbolic links are followed only while their target stays under
+the root. Missing files, directories and targets outside the root answer 404,
+and files above `maxFileSize` (64 MiB by default) answer 413. All three are
+problem responses with fixed codes and no path or file system detail.
+
+Every file response carries `Content-Type` from a bounded built-in extension
+table (override individual extensions with `contentType(extension, value)`),
+`Cache-Control`, `Accept-Ranges: bytes`, a strong SHA-256 `ETag` and, when the
+source supplies a time, `Last-Modified`. GET streams the file in bounded pieces
+through the normal [response stream](streaming.md) path, so a 64 MiB file does
+not become a 64 MiB heap array; the stream is cancelled with the request. HEAD
+sends no body and advertises the representation's `Content-Length`. The handler
+is immutable and thread-safe; one instance can serve any number of routes.
+A file replaced between hashing and streaming can produce an `ETag` for one
+version and bytes from another, so publish immutable files when that matters;
+JAR entries that carry no usable timestamp are served without `Last-Modified`.
 
 ## Resource limits
 

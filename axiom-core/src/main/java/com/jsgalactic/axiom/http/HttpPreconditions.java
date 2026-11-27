@@ -3,6 +3,7 @@ package com.jsgalactic.axiom.http;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.error.PreconditionRequiredException;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -47,11 +48,13 @@ import java.util.regex.Pattern;
  * response carries {@code Accept-Ranges: bytes}.
  *
  * <p>The evaluation applies to buffered responses after encoding: byte arrays,
- * and strings read as UTF-8 bytes. Streamed responses pass through unchanged
- * because a stream has no total length against which a byte range or
- * unsatisfiability can be defined; applications that need ranges over large
- * bodies must slice the data before streaming it. Responses with another
- * status, such as the router's own 404, are also left untouched.
+ * and strings read as UTF-8 bytes. It also applies to streamed responses that
+ * declare a total representation length and a slice writer, such as those built
+ * by {@link StaticFiles}: a range is written from the declared slices, so 206
+ * and 416 need no buffer. An ordinary stream passes through unchanged because
+ * it has no total length; applications that need ranges over such a body must
+ * slice the data before streaming it. Responses with another status, such as
+ * the router's own 404, are also left untouched.
  *
  * <p>Both middleware are immutable and thread-safe; one instance may serve
  * every request. {@link #evaluate(Request, Response)} is the same decision as
@@ -62,6 +65,8 @@ import java.util.regex.Pattern;
 public final class HttpPreconditions {
     /** Boundary of every multipart range body, chosen so responses are reproducible. */
     public static final String BOUNDARY = "axiom-byteranges-boundary";
+
+    private static final String DEFAULT_STREAM_TYPE = "application/octet-stream";
 
     private static final List<String> VALIDATORS = List.of(
             "Content-Location", "ETag", "Expires", "Vary", "Cache-Control", "Last-Modified");
@@ -116,13 +121,13 @@ public final class HttpPreconditions {
     /**
      * Evaluates the request's preconditions and ranges against a response.
      *
-     * <p>The response is returned unchanged when it is not successful, is
-     * streamed, or has no buffered bytes, and when no conditional field applies.
-     * A failed precondition yields a bodiless 412 or 304 response carrying the
-     * original cache validators. A GET with a satisfiable range yields 206; with
-     * a malformed, excessive or unsatisfiable range it yields a bodiless 416
-     * with an asterisk {@code Content-Range}. A mismatching {@code If-Range}
-     * leaves the whole 200 response intact.
+     * <p>The response is returned unchanged when it is not successful, is an
+     * ordinary stream without a declared length, or has no buffered bytes, and
+     * when no conditional field applies. A failed precondition yields a bodiless
+     * 412 or 304 response carrying the original cache validators. A GET with a
+     * satisfiable range yields 206; with a malformed, excessive or unsatisfiable
+     * range it yields a bodiless 416 with an asterisk {@code Content-Range}. A
+     * mismatching {@code If-Range} leaves the whole 200 response intact.
      *
      * @param request the request whose conditional fields are evaluated
      * @param response the response selected for the request
@@ -131,9 +136,19 @@ public final class HttpPreconditions {
     public static Response evaluate(Request request, Response response) {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(response, "response");
-        if (response.status() < 200 || response.status() >= 300 || response.isStreaming()) { return response; }
+        if (response.status() < 200 || response.status() >= 300) { return response; }
 
         var method = request.method();
+        var failed = conditional(request, response, method);
+        if (failed != null) { return failed; }
+        var length = response.representationLength();
+        if (length != null) { return slicedRanges(request, response, length); }
+        if (response.isStreaming()) { return response; }
+        return bufferedRanges(request, response, method);
+    }
+
+    /** Returns the first failed condition's response, or null when the request may proceed. */
+    private static Response conditional(Request request, Response response, String method) {
         boolean cacheValidation = method.equals("GET") || method.equals("HEAD");
         var ifMatch = request.header("If-Match");
         if (ifMatch.isPresent() && !matches(ifMatch.get(), response, true)) {
@@ -159,11 +174,13 @@ public final class HttpPreconditions {
                 return bodiless(304, response);
             }
         }
+        return null;
+    }
 
+    /** Evaluates a range against a buffered representation, without streaming it. */
+    private static Response bufferedRanges(Request request, Response response, String method) {
         var range = request.header("Range");
-        if (range.isEmpty() || !method.equals("GET")) { return response; }
-        var ifRange = request.header("If-Range");
-        if (ifRange.isPresent() && !ifRangeMatches(ifRange.get(), response)) { return response; }
+        if (range.isEmpty() || !method.equals("GET") || !rangeApplies(request, response)) { return response; }
         byte[] bytes = buffered(response);
         if (bytes == null || response.status() != 200) { return response; }
         var parsed = ByteRanges.parse(range.get(), bytes.length);
@@ -171,6 +188,56 @@ public final class HttpPreconditions {
         return parsed.get().ranges().size() == 1
                 ? single(response, bytes, parsed.get().ranges().getFirst())
                 : multipart(response, bytes, parsed.get().ranges());
+    }
+
+    /** Evaluates a range against a stream whose representation length and slices are known. */
+    private static Response slicedRanges(Request request, Response response, long length) {
+        var range = request.header("Range");
+        if (range.isEmpty() || !request.method().equals("GET") || !rangeApplies(request, response)) { return response; }
+        var parsed = ByteRanges.parse(range.get(), length);
+        if (parsed.isEmpty()) { return unsatisfiable(response, length); }
+        var ranges = parsed.get().ranges();
+        var slices = response.sliceWriter();
+        return ranges.size() == 1
+                ? singleSlice(response, slices, ranges.getFirst(), length)
+                : multipartSlices(response, slices, ranges, length);
+    }
+
+    private static boolean rangeApplies(Request request, Response response) {
+        var ifRange = request.header("If-Range");
+        return ifRange.isEmpty() || ifRangeMatches(ifRange.get(), response);
+    }
+
+    private static Response singleSlice(Response original, Response.SliceWriter slices, ByteRange range, long length) {
+        var type = header(original, "Content-Type").orElse(DEFAULT_STREAM_TYPE);
+        var sliced = Response.stream(HttpStatus.PARTIAL_CONTENT, type, original.streamLimit(),
+                out -> slices.writeTo(out, range.first(), range.last()));
+        return copyHeaders(sliced, original, true)
+                .withHeader("Content-Range", range.contentRange(length))
+                .withHeader("Accept-Ranges", "bytes");
+    }
+
+    private static Response multipartSlices(Response original, Response.SliceWriter slices,
+            List<ByteRange> ranges, long length) {
+        var type = header(original, "Content-Type").orElse(DEFAULT_STREAM_TYPE);
+        var boundaryType = "multipart/byteranges; boundary=" + BOUNDARY;
+        var stream = Response.stream(HttpStatus.PARTIAL_CONTENT, boundaryType, original.streamLimit(), out -> {
+            for (var range : ranges) {
+                ascii(out, "--" + BOUNDARY + "\r\n");
+                ascii(out, "Content-Type: " + type + "\r\n");
+                ascii(out, "Content-Range: " + range.contentRange(length) + "\r\n\r\n");
+                slices.writeTo(out, range.first(), range.last());
+                ascii(out, "\r\n");
+            }
+            ascii(out, "--" + BOUNDARY + "--\r\n");
+        });
+        return copyHeaders(stream, original, false)
+                .withHeader("Content-Type", boundaryType)
+                .withHeader("Accept-Ranges", "bytes");
+    }
+
+    private static void ascii(BodyWriter out, String text) throws IOException {
+        out.write(text.getBytes(StandardCharsets.ISO_8859_1));
     }
 
     private static boolean matches(String value, Response response, boolean strong) {
@@ -219,7 +286,7 @@ public final class HttpPreconditions {
         return result;
     }
 
-    private static Response unsatisfiable(Response original, int length) {
+    private static Response unsatisfiable(Response original, long length) {
         return bodiless(HttpStatus.RANGE_NOT_SATISFIABLE, original)
                 .withHeader("Accept-Ranges", "bytes")
                 .withHeader("Content-Range", "bytes */" + length);

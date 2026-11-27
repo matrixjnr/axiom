@@ -398,6 +398,19 @@ containment check (for example, normalizing a `Path` and verifying its prefix).
 Typed conversion is in [typed parameters](#typed-parameters); request body limits are
 described in [request bodies](bodies.md).
 
+### Static file paths
+
+A handler that turns a wildcard remainder into a file path must do its own containment
+check, because a capture is client input even though dot segments and encoded separators
+cannot reach it. The JDK-only `StaticFiles` helper in `axiom-core` does that work: it
+validates the raw capture against the path policy above before touching the file system,
+percent-decodes each segment once, normalizes only afterwards, resolves symbolic links
+only while their target remains under the configured root, and answers 400, 404 or 413
+with a fixed problem code instead of a path or a file system message. It serves GET and
+HEAD, streams files under a configurable size bound, and carries validators that
+[conditional middleware](http.md#conditional-and-range-requests) can use. See
+[serving static files](http.md#serving-static-files) for the registration example.
+
 ## Query parameters
 
 The query is everything after the first `?` of the request target, without the

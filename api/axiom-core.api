@@ -1066,6 +1066,34 @@ public final class com.jsgalactic.axiom.http.ServerSentEvent {
     descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/ServerSentEvent;
 }
 
+public final class com.jsgalactic.axiom.http.StaticFiles {
+  public static com.jsgalactic.axiom.http.StaticFiles$Builder classpath(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/StaticFiles$Builder;
+  public static com.jsgalactic.axiom.http.StaticFiles$Builder classpath(java.lang.String, java.lang.ClassLoader);
+    descriptor: (Ljava/lang/String;Ljava/lang/ClassLoader;)Lcom/jsgalactic/axiom/http/StaticFiles$Builder;
+  public static com.jsgalactic.axiom.http.StaticFiles$Builder directory(java.nio.file.Path);
+    descriptor: (Ljava/nio/file/Path;)Lcom/jsgalactic/axiom/http/StaticFiles$Builder;
+  public static final java.lang.String DEFAULT_CACHE_CONTROL = "public, max-age=3600";
+    descriptor: Ljava/lang/String;
+  public static final java.lang.String DEFAULT_CONTENT_TYPE = "application/octet-stream";
+    descriptor: Ljava/lang/String;
+  public static final long DEFAULT_MAX_FILE_SIZE = 67108864l;
+    descriptor: J
+}
+
+public static final class com.jsgalactic.axiom.http.StaticFiles$Builder {
+  public com.jsgalactic.axiom.context.Handler build();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Handler;
+  public com.jsgalactic.axiom.http.StaticFiles$Builder cacheControl(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/StaticFiles$Builder;
+  public com.jsgalactic.axiom.http.StaticFiles$Builder capture(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/StaticFiles$Builder;
+  public com.jsgalactic.axiom.http.StaticFiles$Builder contentType(java.lang.String, java.lang.String);
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/StaticFiles$Builder;
+  public com.jsgalactic.axiom.http.StaticFiles$Builder maxFileSize(long);
+    descriptor: (J)Lcom/jsgalactic/axiom/http/StaticFiles$Builder;
+}
+
 public final class com.jsgalactic.axiom.http.StreamAbortedException extends java.io.IOException {
   public com.jsgalactic.axiom.http.StreamAbortedException$Reason reason();
     descriptor: ()Lcom/jsgalactic/axiom/http/StreamAbortedException$Reason;
