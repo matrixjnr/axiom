@@ -52,7 +52,7 @@ class StaticFilesIntegrationTest {
   private Application application(long max) throws Exception {
     Files.writeString(root.resolve("hello.txt"), CONTENT);
     Files.writeString(root.resolve("large.txt"), CONTENT.repeat(10));
-    Files.writeString(root.resolve("huge.txt"), "x".repeat(64 * 1024));
+    Files.writeString(root.resolve("huge.txt"), "x".repeat(2 * 1024 * 1024));
     app = Axiom.create();
     app.use(HttpPreconditions.conditional());
     app.get("/files/*path", StaticFiles.directory(root).maxFileSize(max).build());
@@ -121,7 +121,7 @@ class StaticFilesIntegrationTest {
 
   @Test
   void aStreamCanBeReadIncrementallyAndCancelled() throws Exception {
-    try (var client = TestClient.start(application(1024 * 1024))) {
+    try (var client = TestClient.start(application(4 * 1024 * 1024))) {
       try (var stream = client.stream(get("/files/large.txt"))) {
         assertThat(stream.status()).isEqualTo(200);
         assertThat(stream.readAllText()).isEqualTo(CONTENT.repeat(10));
