@@ -12,26 +12,42 @@ import io.netty.handler.timeout.IdleStateEvent;
  * when the last of those streams ends, and the listener's grace period still bounds the wait.
  */
 final class Http2GracefulCloseHandler extends ChannelInboundHandlerAdapter {
-    private final Http2Streams streams;
-    private ChannelHandlerContext context;
-    private boolean gone;
+  private final Http2Streams streams;
+  private ChannelHandlerContext context;
+  private boolean gone;
 
-    Http2GracefulCloseHandler(Http2Streams streams) { this.streams = streams; }
+  Http2GracefulCloseHandler(Http2Streams streams) {
+    this.streams = streams;
+  }
 
-    @Override public void handlerAdded(ChannelHandlerContext ctx) { context = ctx; }
+  @Override
+  public void handlerAdded(ChannelHandlerContext ctx) {
+    context = ctx;
+  }
 
-    @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
-        if (event instanceof IdleStateEvent && !streams.busy()) { goAway(); }
-        else { super.userEventTriggered(ctx, event); }
+  @Override
+  public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
+    if (event instanceof IdleStateEvent && !streams.busy()) {
+      goAway();
+    } else {
+      super.userEventTriggered(ctx, event);
     }
+  }
 
-    /** Called from the listener's event loop when shutdown begins; idempotent. */
-    void goAway() {
-        if (gone || !context.channel().isActive()) { return; }
-        gone = true;
-        context.writeAndFlush(new DefaultHttp2GoAwayFrame(Http2Error.NO_ERROR)).addListener(written -> {
-            if (!written.isSuccess()) { context.close(); }
-        });
-        streams.closeWhenDone();
+  /** Called from the listener's event loop when shutdown begins; idempotent. */
+  void goAway() {
+    if (gone || !context.channel().isActive()) {
+      return;
     }
+    gone = true;
+    context
+        .writeAndFlush(new DefaultHttp2GoAwayFrame(Http2Error.NO_ERROR))
+        .addListener(
+            written -> {
+              if (!written.isSuccess()) {
+                context.close();
+              }
+            });
+    streams.closeWhenDone();
+  }
 }

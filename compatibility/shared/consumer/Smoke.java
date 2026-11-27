@@ -16,12 +16,15 @@ import java.util.concurrent.TimeUnit;
 /** Starts an application from published artifacts and checks a plain and a JSON response. */
 public final class Smoke {
     /** JSON request body. */
-    public record Greeting(String name) { }
+    public record Greeting(String name) {
+    }
 
     /** JSON response body. */
-    public record Reply(String message) { }
+    public record Reply(String message) {
+    }
 
-    private Smoke() {}
+    private Smoke() {
+    }
 
     /**
      * Runs the smoke test.

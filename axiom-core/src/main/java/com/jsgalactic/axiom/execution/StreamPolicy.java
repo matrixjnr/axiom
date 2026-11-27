@@ -11,23 +11,25 @@ package com.jsgalactic.axiom.execution;
  * @param maxActive maximum number of concurrently active streams
  */
 public record StreamPolicy(int maxActive) {
-    /**
-     * Validates the bound before it can be installed.
-     * @param maxActive positive active limit
-     * @throws IllegalArgumentException if the limit is not positive
-     */
-    public StreamPolicy {
-        if (maxActive < 1) {
-            throw new IllegalArgumentException("Stream capacity must be positive");
-        }
+  /**
+   * Validates the bound before it can be installed.
+   *
+   * @param maxActive positive active limit
+   * @throws IllegalArgumentException if the limit is not positive
+   */
+  public StreamPolicy {
+    if (maxActive < 1) {
+      throw new IllegalArgumentException("Stream capacity must be positive");
     }
+  }
 
-    /**
-     * Configures immediate refusal when the active limit is occupied.
-     * @param maxActive positive active limit
-     * @return policy that refuses a new stream with 503 when all slots are taken
-     */
-    public static StreamPolicy reject(int maxActive) {
-        return new StreamPolicy(maxActive);
-    }
+  /**
+   * Configures immediate refusal when the active limit is occupied.
+   *
+   * @param maxActive positive active limit
+   * @return policy that refuses a new stream with 503 when all slots are taken
+   */
+  public static StreamPolicy reject(int maxActive) {
+    return new StreamPolicy(maxActive);
+  }
 }

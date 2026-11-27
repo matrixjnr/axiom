@@ -12,10 +12,11 @@ package com.jsgalactic.axiom.observability;
  */
 @FunctionalInterface
 public interface HealthCheck {
-    /**
-     * Evaluates the condition.
-     * @return true when healthy
-     * @throws Exception if the condition cannot be determined, which counts as unhealthy
-     */
-    boolean isHealthy() throws Exception;
+  /**
+   * Evaluates the condition.
+   *
+   * @return true when healthy
+   * @throws Exception if the condition cannot be determined, which counts as unhealthy
+   */
+  boolean isHealthy() throws Exception;
 }

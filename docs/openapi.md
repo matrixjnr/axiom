@@ -33,15 +33,23 @@ for generic types.
 
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#describe-route -->
 ```java
-var add = app.post("/books", ctx -> {
-    var request = ctx.validatedBody(NewBook.class, NEW_BOOK);
-    var book = new Book(ids.incrementAndGet(), request.title(), request.author(), request.year());
-    books.put(book.id(), book);
-    return ctx.status(201).json(book);
-});
-app.describe(add, RouteDoc.summary("Add a book")
+var add =
+    app.post(
+        "/books",
+        ctx -> {
+          var request = ctx.validatedBody(NewBook.class, NEW_BOOK);
+          var book =
+              new Book(
+                  ids.incrementAndGet(), request.title(), request.author(), request.year());
+          books.put(book.id(), book);
+          return ctx.status(201).json(book);
+        });
+app.describe(
+    add,
+    RouteDoc.summary("Add a book")
         .description("Stores a new book and returns it with its id.")
-        .tags("books").operationId("addBook")
+        .tags("books")
+        .operationId("addBook")
         .requestBody(NewBook.class)
         .response(201, "The stored book", Book.class)
         .response(422, "The book is not valid")
@@ -68,19 +76,32 @@ time types, or a `List`/`Set` of those.
 
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#describe-params -->
 ```java
-var read = app.get("/books/:id", ctx -> {
-    var book = books.get(ctx.pathLong("id"));
-    if (book == null) { throw new NotFoundException("book_not_found"); }
-    return ctx.json(book);
-});
-app.describe(read, RouteDoc.summary("Read a book").tags("books").operationId("readBook")
+var read =
+    app.get(
+        "/books/:id",
+        ctx -> {
+          var book = books.get(ctx.pathLong("id"));
+          if (book == null) {
+            throw new NotFoundException("book_not_found");
+          }
+          return ctx.json(book);
+        });
+app.describe(
+    read,
+    RouteDoc.summary("Read a book")
+        .tags("books")
+        .operationId("readBook")
         .pathParam("id", long.class, "The book id")
         .headerParam("X-Request-Id", UUID.class, "Correlation id, echoed in logs", false)
         .response(200, "The book", Book.class)
         .response(404, "No such book"));
 
 var list = app.get("/books", ctx -> ctx.json(List.copyOf(books.values())));
-app.describe(list, RouteDoc.summary("List books").tags("books").operationId("listBooks")
+app.describe(
+    list,
+    RouteDoc.summary("List books")
+        .tags("books")
+        .operationId("listBooks")
         .queryParam("author", String.class, "Only books by this author", false)
         .response(200, "All books", RouteDoc.listOf(Book.class)));
 ```
@@ -96,10 +117,11 @@ constructors at compile time, which is all the generator reads), an enum, a prim
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#records -->
 ```java
 /** Request body for adding a book. */
-public record NewBook(String title, String author, int year) { }
+public record NewBook(String title, String author, int year) {}
 
 /** A stored book. */
-public record Book(long id, String title, String author, int year) { }
+public record Book(long id, String title, String author, int year) {}
+
 ```
 
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#bean -->
@@ -109,37 +131,66 @@ public record Book(long id, String title, String author, int year) { }
  * fields with public getters and setters, and {@code is} for a primitive boolean.
  */
 public static class Reader {
-    private String name;
-    private boolean active;
-    private List<String> favourites;
+  private String name;
+  private boolean active;
+  private List<String> favourites;
 
-    /** Creates an empty reader, as the JSON codec requires. */
-    public Reader() { }
+  /** Creates an empty reader, as the JSON codec requires. */
+  public Reader() {}
 
-    /** @return the reader's name */
-    public String getName() { return name; }
+  /**
+   * @return the reader's name
+   */
+  public String getName() {
+    return name;
+  }
 
-    /** @param name the reader's name */
-    public void setName(String name) { this.name = name; }
+  /**
+   * @param name the reader's name
+   */
+  public void setName(String name) {
+    this.name = name;
+  }
 
-    /** @return true while the reader is active */
-    public boolean isActive() { return active; }
+  /**
+   * @return true while the reader is active
+   */
+  public boolean isActive() {
+    return active;
+  }
 
-    /** @param active true while the reader is active */
-    public void setActive(boolean active) { this.active = active; }
+  /**
+   * @param active true while the reader is active
+   */
+  public void setActive(boolean active) {
+    this.active = active;
+  }
 
-    /** @return titles the reader likes */
-    public List<String> getFavourites() { return favourites; }
+  /**
+   * @return titles the reader likes
+   */
+  public List<String> getFavourites() {
+    return favourites;
+  }
 
-    /** @param favourites titles the reader likes */
-    public void setFavourites(List<String> favourites) { this.favourites = favourites; }
+  /**
+   * @param favourites titles the reader likes
+   */
+  public void setFavourites(List<String> favourites) {
+    this.favourites = favourites;
+  }
 }
+
 ```
 
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#describe-bean -->
 ```java
 var reader = app.put("/readers/:name", ctx -> ctx.json(ctx.body(Reader.class)));
-app.describe(reader, RouteDoc.summary("Save a reader").tags("readers").operationId("saveReader")
+app.describe(
+    reader,
+    RouteDoc.summary("Save a reader")
+        .tags("readers")
+        .operationId("saveReader")
         .requestBody(Reader.class)
         .response(200, "The saved reader", Reader.class));
 ```
@@ -174,7 +225,8 @@ integer) or a property the type does not have fails generation instead of being 
 
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#openapi -->
 ```java
-var openApi = OpenApi.builder("Books API", "1.0.0")
+var openApi =
+    OpenApi.builder("Books API", "1.0.0")
         .description("Add and read books.")
         .securityScheme("bearer", SecurityScheme.bearer("JWT"))
         .rules(NewBook.class, NEW_BOOK)
@@ -191,11 +243,13 @@ serves it, so register them after every other route:
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#serve -->
 ```java
 if (docsAccess != null) {
-    openApi.serve(app, "/openapi.json", docsAccess);        // OpenAPI 3.1
-    openApi.serveSwagger(app, "/swagger.json", docsAccess); // Swagger 2.0
-    SwaggerUi.builder()                                     // Swagger UI at /docs
-            .spec("OpenAPI 3.1", "/openapi.json").spec("Swagger 2.0", "/swagger.json")
-            .build().register(app, docsAccess);
+  openApi.serve(app, "/openapi.json", docsAccess); // OpenAPI 3.1
+  openApi.serveSwagger(app, "/swagger.json", docsAccess); // Swagger 2.0
+  SwaggerUi.builder() // Swagger UI at /docs
+      .spec("OpenAPI 3.1", "/openapi.json")
+      .spec("Swagger 2.0", "/swagger.json")
+      .build()
+      .register(app, docsAccess);
 }
 ```
 
@@ -265,27 +319,32 @@ middleware as any route, so every policy of `axiom-security` applies.
  * @return middleware for {@code serve(app, path, middleware)} and {@code SwaggerUi.register}
  */
 public static Middleware requirePassword(String password) {
-    var expected = ("docs:" + password).getBytes(StandardCharsets.UTF_8);
-    Authenticator authenticator = new Authenticator() {
-        @Override public Optional<SecurityIdentity> authenticate(Request request) {
-            var header = request.headers().get("Authorization");
-            if (header == null || !header.regionMatches(true, 0, "Basic ", 0, 6)) {
-                return Optional.empty();
+  var expected = ("docs:" + password).getBytes(StandardCharsets.UTF_8);
+  Authenticator authenticator =
+      new Authenticator() {
+        @Override
+        public Optional<SecurityIdentity> authenticate(Request request) {
+          var header = request.headers().get("Authorization");
+          if (header == null || !header.regionMatches(true, 0, "Basic ", 0, 6)) {
+            return Optional.empty();
+          }
+          try {
+            var sent = Base64.getDecoder().decode(header.substring(6).trim());
+            if (MessageDigest.isEqual(sent, expected)) {
+              return Optional.of(new SecurityIdentity("docs", Set.of("docs"), Set.of()));
             }
-            try {
-                var sent = Base64.getDecoder().decode(header.substring(6).trim());
-                if (MessageDigest.isEqual(sent, expected)) {
-                    return Optional.of(new SecurityIdentity("docs", Set.of("docs"), Set.of()));
-                }
-            } catch (IllegalArgumentException notBase64) {
-                // falls through to the same refusal as a wrong password
-            }
-            throw new UnauthorizedException(challenge(), "invalid_credentials");
+          } catch (IllegalArgumentException notBase64) {
+            // falls through to the same refusal as a wrong password
+          }
+          throw new UnauthorizedException(challenge(), "invalid_credentials");
         }
 
-        @Override public String challenge() { return "Basic realm=\"docs\", charset=\"UTF-8\""; }
-    };
-    return Security.of(authenticator).hasRole("docs");
+        @Override
+        public String challenge() {
+          return "Basic realm=\"docs\", charset=\"UTF-8\"";
+        }
+      };
+  return Security.of(authenticator).hasRole("docs");
 }
 ```
 

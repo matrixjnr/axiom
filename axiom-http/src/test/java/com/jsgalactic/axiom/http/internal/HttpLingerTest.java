@@ -21,276 +21,358 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/** After a listener error response the connection half-closes and discards input for a bounded time. */
+/**
+ * After a listener error response the connection half-closes and discards input for a bounded time.
+ */
 class HttpLingerTest {
-    private final RequestDispatcher executor = new RequestDispatcher(4);
-    private final Application app = Axiom.create();
-    private HttpConnection connection;
+  private final RequestDispatcher executor = new RequestDispatcher(4);
+  private final Application app = Axiom.create();
+  private HttpConnection connection;
 
-    @AfterEach void stop() throws Exception {
-        app.close();
-        executor.close();
-        executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+  @AfterEach
+  void stop() throws Exception {
+    app.close();
+    executor.close();
+    executor.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+  }
+
+  private static final class Socket extends DuplexEmbeddedChannel {}
+
+  private Socket socket() {
+    return socket(TransportSettings.DEFAULTS);
+  }
+
+  private Socket socket(TransportSettings settings) {
+    app.maxRequestBody(16);
+    app.start();
+    var channel = new Socket();
+    channel.freezeTime();
+    connection = new HttpConnection(app, executor, settings, null, () -> false);
+    channel
+        .pipeline()
+        .addLast(
+            new RequestDecoder(NettyServer.decoderConfig()), new HttpResponseEncoder(), connection);
+    return channel;
+  }
+
+  @Test
+  void errorResponseHalfClosesAndDiscardsInputUntilTheLingerTimeoutWhileInputKeepsArriving() {
+    app.post(
+        "/",
+        ctx -> {
+          throw new AssertionError("must not execute");
+        });
+    var channel = socket();
+    try {
+      channel.writeInbound(
+          ascii("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 17\r\n\r\n0123456789"));
+      assertThat(outbound(channel)).startsWith("HTTP/1.1 413 ").contains("connection: close");
+      assertThat(channel.outputShutdown).isTrue();
+      assertThat(channel.isActive()).isTrue();
+      // The rest of the body, and anything after it, is released unread.
+      var rest = ascii("0123456POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n");
+      channel.writeInbound(rest);
+      assertThat(rest.refCnt()).isZero();
+      assertThat(channel.<Object>readOutbound()).isNull();
+      // A client still sending keeps the connection lingering up to the total bound.
+      long step = HttpConnection.LINGER_QUIET_TIMEOUT.toMillis() - 1;
+      for (long elapsed = 0; elapsed < HttpConnection.LINGER_TIMEOUT.toMillis() - 1; ) {
+        long advance = Math.min(step, HttpConnection.LINGER_TIMEOUT.toMillis() - 1 - elapsed);
+        channel.advanceTimeBy(advance, TimeUnit.MILLISECONDS);
+        elapsed += advance;
+        channel.runScheduledPendingTasks();
+        assertThat(channel.isActive()).isTrue();
+        var more = ascii("more input");
+        channel.writeInbound(more);
+        assertThat(more.refCnt()).isZero();
+      }
+      channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      channel.finishAndReleaseAll();
     }
+  }
 
-    private static final class Socket extends DuplexEmbeddedChannel { }
-
-    private Socket socket() { return socket(TransportSettings.DEFAULTS); }
-
-    private Socket socket(TransportSettings settings) {
-        app.maxRequestBody(16);
-        app.start();
-        var channel = new Socket();
-        channel.freezeTime();
-        connection = new HttpConnection(app, executor, settings, null, () -> false);
-        channel.pipeline().addLast(new RequestDecoder(NettyServer.decoderConfig()), new HttpResponseEncoder(), connection);
-        return channel;
+  @Test
+  void lingeringEndsOnceTheClientHasBeenQuietForTheQuietPeriod() {
+    var channel = socket();
+    try {
+      channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
+      assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
+      assertThat(channel.outputShutdown).isTrue();
+      channel.advanceTimeBy(
+          HttpConnection.LINGER_QUIET_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isTrue();
+      channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void errorResponseHalfClosesAndDiscardsInputUntilTheLingerTimeoutWhileInputKeepsArriving() {
-        app.post("/", ctx -> { throw new AssertionError("must not execute"); });
-        var channel = socket();
-        try {
-            channel.writeInbound(ascii("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 17\r\n\r\n0123456789"));
-            assertThat(outbound(channel)).startsWith("HTTP/1.1 413 ").contains("connection: close");
-            assertThat(channel.outputShutdown).isTrue();
-            assertThat(channel.isActive()).isTrue();
-            // The rest of the body, and anything after it, is released unread.
-            var rest = ascii("0123456POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n");
-            channel.writeInbound(rest);
-            assertThat(rest.refCnt()).isZero();
-            assertThat(channel.<Object>readOutbound()).isNull();
-            // A client still sending keeps the connection lingering up to the total bound.
-            long step = HttpConnection.LINGER_QUIET_TIMEOUT.toMillis() - 1;
-            for (long elapsed = 0; elapsed < HttpConnection.LINGER_TIMEOUT.toMillis() - 1;) {
-                long advance = Math.min(step, HttpConnection.LINGER_TIMEOUT.toMillis() - 1 - elapsed);
-                channel.advanceTimeBy(advance, TimeUnit.MILLISECONDS);
-                elapsed += advance;
-                channel.runScheduledPendingTasks();
-                assertThat(channel.isActive()).isTrue();
-                var more = ascii("more input");
-                channel.writeInbound(more);
-                assertThat(more.refCnt()).isZero();
-            }
-            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isFalse();
-        } finally { channel.finishAndReleaseAll(); }
+  @Test
+  void inputRestartsTheQuietPeriod() {
+    var channel = socket();
+    try {
+      channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
+      assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
+      long quiet = HttpConnection.LINGER_QUIET_TIMEOUT.toMillis();
+      channel.advanceTimeBy(quiet - 1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      channel.writeInbound(ascii("still sending"));
+      // The first quiet period would have ended here.
+      channel.advanceTimeBy(quiet - 1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isTrue();
+      channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void lingeringEndsOnceTheClientHasBeenQuietForTheQuietPeriod() {
-        var channel = socket();
-        try {
-            channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
-            assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
-            assertThat(channel.outputShutdown).isTrue();
-            channel.advanceTimeBy(HttpConnection.LINGER_QUIET_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isTrue();
-            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isFalse();
-        } finally { channel.finishAndReleaseAll(); }
+  @Test
+  void drainCutsTheLingerOfAClientStillSendingToTheShutdownBound() {
+    // The quiet period is out of the way, so only the total bounds can end lingering.
+    var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(Duration.ofHours(1)));
+    try {
+      channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
+      assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
+      channel.advanceTimeBy(100, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      connection.drain();
+      channel.writeInbound(ascii("still sending"));
+      channel.advanceTimeBy(
+          HttpConnection.SHUTDOWN_LINGER_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isTrue();
+      channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void inputRestartsTheQuietPeriod() {
-        var channel = socket();
-        try {
-            channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
-            assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
-            long quiet = HttpConnection.LINGER_QUIET_TIMEOUT.toMillis();
-            channel.advanceTimeBy(quiet - 1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            channel.writeInbound(ascii("still sending"));
-            // The first quiet period would have ended here.
-            channel.advanceTimeBy(quiet - 1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isTrue();
-            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isFalse();
-        } finally { channel.finishAndReleaseAll(); }
+  @Test
+  void lingeringThatStartsDuringADrainIsCutToTheShutdownBound() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    app.get(
+        "/slow",
+        ctx -> {
+          entered.countDown();
+          release.await();
+          return "slow";
+        });
+    var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(Duration.ofHours(1)));
+    try {
+      channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\n"));
+      assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+      connection.drain();
+      release.countDown();
+      assertThat(awaitOutputShutdown(channel)).contains("connection: close");
+      channel.advanceTimeBy(
+          HttpConnection.SHUTDOWN_LINGER_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isTrue();
+      channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      release.countDown();
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void drainCutsTheLingerOfAClientStillSendingToTheShutdownBound() {
-        // The quiet period is out of the way, so only the total bounds can end lingering.
-        var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(Duration.ofHours(1)));
-        try {
-            channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
-            assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
-            channel.advanceTimeBy(100, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            connection.drain();
-            channel.writeInbound(ascii("still sending"));
-            channel.advanceTimeBy(HttpConnection.SHUTDOWN_LINGER_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isTrue();
-            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isFalse();
-        } finally { channel.finishAndReleaseAll(); }
+  @Test
+  void lingeringStopsOnceTheDiscardLimitIsExceeded() {
+    var channel = socket();
+    try {
+      channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
+      assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
+      var piece = new byte[1024 * 1024];
+      for (int sent = 0; sent < HttpConnection.MAX_DISCARDED_INPUT; sent += piece.length) {
+        channel.writeInbound(Unpooled.wrappedBuffer(piece));
+        assertThat(channel.isActive()).isTrue();
+      }
+      channel.writeInbound(Unpooled.wrappedBuffer(new byte[1]));
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void lingeringThatStartsDuringADrainIsCutToTheShutdownBound() throws Exception {
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        app.get("/slow", ctx -> { entered.countDown(); release.await(); return "slow"; });
-        var channel = socket(TransportSettings.DEFAULTS.withLingerQuiet(Duration.ofHours(1)));
-        try {
-            channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\n"));
-            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
-            connection.drain();
-            release.countDown();
-            assertThat(awaitOutputShutdown(channel)).contains("connection: close");
-            channel.advanceTimeBy(HttpConnection.SHUTDOWN_LINGER_TIMEOUT.toMillis() - 1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isTrue();
-            channel.advanceTimeBy(1, TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isFalse();
-        } finally {
-            release.countDown();
-            channel.finishAndReleaseAll();
-        }
+  @Test
+  void inactivityEndsLingering() {
+    var channel = socket();
+    try {
+      channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
+      assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
+      assertThat(channel.isActive()).isTrue();
+      channel.pipeline().fireUserEventTriggered(IdleStateEvent.ALL_IDLE_STATE_EVENT);
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void lingeringStopsOnceTheDiscardLimitIsExceeded() {
-        var channel = socket();
-        try {
-            channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
-            assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
-            var piece = new byte[1024 * 1024];
-            for (int sent = 0; sent < HttpConnection.MAX_DISCARDED_INPUT; sent += piece.length) {
-                channel.writeInbound(Unpooled.wrappedBuffer(piece));
-                assertThat(channel.isActive()).isTrue();
-            }
-            channel.writeInbound(Unpooled.wrappedBuffer(new byte[1]));
-            assertThat(channel.isActive()).isFalse();
-        } finally { channel.finishAndReleaseAll(); }
+  @Test
+  void pipelinedErrorLingersAfterTheEarlierResponses() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    app.get(
+        "/slow",
+        ctx -> {
+          entered.countDown();
+          release.await();
+          return "slow";
+        });
+    var channel = socket();
+    try {
+      channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\nGARBAGE\r\n\r\n"));
+      assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+      channel.writeInbound(Unpooled.wrappedBuffer(new byte[1024 * 1024]));
+      release.countDown();
+      var text = new StringBuilder();
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+      while (!channel.outputShutdown) {
+        assertThat(System.nanoTime()).isLessThan(deadline);
+        channel.runPendingTasks();
+        text.append(outbound(channel));
+        Thread.onSpinWait();
+      }
+      text.append(outbound(channel));
+      assertThat(text.toString())
+          .startsWith("HTTP/1.1 200 OK")
+          .contains("\r\n\r\nslowHTTP/1.1 400 ");
+      assertThat(channel.isActive()).isTrue();
+      channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      release.countDown();
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void inactivityEndsLingering() {
-        var channel = socket();
-        try {
-            channel.writeInbound(ascii("GARBAGE\r\n\r\n"));
-            assertThat(outbound(channel)).startsWith("HTTP/1.1 400 ");
-            assertThat(channel.isActive()).isTrue();
-            channel.pipeline().fireUserEventTriggered(IdleStateEvent.ALL_IDLE_STATE_EVENT);
-            assertThat(channel.isActive()).isFalse();
-        } finally { channel.finishAndReleaseAll(); }
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n",
+        "GET / HTTP/1.0\r\n\r\nGET / HTTP/1.0\r\n\r\n",
+        "GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n",
+        "GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGARBAGE\r\n\r\n"
+      })
+  void everyCloseAfterAResponseLingers(String requests) {
+    var calls = new AtomicInteger();
+    app.get(
+        "/",
+        ctx -> {
+          calls.incrementAndGet();
+          return "hi";
+        });
+    app.get(
+        "/bye",
+        ctx -> {
+          calls.incrementAndGet();
+          return Response.of(200, "bye").withHeader("Connection", "close");
+        });
+    var channel = socket();
+    try {
+      channel.writeInbound(ascii(requests));
+      var text = awaitOutputShutdown(channel);
+      assertThat(text)
+          .startsWith("HTTP/1.1 200 OK")
+          .containsOnlyOnce("HTTP/1.1 ")
+          .contains("connection: close");
+      assertThat(calls).hasValue(1);
+      // The client may still be sending; its input is discarded while the connection lingers.
+      var more = ascii("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
+      channel.writeInbound(more);
+      assertThat(more.refCnt()).isZero();
+      assertThat(calls).hasValue(1);
+      assertThat(channel.isActive()).isTrue();
+      channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void pipelinedErrorLingersAfterTheEarlierResponses() throws Exception {
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        app.get("/slow", ctx -> { entered.countDown(); release.await(); return "slow"; });
-        var channel = socket();
-        try {
-            channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\nGARBAGE\r\n\r\n"));
-            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
-            channel.writeInbound(Unpooled.wrappedBuffer(new byte[1024 * 1024]));
-            release.countDown();
-            var text = new StringBuilder();
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-            while (!channel.outputShutdown) {
-                assertThat(System.nanoTime()).isLessThan(deadline);
-                channel.runPendingTasks();
-                text.append(outbound(channel));
-                Thread.onSpinWait();
-            }
-            text.append(outbound(channel));
-            assertThat(text.toString()).startsWith("HTTP/1.1 200 OK").contains("\r\n\r\nslowHTTP/1.1 400 ");
-            assertThat(channel.isActive()).isTrue();
-            channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isFalse();
-        } finally {
-            release.countDown();
-            channel.finishAndReleaseAll();
-        }
+  @Test
+  void drainLingersAfterTheRunningResponse() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    app.get(
+        "/slow",
+        ctx -> {
+          entered.countDown();
+          release.await();
+          return "slow";
+        });
+    var channel = socket();
+    try {
+      channel.writeInbound(
+          ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\nGET /slow HTTP/1.1\r\nHost: a\r\n\r\n"));
+      assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+      connection.drain();
+      release.countDown();
+      assertThat(awaitOutputShutdown(channel))
+          .startsWith("HTTP/1.1 200 OK")
+          .containsOnlyOnce("HTTP/1.1 ")
+          .contains("connection: close");
+      assertThat(channel.isActive()).isTrue();
+      channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      channel.runScheduledPendingTasks();
+      assertThat(channel.isActive()).isFalse();
+    } finally {
+      release.countDown();
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {
-            "GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n",
-            "GET / HTTP/1.0\r\n\r\nGET / HTTP/1.0\r\n\r\n",
-            "GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n",
-            "GET /bye HTTP/1.1\r\nHost: a\r\n\r\nGARBAGE\r\n\r\n"})
-    void everyCloseAfterAResponseLingers(String requests) {
-        var calls = new AtomicInteger();
-        app.get("/", ctx -> { calls.incrementAndGet(); return "hi"; });
-        app.get("/bye", ctx -> { calls.incrementAndGet(); return Response.of(200, "bye").withHeader("Connection", "close"); });
-        var channel = socket();
-        try {
-            channel.writeInbound(ascii(requests));
-            var text = awaitOutputShutdown(channel);
-            assertThat(text).startsWith("HTTP/1.1 200 OK").containsOnlyOnce("HTTP/1.1 ").contains("connection: close");
-            assertThat(calls).hasValue(1);
-            // The client may still be sending; its input is discarded while the connection lingers.
-            var more = ascii("GET / HTTP/1.1\r\nHost: a\r\n\r\n");
-            channel.writeInbound(more);
-            assertThat(more.refCnt()).isZero();
-            assertThat(calls).hasValue(1);
-            assertThat(channel.isActive()).isTrue();
-            channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isFalse();
-        } finally { channel.finishAndReleaseAll(); }
+  @Test
+  void drainClosesAnIdleConnectionAtOnce() {
+    var channel = socket();
+    try {
+      connection.drain();
+      assertThat(channel.isActive()).isFalse();
+      assertThat(channel.outputShutdown).isFalse();
+    } finally {
+      channel.finishAndReleaseAll();
     }
+  }
 
-    @Test void drainLingersAfterTheRunningResponse() throws Exception {
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        app.get("/slow", ctx -> { entered.countDown(); release.await(); return "slow"; });
-        var channel = socket();
-        try {
-            channel.writeInbound(ascii("GET /slow HTTP/1.1\r\nHost: a\r\n\r\nGET /slow HTTP/1.1\r\nHost: a\r\n\r\n"));
-            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
-            connection.drain();
-            release.countDown();
-            assertThat(awaitOutputShutdown(channel)).startsWith("HTTP/1.1 200 OK").containsOnlyOnce("HTTP/1.1 ")
-                    .contains("connection: close");
-            assertThat(channel.isActive()).isTrue();
-            channel.advanceTimeBy(HttpConnection.LINGER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            channel.runScheduledPendingTasks();
-            assertThat(channel.isActive()).isFalse();
-        } finally {
-            release.countDown();
-            channel.finishAndReleaseAll();
-        }
+  /** Runs tasks posted by handler threads until the connection shuts down its output. */
+  private static String awaitOutputShutdown(Socket channel) {
+    var text = new StringBuilder();
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+    while (!channel.outputShutdown) {
+      assertThat(channel.isActive()).as("closed without lingering").isTrue();
+      assertThat(System.nanoTime()).isLessThan(deadline);
+      channel.runPendingTasks();
+      text.append(outbound(channel));
+      Thread.onSpinWait();
     }
+    return text.append(outbound(channel)).toString();
+  }
 
-    @Test void drainClosesAnIdleConnectionAtOnce() {
-        var channel = socket();
-        try {
-            connection.drain();
-            assertThat(channel.isActive()).isFalse();
-            assertThat(channel.outputShutdown).isFalse();
-        } finally { channel.finishAndReleaseAll(); }
+  private static ByteBuf ascii(String text) {
+    return Unpooled.copiedBuffer(text, StandardCharsets.US_ASCII);
+  }
+
+  private static String outbound(EmbeddedChannel channel) {
+    var text = new StringBuilder();
+    for (ByteBuf buffer; (buffer = channel.readOutbound()) != null; ) {
+      text.append(buffer.toString(StandardCharsets.US_ASCII));
+      buffer.release();
     }
-
-    /** Runs tasks posted by handler threads until the connection shuts down its output. */
-    private static String awaitOutputShutdown(Socket channel) {
-        var text = new StringBuilder();
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-        while (!channel.outputShutdown) {
-            assertThat(channel.isActive()).as("closed without lingering").isTrue();
-            assertThat(System.nanoTime()).isLessThan(deadline);
-            channel.runPendingTasks();
-            text.append(outbound(channel));
-            Thread.onSpinWait();
-        }
-        return text.append(outbound(channel)).toString();
-    }
-
-    private static ByteBuf ascii(String text) { return Unpooled.copiedBuffer(text, StandardCharsets.US_ASCII); }
-
-    private static String outbound(EmbeddedChannel channel) {
-        var text = new StringBuilder();
-        for (ByteBuf buffer; (buffer = channel.readOutbound()) != null;) {
-            text.append(buffer.toString(StandardCharsets.US_ASCII));
-            buffer.release();
-        }
-        return text.toString();
-    }
+    return text.toString();
+  }
 }

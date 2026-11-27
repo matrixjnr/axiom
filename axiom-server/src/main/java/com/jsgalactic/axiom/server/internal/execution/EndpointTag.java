@@ -8,4 +8,4 @@ package com.jsgalactic.axiom.server.internal.execution;
  * @param method HTTP method of the registered route
  * @param route registered route template
  */
-public record EndpointTag(String method, String route) { }
+public record EndpointTag(String method, String route) {}

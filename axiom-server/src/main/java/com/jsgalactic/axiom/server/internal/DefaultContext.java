@@ -21,186 +21,236 @@ import java.util.Optional;
  * middleware run with this context around the router's own answer.
  */
 final class DefaultContext implements Context {
-    private final Request request;
-    private final BodyReader reader;
-    private final ExecutionContext execution;
-    private final CompiledRouter.Match match;
-    private final Response frameworkAnswer;
-    private final CompiledRouter router;
-    private int status = 200;
-    private boolean explicitStatus;
-    private SecurityIdentity identity;
-    private Optional<TraceContext> traceContext;
+  private final Request request;
+  private final BodyReader reader;
+  private final ExecutionContext execution;
+  private final CompiledRouter.Match match;
+  private final Response frameworkAnswer;
+  private final CompiledRouter router;
+  private int status = 200;
+  private boolean explicitStatus;
+  private SecurityIdentity identity;
+  private Optional<TraceContext> traceContext;
 
-    private final Codecs codecs;
-    /** Middleware on the stack of this request's chain, outermost first; see {@link Pipeline}. */
-    private int entered;
-    private Throwable seen;
+  private final Codecs codecs;
 
-    DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution, Codecs codecs,
-                   Response frameworkAnswer, CompiledRouter router, BodyReader reader) {
-        this.router = router;
-        this.request = request;
-        this.reader = reader;
-        this.codecs = codecs;
-        this.execution = execution;
-        this.match = match;
-        this.frameworkAnswer = frameworkAnswer;
+  /** Middleware on the stack of this request's chain, outermost first; see {@link Pipeline}. */
+  private int entered;
+
+  private Throwable seen;
+
+  DefaultContext(
+      Request request,
+      CompiledRouter.Match match,
+      ExecutionContext execution,
+      Codecs codecs,
+      Response frameworkAnswer,
+      CompiledRouter router,
+      BodyReader reader) {
+    this.router = router;
+    this.request = request;
+    this.reader = reader;
+    this.codecs = codecs;
+    this.execution = execution;
+    this.match = match;
+    this.frameworkAnswer = frameworkAnswer;
+  }
+
+  Codecs codecs() {
+    return codecs;
+  }
+
+  /** How many middleware of the chain are on the stack; set by the chain as it runs. */
+  int entered() {
+    return entered;
+  }
+
+  void entered(int count) {
+    entered = count;
+  }
+
+  /**
+   * Records how many middleware were on the stack when an exception first came into view. The same
+   * exception passing outwards through further frames keeps its first, deeper count.
+   */
+  void observed(Throwable failure, int count) {
+    if (seen != failure) {
+      seen = failure;
+      entered = count;
     }
+  }
 
-    Codecs codecs() { return codecs; }
+  /** The router's answer (404, 405, automatic OPTIONS, 501) for a request no route serves. */
+  Response frameworkAnswer() {
+    return frameworkAnswer;
+  }
 
-    /** How many middleware of the chain are on the stack; set by the chain as it runs. */
-    int entered() { return entered; }
+  @Override
+  public Response automaticOptions() {
+    return Response.of(204, null).withHeader("Allow", router.allowFor(request));
+  }
 
-    void entered(int count) { entered = count; }
-
-    /**
-     * Records how many middleware were on the stack when an exception first came into view. The
-     * same exception passing outwards through further frames keeps its first, deeper count.
-     */
-    void observed(Throwable failure, int count) {
-        if (seen != failure) {
-            seen = failure;
-            entered = count;
-        }
+  @Override
+  public Route route() {
+    if (match == null) {
+      throw new IllegalStateException(
+          "No route serves this request; the router answers it itself."
+              + " Use matchedRoute() in global middleware");
     }
+    return match.route();
+  }
 
-    /** The router's answer (404, 405, automatic OPTIONS, 501) for a request no route serves. */
-    Response frameworkAnswer() { return frameworkAnswer; }
+  @Override
+  public Optional<Route> matchedRoute() {
+    return match == null ? Optional.empty() : Optional.of(match.route());
+  }
 
-    @Override
-    public Response automaticOptions() {
-        return Response.of(204, null).withHeader("Allow", router.allowFor(request));
+  @Override
+  public String path(String name) {
+    if (match == null) {
+      throw new IllegalArgumentException(
+          "Unknown path parameter: " + Objects.requireNonNull(name, "name"));
     }
+    return match.parameter(name);
+  }
 
-    @Override
-    public Route route() {
-        if (match == null) {
-            throw new IllegalStateException("No route serves this request; the router answers it itself."
-                    + " Use matchedRoute() in global middleware");
-        }
-        return match.route();
+  @Override
+  public Map<String, String> pathParameters() {
+    return match == null ? Map.of() : match.parameters();
+  }
+
+  @Override
+  public Request request() {
+    return request;
+  }
+
+  @Override
+  public ExecutionContext execution() {
+    return execution;
+  }
+
+  /** Parsed on first use; the context is thread-confined, so no synchronization is needed. */
+  @Override
+  public Optional<TraceContext> traceContext() {
+    if (traceContext == null) {
+      traceContext = Context.super.traceContext();
     }
+    return traceContext;
+  }
 
-    @Override
-    public Optional<Route> matchedRoute() {
-        return match == null ? Optional.empty() : Optional.of(match.route());
+  @Override
+  public Optional<SecurityIdentity> identity() {
+    return Optional.ofNullable(identity);
+  }
+
+  @Override
+  public Context identity(SecurityIdentity identity) {
+    Objects.requireNonNull(identity, "identity");
+    if (this.identity != null) {
+      throw new IllegalStateException(
+          "This request already has a security identity; it can be set only once");
     }
+    this.identity = identity;
+    return this;
+  }
 
-    @Override
-    public String path(String name) {
-        if (match == null) {
-            throw new IllegalArgumentException("Unknown path parameter: " + Objects.requireNonNull(name, "name"));
-        }
-        return match.parameter(name);
+  @Override
+  public BodyReader bodyReader() {
+    if (reader == null) {
+      throw new UnsupportedOperationException("This request has no streaming body reader");
     }
+    return reader;
+  }
 
-    @Override
-    public Map<String, String> pathParameters() { return match == null ? Map.of() : match.parameters(); }
-
-    @Override
-    public Request request() { return request; }
-
-    @Override public ExecutionContext execution() { return execution; }
-
-    /** Parsed on first use; the context is thread-confined, so no synchronization is needed. */
-    @Override
-    public Optional<TraceContext> traceContext() {
-        if (traceContext == null) { traceContext = Context.super.traceContext(); }
-        return traceContext;
+  @Override
+  public <T> T body(Class<T> type) {
+    Objects.requireNonNull(type, "type");
+    var body = request.body();
+    if (body.isEmpty()) {
+      throw new DecodeException("empty_body");
     }
-
-    @Override
-    public Optional<SecurityIdentity> identity() { return Optional.ofNullable(identity); }
-
-    @Override
-    public Context identity(SecurityIdentity identity) {
-        Objects.requireNonNull(identity, "identity");
-        if (this.identity != null) {
-            throw new IllegalStateException("This request already has a security identity; it can be set only once");
-        }
-        this.identity = identity;
-        return this;
+    var mediaType = body.mediaType();
+    if (mediaType.isEmpty()) {
+      throw new UnsupportedMediaTypeException("missing_content_type");
     }
-
-    @Override
-    public BodyReader bodyReader() {
-        if (reader == null) { throw new UnsupportedOperationException("This request has no streaming body reader"); }
-        return reader;
+    if (body.charset().filter(charset -> !charset.equals("utf-8")).isPresent()) {
+      throw new UnsupportedMediaTypeException("unsupported_charset");
     }
-
-    @Override
-    public <T> T body(Class<T> type) {
-        Objects.requireNonNull(type, "type");
-        var body = request.body();
-        if (body.isEmpty()) { throw new DecodeException("empty_body"); }
-        var mediaType = body.mediaType();
-        if (mediaType.isEmpty()) { throw new UnsupportedMediaTypeException("missing_content_type"); }
-        if (body.charset().filter(charset -> !charset.equals("utf-8")).isPresent()) {
-            throw new UnsupportedMediaTypeException("unsupported_charset");
-        }
-        var codec = codecs.forMediaType(mediaType.get());
-        if (codec == null) { throw new UnsupportedMediaTypeException(); }
-        // A read-only view: the codec reads the request's bytes without another copy.
-        var value = codec.decode(body.asReadOnlyBuffer(), type);
-        if (value == null) { throw new DecodeException("null_body"); }
-        return value;
+    var codec = codecs.forMediaType(mediaType.get());
+    if (codec == null) {
+      throw new UnsupportedMediaTypeException();
     }
-
-    /** Forgets the status the handler or middleware set, before an error handler runs. */
-    void resetStatus() {
-        status = 200;
-        explicitStatus = false;
+    // A read-only view: the codec reads the request's bytes without another copy.
+    var value = codec.decode(body.asReadOnlyBuffer(), type);
+    if (value == null) {
+      throw new DecodeException("null_body");
     }
+    return value;
+  }
 
-    @Override
-    public Context status(int status) {
-        HttpStatus.reasonPhrase(status); // Rejects anything but a final status (200 to 599).
-        this.status = status;
-        explicitStatus = true;
-        return this;
-    }
+  /** Forgets the status the handler or middleware set, before an error handler runs. */
+  void resetStatus() {
+    status = 200;
+    explicitStatus = false;
+  }
 
-    @Override
-    public Response problem(AxiomException failure) {
-        return Problems.response(Objects.requireNonNull(failure, "failure"), execution.requestId());
-    }
+  @Override
+  public Context status(int status) {
+    HttpStatus.reasonPhrase(status); // Rejects anything but a final status (200 to 599).
+    this.status = status;
+    explicitStatus = true;
+    return this;
+  }
 
-    @Override
-    public Response response(Object body) {
-        validateBodyStatus(body);
-        return Response.of(body == null && !explicitStatus ? 204 : status, body);
-    }
+  @Override
+  public Response problem(AxiomException failure) {
+    return Problems.response(Objects.requireNonNull(failure, "failure"), execution.requestId());
+  }
 
-    @Override
-    public Response encode(String contentType, Object value) {
-        Objects.requireNonNull(value, "value");
-        Objects.requireNonNull(contentType, "contentType");
-        validateBodyStatus(value);
-        // Validate the header before invoking application codec code.
-        Response.of(status, null).withHeader("Content-Type", contentType);
-        var mediaType = Codecs.mediaType(contentType);
-        if (mediaType == null || mediaType.indexOf('*') >= 0) {
-            throw new IllegalArgumentException("Content-Type must contain an exact type/subtype");
-        }
-        if (value instanceof String || value instanceof byte[]) {
-            return response(value).withHeader("Content-Type", contentType);
-        }
-        var codec = codecs.forMediaType(mediaType);
-        if (codec == null) { throw new IllegalStateException("No body codec installed for " + mediaType); }
-        var bytes = codec.encode(value);
-        if (bytes == null) { throw new IllegalStateException("Body codec returned null instead of encoded bytes"); }
-        return response(bytes).withHeader("Content-Type", contentType);
-    }
+  @Override
+  public Response response(Object body) {
+    validateBodyStatus(body);
+    return Response.of(body == null && !explicitStatus ? 204 : status, body);
+  }
 
-    private void validateBodyStatus(Object body) {
-        if (body != null && (status == 204 || status == 205 || status == 304)) {
-            var route = match == null ? "unmatched request " + request.method() : "Route " + match.route().method()
-                    + " " + match.route().path();
-            throw new IllegalStateException(route + " set status "
-                    + status + ", which cannot carry a body, but produced a " + body.getClass().getName()
-                    + " body; return null or a Response without a body");
-        }
+  @Override
+  public Response encode(String contentType, Object value) {
+    Objects.requireNonNull(value, "value");
+    Objects.requireNonNull(contentType, "contentType");
+    validateBodyStatus(value);
+    // Validate the header before invoking application codec code.
+    Response.of(status, null).withHeader("Content-Type", contentType);
+    var mediaType = Codecs.mediaType(contentType);
+    if (mediaType == null || mediaType.indexOf('*') >= 0) {
+      throw new IllegalArgumentException("Content-Type must contain an exact type/subtype");
     }
+    if (value instanceof String || value instanceof byte[]) {
+      return response(value).withHeader("Content-Type", contentType);
+    }
+    var codec = codecs.forMediaType(mediaType);
+    if (codec == null) {
+      throw new IllegalStateException("No body codec installed for " + mediaType);
+    }
+    var bytes = codec.encode(value);
+    if (bytes == null) {
+      throw new IllegalStateException("Body codec returned null instead of encoded bytes");
+    }
+    return response(bytes).withHeader("Content-Type", contentType);
+  }
+
+  private void validateBodyStatus(Object body) {
+    if (body != null && (status == 204 || status == 205 || status == 304)) {
+      var route =
+          match == null
+              ? "unmatched request " + request.method()
+              : "Route " + match.route().method() + " " + match.route().path();
+      throw new IllegalStateException(
+          route
+              + " set status "
+              + status
+              + ", which cannot carry a body, but produced a "
+              + body.getClass().getName()
+              + " body; return null or a Response without a body");
+    }
+  }
 }

@@ -22,12 +22,11 @@ import org.openjdk.jmh.annotations.Warmup;
 
 /**
  * Measures request dispatch of one running application driven by several threads at once. The
- * request path reads an immutable runtime snapshot without taking a lock, so the cost per
- * operation under contention can be compared with the single-thread cost (run with {@code -t 1}
- * to override the default of one JMH thread per available processor). {@code handle} includes
- * creating the request's execution context and identity; {@code handleSharedExecution} reuses
- * one context and so excludes identity generation, which {@link RequestIdBenchmark} measures
- * alone.
+ * request path reads an immutable runtime snapshot without taking a lock, so the cost per operation
+ * under contention can be compared with the single-thread cost (run with {@code -t 1} to override
+ * the default of one JMH thread per available processor). {@code handle} includes creating the
+ * request's execution context and identity; {@code handleSharedExecution} reuses one context and so
+ * excludes identity generation, which {@link RequestIdBenchmark} measures alone.
  */
 @State(Scope.Benchmark)
 @BenchmarkMode(Mode.AverageTime)
@@ -37,25 +36,31 @@ import org.openjdk.jmh.annotations.Warmup;
 @Fork(2)
 @Threads(Threads.MAX)
 public class RequestPathBenchmark {
-    private Application app;
-    private Request request;
-    private ExecutionContext shared;
+  private Application app;
+  private Request request;
+  private ExecutionContext shared;
 
-    @Setup
-    public void setup() {
-        app = Axiom.create();
-        app.get("/items/:id", ctx -> ctx.path("id"));
-        app.start();
-        request = Request.get("/items/42");
-        shared = ExecutionContext.create(Duration.ofHours(1));
-    }
+  @Setup
+  public void setup() {
+    app = Axiom.create();
+    app.get("/items/:id", ctx -> ctx.path("id"));
+    app.start();
+    request = Request.get("/items/42");
+    shared = ExecutionContext.create(Duration.ofHours(1));
+  }
 
-    @TearDown
-    public void teardown() { app.close(); }
+  @TearDown
+  public void teardown() {
+    app.close();
+  }
 
-    @Benchmark
-    public Response handle() throws Exception { return app.handle(request); }
+  @Benchmark
+  public Response handle() throws Exception {
+    return app.handle(request);
+  }
 
-    @Benchmark
-    public Response handleSharedExecution() throws Exception { return app.handle(request, shared); }
+  @Benchmark
+  public Response handleSharedExecution() throws Exception {
+    return app.handle(request, shared);
+  }
 }

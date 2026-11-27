@@ -18,180 +18,247 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class RequestTest {
-    @Test
-    void requestIsAnImmutableClassWithNamedAccessors() {
-        assertThat(Request.class.isRecord()).isFalse();
-        assertThat(Modifier.isFinal(Request.class.getModifiers())).isTrue();
-        var headers = new HashMap<String, String>();
-        headers.put("Accept", "application/json");
-        var body = Body.of("text/plain", new byte[] {65});
-        var peer = new InetSocketAddress("127.0.0.1", 1234);
-        var request = new Request("POST", "/notes", "sort=new", headers, body, peer, true);
-        headers.clear();
-        assertThat(request.method()).isEqualTo("POST");
-        assertThat(request.path()).isEqualTo("/notes");
-        assertThat(request.query()).isEqualTo("sort=new");
-        assertThat(request.headers()).containsEntry("Accept", "application/json");
-        assertThat(request.body()).isSameAs(body);
-        assertThat(request.remoteAddress()).isEqualTo(peer);
-        assertThat(request.tls()).isTrue();
-    }
+  @Test
+  void requestIsAnImmutableClassWithNamedAccessors() {
+    assertThat(Request.class.isRecord()).isFalse();
+    assertThat(Modifier.isFinal(Request.class.getModifiers())).isTrue();
+    var headers = new HashMap<String, String>();
+    headers.put("Accept", "application/json");
+    var body = Body.of("text/plain", new byte[] {65});
+    var peer = new InetSocketAddress("127.0.0.1", 1234);
+    var request = new Request("POST", "/notes", "sort=new", headers, body, peer, true);
+    headers.clear();
+    assertThat(request.method()).isEqualTo("POST");
+    assertThat(request.path()).isEqualTo("/notes");
+    assertThat(request.query()).isEqualTo("sort=new");
+    assertThat(request.headers()).containsEntry("Accept", "application/json");
+    assertThat(request.body()).isSameAs(body);
+    assertThat(request.remoteAddress()).isEqualTo(peer);
+    assertThat(request.tls()).isTrue();
+  }
 
-    @Test
-    void equalityAndHashingAgreeForCaseInsensitiveHeaders() {
-        var body = Body.of("text/plain", new byte[] {65});
-        var first = new Request("POST", "/notes", "q=1", Map.of("Accept", "text/plain"), body);
-        var same = new Request("POST", "/notes", "q=1", Map.of("accept", "text/plain"), body);
-        assertThat(first).isEqualTo(same).hasSameHashCodeAs(same);
-        assertThat(same).isEqualTo(first);
-        assertThat(new HashSet<>(List.of(first, same))).hasSize(1);
-        assertThat(first).isEqualTo(first).isNotEqualTo(null).isNotEqualTo("request");
-        assertThat(first).isNotEqualTo(new Request("GET", "/notes", "q=1", first.headers(), body));
-        assertThat(first).isNotEqualTo(new Request("POST", "/other", "q=1", first.headers(), body));
-        assertThat(first).isNotEqualTo(new Request("POST", "/notes", "q=2", first.headers(), body));
-        assertThat(first).isNotEqualTo(first.withHeaders(Map.of("Accept", "application/json")));
-        assertThat(first).isEqualTo(first.withBody(Body.of("text/plain", new byte[] {65})))
-                .hasSameHashCodeAs(first.withBody(Body.of("text/plain", new byte[] {65})));
-        assertThat(first).isNotEqualTo(first.withBody(Body.of("text/plain", new byte[] {66})));
-        assertThat(first).isNotEqualTo(first.withBody(Body.of("application/octet-stream", new byte[] {65})));
-        assertThat(first).isNotEqualTo(first.withRemoteAddress(new InetSocketAddress("127.0.0.1", 1234)));
-        assertThat(first).isNotEqualTo(first.withTls(true));
-    }
+  @Test
+  void equalityAndHashingAgreeForCaseInsensitiveHeaders() {
+    var body = Body.of("text/plain", new byte[] {65});
+    var first = new Request("POST", "/notes", "q=1", Map.of("Accept", "text/plain"), body);
+    var same = new Request("POST", "/notes", "q=1", Map.of("accept", "text/plain"), body);
+    assertThat(first).isEqualTo(same).hasSameHashCodeAs(same);
+    assertThat(same).isEqualTo(first);
+    assertThat(new HashSet<>(List.of(first, same))).hasSize(1);
+    assertThat(first).isEqualTo(first).isNotEqualTo(null).isNotEqualTo("request");
+    assertThat(first).isNotEqualTo(new Request("GET", "/notes", "q=1", first.headers(), body));
+    assertThat(first).isNotEqualTo(new Request("POST", "/other", "q=1", first.headers(), body));
+    assertThat(first).isNotEqualTo(new Request("POST", "/notes", "q=2", first.headers(), body));
+    assertThat(first).isNotEqualTo(first.withHeaders(Map.of("Accept", "application/json")));
+    assertThat(first)
+        .isEqualTo(first.withBody(Body.of("text/plain", new byte[] {65})))
+        .hasSameHashCodeAs(first.withBody(Body.of("text/plain", new byte[] {65})));
+    assertThat(first).isNotEqualTo(first.withBody(Body.of("text/plain", new byte[] {66})));
+    assertThat(first)
+        .isNotEqualTo(first.withBody(Body.of("application/octet-stream", new byte[] {65})));
+    assertThat(first)
+        .isNotEqualTo(first.withRemoteAddress(new InetSocketAddress("127.0.0.1", 1234)));
+    assertThat(first).isNotEqualTo(first.withTls(true));
+  }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"", "users", "/users?x=1", "/users#top", "/bad path", "/bad%", "/bad%zz", "/bad%2",
-            "/a\\b", "/a\r\nb", "/a\u0000b", "//", "//users", "/a//b", "/users//", "/.", "/..", "/a/./b",
-            "/a/../b", "/a/..", "/%2e%2e/b", "/%2E", "/a.%2e", "/a%2Fb", "/a%2fb", "/a%5Cb", "/a%5cb", "/a%00b"})
-    void rejectsUnsafePathsWithADistinctException(String path) {
-        assertThatThrownBy(() -> Request.get(path)).isInstanceOf(InvalidRequestPathException.class);
-    }
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "",
+        "users",
+        "/users?x=1",
+        "/users#top",
+        "/bad path",
+        "/bad%",
+        "/bad%zz",
+        "/bad%2",
+        "/a\\b",
+        "/a\r\nb",
+        "/a\u0000b",
+        "//",
+        "//users",
+        "/a//b",
+        "/users//",
+        "/.",
+        "/..",
+        "/a/./b",
+        "/a/../b",
+        "/a/..",
+        "/%2e%2e/b",
+        "/%2E",
+        "/a.%2e",
+        "/a%2Fb",
+        "/a%2fb",
+        "/a%5Cb",
+        "/a%5cb",
+        "/a%00b"
+      })
+  void rejectsUnsafePathsWithADistinctException(String path) {
+    assertThatThrownBy(() -> Request.get(path)).isInstanceOf(InvalidRequestPathException.class);
+  }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"", "G ET", "GET\r\n", "GÉT", "GET/"})
-    void rejectsInvalidMethods(String method) {
-        assertThatIllegalArgumentException().isThrownBy(() -> new Request(method, "/"));
-    }
+  @ParameterizedTest
+  @ValueSource(strings = {"", "G ET", "GET\r\n", "GÉT", "GET/"})
+  void rejectsInvalidMethods(String method) {
+    assertThatIllegalArgumentException().isThrownBy(() -> new Request(method, "/"));
+  }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"/", "/users/", "/Users", "/a%20b", "/a%2520b", "/%E2%82%AC", "/é", "/a.b", "/...",
-            "/..a", "/.well-known/x", "/time/12:00", "/a+b;c=d@e"})
-    void preservesAcceptedRawPathsWithoutDecoding(String path) {
-        assertThat(Request.get(path).path()).isEqualTo(path);
-    }
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "/",
+        "/users/",
+        "/Users",
+        "/a%20b",
+        "/a%2520b",
+        "/%E2%82%AC",
+        "/é",
+        "/a.b",
+        "/...",
+        "/..a",
+        "/.well-known/x",
+        "/time/12:00",
+        "/a+b;c=d@e"
+      })
+  void preservesAcceptedRawPathsWithoutDecoding(String path) {
+    assertThat(Request.get(path).path()).isEqualTo(path);
+  }
 
-    @Test
-    void parsesOriginFormTargetsOnceAndRetainsTheRawQuery() {
-        assertThat(Request.fromTarget("GET", "/a%20b")).isEqualTo(Request.get("/a%20b"));
-        var target = Request.fromTarget("GET", "/a?x=1&y=%2F/?z");
-        assertThat(target.path()).isEqualTo("/a");
-        assertThat(target.query()).isEqualTo("x=1&y=%2F/?z");
-        assertThat(Request.fromTarget("POST", "/a?").path()).isEqualTo("/a");
-        assertThat(Request.fromTarget("POST", "/a?")).isEqualTo(new Request("POST", "/a"));
-        for (var invalidQuery : new String[] {"/a?bad%zz", "/a?%2", "/a?x#frag", "/a?x y", "/a?\\"}) {
-            assertThatIllegalArgumentException().as(invalidQuery)
-                    .isThrownBy(() -> Request.fromTarget("GET", invalidQuery));
-        }
-        for (var invalidPath : new String[] {"*", "http://host/a", "/a#frag", "/a/../b?x", "//a?x"}) {
-            assertThatThrownBy(() -> Request.fromTarget("GET", invalidPath)).as(invalidPath)
-                    .isInstanceOf(InvalidRequestPathException.class);
-        }
-        assertThatIllegalArgumentException().isThrownBy(() -> Request.fromTarget("G ET", "/"));
+  @Test
+  void parsesOriginFormTargetsOnceAndRetainsTheRawQuery() {
+    assertThat(Request.fromTarget("GET", "/a%20b")).isEqualTo(Request.get("/a%20b"));
+    var target = Request.fromTarget("GET", "/a?x=1&y=%2F/?z");
+    assertThat(target.path()).isEqualTo("/a");
+    assertThat(target.query()).isEqualTo("x=1&y=%2F/?z");
+    assertThat(Request.fromTarget("POST", "/a?").path()).isEqualTo("/a");
+    assertThat(Request.fromTarget("POST", "/a?")).isEqualTo(new Request("POST", "/a"));
+    for (var invalidQuery : new String[] {"/a?bad%zz", "/a?%2", "/a?x#frag", "/a?x y", "/a?\\"}) {
+      assertThatIllegalArgumentException()
+          .as(invalidQuery)
+          .isThrownBy(() -> Request.fromTarget("GET", invalidQuery));
     }
+    for (var invalidPath : new String[] {"*", "http://host/a", "/a#frag", "/a/../b?x", "//a?x"}) {
+      assertThatThrownBy(() -> Request.fromTarget("GET", invalidPath))
+          .as(invalidPath)
+          .isInstanceOf(InvalidRequestPathException.class);
+    }
+    assertThatIllegalArgumentException().isThrownBy(() -> Request.fromTarget("G ET", "/"));
+  }
 
-    @Test
-    void acceptsTheAsteriskFormOnlyForOptions() {
-        var asterisk = Request.fromTarget("OPTIONS", "*");
-        assertThat(asterisk.path()).isEqualTo("*");
-        assertThat(asterisk.query()).isEmpty();
-        assertThat(asterisk).isEqualTo(new Request("OPTIONS", "*"));
-        assertThat(asterisk.withHeaders(Map.of("X", "y")).path()).isEqualTo("*");
-        for (var method : new String[] {"GET", "HEAD", "POST", "options", "Options", "TRACE", "PROPFIND"}) {
-            assertThatThrownBy(() -> Request.fromTarget(method, "*")).as(method)
-                    .isInstanceOf(InvalidRequestPathException.class);
-        }
-        for (var target : new String[] {"*?", "*?x=1", "**", "*/", "*/a", "*a", "*#", "*%20", " *"}) {
-            assertThatThrownBy(() -> Request.fromTarget("OPTIONS", target)).as(target)
-                    .isInstanceOf(IllegalArgumentException.class);
-        }
-        // Absolute-form targets are not normalized; they stay rejected for every method.
-        assertThatThrownBy(() -> Request.fromTarget("OPTIONS", "http://host/a"))
-                .isInstanceOf(InvalidRequestPathException.class);
-        assertThatThrownBy(() -> new Request("OPTIONS", "*", "x=1", Map.of(), Body.empty()))
-                .isInstanceOf(InvalidRequestPathException.class);
+  @Test
+  void acceptsTheAsteriskFormOnlyForOptions() {
+    var asterisk = Request.fromTarget("OPTIONS", "*");
+    assertThat(asterisk.path()).isEqualTo("*");
+    assertThat(asterisk.query()).isEmpty();
+    assertThat(asterisk).isEqualTo(new Request("OPTIONS", "*"));
+    assertThat(asterisk.withHeaders(Map.of("X", "y")).path()).isEqualTo("*");
+    for (var method :
+        new String[] {"GET", "HEAD", "POST", "options", "Options", "TRACE", "PROPFIND"}) {
+      assertThatThrownBy(() -> Request.fromTarget(method, "*"))
+          .as(method)
+          .isInstanceOf(InvalidRequestPathException.class);
     }
+    for (var target : new String[] {"*?", "*?x=1", "**", "*/", "*/a", "*a", "*#", "*%20", " *"}) {
+      assertThatThrownBy(() -> Request.fromTarget("OPTIONS", target))
+          .as(target)
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+    // Absolute-form targets are not normalized; they stay rejected for every method.
+    assertThatThrownBy(() -> Request.fromTarget("OPTIONS", "http://host/a"))
+        .isInstanceOf(InvalidRequestPathException.class);
+    assertThatThrownBy(() -> new Request("OPTIONS", "*", "x=1", Map.of(), Body.empty()))
+        .isInstanceOf(InvalidRequestPathException.class);
+  }
 
-    @Test
-    void preservesMethodCaseAndAllowsExtensionMethods() {
-        assertThat(new Request("propfind", "/").method()).isEqualTo("propfind");
-        assertThat(new Request("CUSTOM-METHOD", "/").method()).isEqualTo("CUSTOM-METHOD");
-    }
+  @Test
+  void preservesMethodCaseAndAllowsExtensionMethods() {
+    assertThat(new Request("propfind", "/").method()).isEqualTo("propfind");
+    assertThat(new Request("CUSTOM-METHOD", "/").method()).isEqualTo("CUSTOM-METHOD");
+  }
 
-    @Test
-    void rejectsNullMetadata() {
-        assertThatNullPointerException().isThrownBy(() -> new Request(null, "/"));
-        assertThatNullPointerException().isThrownBy(() -> Request.get(null));
-    }
+  @Test
+  void rejectsNullMetadata() {
+    assertThatNullPointerException().isThrownBy(() -> new Request(null, "/"));
+    assertThatNullPointerException().isThrownBy(() -> Request.get(null));
+  }
 
-    @Test
-    void keepsTwoArgumentConstructionAndAddsHeadersAndBody() {
-        var plain = new Request("POST", "/notes");
-        assertThat(plain.headers()).isEmpty();
-        assertThat(plain.body()).isSameAs(Body.empty());
-        assertThat(plain).isEqualTo(Request.fromTarget("POST", "/notes"));
-        assertThat(plain.query()).isEmpty();
-        assertThat(plain).isNotEqualTo(Request.fromTarget("POST", "/notes?x=1"));
-        var full = plain.withHeaders(Map.of("Accept", "application/json"))
-                .withBody(Body.of("application/json", new byte[] {'{', '}'}));
-        assertThat(full.header("accept")).contains("application/json");
-        assertThat(full.header("missing")).isEmpty();
-        assertThat(full.body().length()).isEqualTo(2);
-        assertThat(full).isNotEqualTo(plain);
-        assertThatThrownBy(() -> full.headers().put("x", "y")).isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> new Request("GET", "/../x", Map.of(), Body.empty()))
-                .isInstanceOf(InvalidRequestPathException.class);
-    }
+  @Test
+  void keepsTwoArgumentConstructionAndAddsHeadersAndBody() {
+    var plain = new Request("POST", "/notes");
+    assertThat(plain.headers()).isEmpty();
+    assertThat(plain.body()).isSameAs(Body.empty());
+    assertThat(plain).isEqualTo(Request.fromTarget("POST", "/notes"));
+    assertThat(plain.query()).isEmpty();
+    assertThat(plain).isNotEqualTo(Request.fromTarget("POST", "/notes?x=1"));
+    var full =
+        plain
+            .withHeaders(Map.of("Accept", "application/json"))
+            .withBody(Body.of("application/json", new byte[] {'{', '}'}));
+    assertThat(full.header("accept")).contains("application/json");
+    assertThat(full.header("missing")).isEmpty();
+    assertThat(full.body().length()).isEqualTo(2);
+    assertThat(full).isNotEqualTo(plain);
+    assertThatThrownBy(() -> full.headers().put("x", "y"))
+        .isInstanceOf(UnsupportedOperationException.class);
+    assertThatThrownBy(() -> new Request("GET", "/../x", Map.of(), Body.empty()))
+        .isInstanceOf(InvalidRequestPathException.class);
+  }
 
-    @Test
-    void rejectsUnsafeHeadersAndHidesValuesFromDescriptions() {
-        for (var invalid : List.of(Map.of("Bad Name", "x"), Map.of("X", "a\r\nb"),
-                Map.of("X", "1", "x", "2"))) {
-            assertThatIllegalArgumentException().isThrownBy(() -> Request.get("/").withHeaders(invalid));
-        }
-        var request = Request.get("/").withHeaders(Map.of("Authorization", "Bearer secret-token"))
-                .withBody(Body.of("text/plain", "password".getBytes(StandardCharsets.UTF_8)));
-        assertThat(request.toString()).contains("Authorization").doesNotContain("secret-token", "password");
+  @Test
+  void rejectsUnsafeHeadersAndHidesValuesFromDescriptions() {
+    for (var invalid :
+        List.of(Map.of("Bad Name", "x"), Map.of("X", "a\r\nb"), Map.of("X", "1", "x", "2"))) {
+      assertThatIllegalArgumentException().isThrownBy(() -> Request.get("/").withHeaders(invalid));
     }
+    var request =
+        Request.get("/")
+            .withHeaders(Map.of("Authorization", "Bearer secret-token"))
+            .withBody(Body.of("text/plain", "password".getBytes(StandardCharsets.UTF_8)));
+    assertThat(request.toString())
+        .contains("Authorization")
+        .doesNotContain("secret-token", "password");
+  }
 
-    @Test
-    void carriesAResolvedRemoteAddressThroughCopiesWithoutPrintingIt() throws Exception {
-        var peer = new InetSocketAddress(InetAddress.getByAddress(new byte[] {(byte) 192, 0, 2, 7}), 4711);
-        assertThat(Request.get("/").remoteAddress()).isNull();
-        var request = Request.get("/").withRemoteAddress(peer);
-        assertThat(request.remoteAddress()).isEqualTo(peer);
-        assertThat(request.withHeaders(Map.of("A", "b")).withBody(Body.empty()).remoteAddress()).isEqualTo(peer);
-        assertThat(request.toString()).doesNotContain("192.0.2.7");
-        assertThat(request.withRemoteAddress(null).remoteAddress()).isNull();
-    }
+  @Test
+  void carriesAResolvedRemoteAddressThroughCopiesWithoutPrintingIt() throws Exception {
+    var peer =
+        new InetSocketAddress(InetAddress.getByAddress(new byte[] {(byte) 192, 0, 2, 7}), 4711);
+    assertThat(Request.get("/").remoteAddress()).isNull();
+    var request = Request.get("/").withRemoteAddress(peer);
+    assertThat(request.remoteAddress()).isEqualTo(peer);
+    assertThat(request.withHeaders(Map.of("A", "b")).withBody(Body.empty()).remoteAddress())
+        .isEqualTo(peer);
+    assertThat(request.toString()).doesNotContain("192.0.2.7");
+    assertThat(request.withRemoteAddress(null).remoteAddress()).isNull();
+  }
 
-    @Test
-    void recordsTheTransportSchemeThroughCopies() {
-        var plain = Request.get("/");
-        assertThat(plain.isSecure()).isFalse();
-        assertThat(plain.scheme()).isEqualTo("http");
-        var secure = plain.withTls(true);
-        assertThat(secure.isSecure()).isTrue();
-        assertThat(secure.scheme()).isEqualTo("https");
-        assertThat(secure.withHeaders(Map.of("A", "b")).withBody(Body.empty())
-                .withRemoteAddress(null).isSecure()).isTrue();
-        assertThat(secure.withTls(false).isSecure()).isFalse();
-        assertThat(new Request("GET", "/", "", Map.of(), Body.empty(), null).isSecure()).isFalse();
-        // A header can never make a request secure.
-        assertThat(plain.withHeaders(Map.of("X-Forwarded-Proto", "https")).isSecure()).isFalse();
-    }
+  @Test
+  void recordsTheTransportSchemeThroughCopies() {
+    var plain = Request.get("/");
+    assertThat(plain.isSecure()).isFalse();
+    assertThat(plain.scheme()).isEqualTo("http");
+    var secure = plain.withTls(true);
+    assertThat(secure.isSecure()).isTrue();
+    assertThat(secure.scheme()).isEqualTo("https");
+    assertThat(
+            secure
+                .withHeaders(Map.of("A", "b"))
+                .withBody(Body.empty())
+                .withRemoteAddress(null)
+                .isSecure())
+        .isTrue();
+    assertThat(secure.withTls(false).isSecure()).isFalse();
+    assertThat(new Request("GET", "/", "", Map.of(), Body.empty(), null).isSecure()).isFalse();
+    // A header can never make a request secure.
+    assertThat(plain.withHeaders(Map.of("X-Forwarded-Proto", "https")).isSecure()).isFalse();
+  }
 
-    @Test
-    void rejectsAnUnresolvedRemoteAddressSoNothingLooksItUp() {
-        assertThatThrownBy(() -> Request.get("/").withRemoteAddress(InetSocketAddress.createUnresolved("example.org", 80)))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
+  @Test
+  void rejectsAnUnresolvedRemoteAddressSoNothingLooksItUp() {
+    assertThatThrownBy(
+            () ->
+                Request.get("/")
+                    .withRemoteAddress(InetSocketAddress.createUnresolved("example.org", 80)))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
 }

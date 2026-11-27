@@ -31,12 +31,12 @@ to Maven Central yet.
 import com.jsgalactic.axiom.Axiom;
 
 public class Hello {
-    public static void main(String[] args) throws Exception {
-        try (var app = Axiom.create()) {
-            app.get("/", ctx -> "Hello, world!");
-            app.listen(8080).termination().toCompletableFuture().join();
-        }
+  public static void main(String[] args) throws Exception {
+    try (var app = Axiom.create()) {
+      app.get("/", ctx -> "Hello, world!");
+      app.listen(8080).termination().toCompletableFuture().join();
     }
+  }
 }
 ```
 
@@ -62,37 +62,58 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class TasksApi {
-    public record NewTask(String title) {}
-    public record Task(String id, String title) {}
+  public record NewTask(String title) {}
 
-    static final BodyValidator<NewTask> VALID = task -> task.title() == null || task.title().isBlank()
-            ? List.of(new Violation("title", "required")) : List.of();
-    static final Middleware NO_SNIFF = (ctx, next) -> next.run().withHeader("X-Content-Type-Options", "nosniff");
+  public record Task(String id, String title) {}
 
-    static Application create() {
-        var tasks = new ConcurrentHashMap<String, Task>();
-        var ids = new AtomicLong();
-        var app = Axiom.create();
-        app.error(NoSuchElementException.class, (ctx, e) -> { throw new NotFoundException("task_not_found"); });
-        app.group("/tasks", api -> {
-            api.use(NO_SNIFF);
-            api.post("", ctx -> {                                  // POST /tasks, 422 on a blank title
-                var task = new Task(Long.toString(ids.incrementAndGet()), ctx.validatedBody(NewTask.class, VALID).title());
+  static final BodyValidator<NewTask> VALID =
+      task ->
+          task.title() == null || task.title().isBlank()
+              ? List.of(new Violation("title", "required"))
+              : List.of();
+  static final Middleware NO_SNIFF =
+      (ctx, next) -> next.run().withHeader("X-Content-Type-Options", "nosniff");
+
+  static Application create() {
+    var tasks = new ConcurrentHashMap<String, Task>();
+    var ids = new AtomicLong();
+    var app = Axiom.create();
+    app.error(
+        NoSuchElementException.class,
+        (ctx, e) -> {
+          throw new NotFoundException("task_not_found");
+        });
+    app.group(
+        "/tasks",
+        api -> {
+          api.use(NO_SNIFF);
+          api.post(
+              "",
+              ctx -> { // POST /tasks, 422 on a blank title
+                var task =
+                    new Task(
+                        Long.toString(ids.incrementAndGet()),
+                        ctx.validatedBody(NewTask.class, VALID).title());
                 tasks.put(task.id(), task);
                 return ctx.status(201).json(task).withLocation("/tasks/" + task.id());
-            });
-            api.get("", ctx -> {                                   // GET /tasks?q=milk
+              });
+          api.get(
+              "",
+              ctx -> { // GET /tasks?q=milk
                 var text = ctx.query("q").orElse("");
-                return ctx.json(tasks.values().stream().filter(t -> t.title().contains(text)).toList());
-            });
-            api.get("/:id", ctx -> ctx.json(Optional.ofNullable(tasks.get(ctx.path("id"))).orElseThrow()));
+                return ctx.json(
+                    tasks.values().stream().filter(t -> t.title().contains(text)).toList());
+              });
+          api.get(
+              "/:id",
+              ctx -> ctx.json(Optional.ofNullable(tasks.get(ctx.path("id"))).orElseThrow()));
         });
-        return app;
-    }
+    return app;
+  }
 
-    public static void main(String[] args) throws Exception {
-        create().listen(8080).termination().toCompletableFuture().join();
-    }
+  public static void main(String[] args) throws Exception {
+    create().listen(8080).termination().toCompletableFuture().join();
+  }
 }
 ```
 
@@ -101,9 +122,10 @@ Tested without a socket:
 <!-- snippet: examples/readme/src/test/java/TasksApiTest.java#tested -->
 ```java
 try (var client = TestClient.start(TasksApi.create())) {
-    var created = client.post("/tasks", "application/json", "{\"title\":\"Buy milk\"}");
-    assertThat(created.status()).isEqualTo(201);
-    assertThat(client.get("/tasks/42").status()).isEqualTo(404);   // problem+json, code task_not_found
+  var created = client.post("/tasks", "application/json", "{\"title\":\"Buy milk\"}");
+  assertThat(created.status()).isEqualTo(201);
+  assertThat(client.get("/tasks/42").status())
+      .isEqualTo(404); // problem+json, code task_not_found
 }
 ```
 
@@ -305,15 +327,23 @@ want it, Swagger UI (no CDN: the UI files are packaged). Nothing is served unles
 
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#describe-route -->
 ```java
-var add = app.post("/books", ctx -> {
-    var request = ctx.validatedBody(NewBook.class, NEW_BOOK);
-    var book = new Book(ids.incrementAndGet(), request.title(), request.author(), request.year());
-    books.put(book.id(), book);
-    return ctx.status(201).json(book);
-});
-app.describe(add, RouteDoc.summary("Add a book")
+var add =
+    app.post(
+        "/books",
+        ctx -> {
+          var request = ctx.validatedBody(NewBook.class, NEW_BOOK);
+          var book =
+              new Book(
+                  ids.incrementAndGet(), request.title(), request.author(), request.year());
+          books.put(book.id(), book);
+          return ctx.status(201).json(book);
+        });
+app.describe(
+    add,
+    RouteDoc.summary("Add a book")
         .description("Stores a new book and returns it with its id.")
-        .tags("books").operationId("addBook")
+        .tags("books")
+        .operationId("addBook")
         .requestBody(NewBook.class)
         .response(201, "The stored book", Book.class)
         .response(422, "The book is not valid")
@@ -323,11 +353,13 @@ app.describe(add, RouteDoc.summary("Add a book")
 <!-- snippet: examples/openapi/src/main/java/example/openapi/BooksApi.java#serve -->
 ```java
 if (docsAccess != null) {
-    openApi.serve(app, "/openapi.json", docsAccess);        // OpenAPI 3.1
-    openApi.serveSwagger(app, "/swagger.json", docsAccess); // Swagger 2.0
-    SwaggerUi.builder()                                     // Swagger UI at /docs
-            .spec("OpenAPI 3.1", "/openapi.json").spec("Swagger 2.0", "/swagger.json")
-            .build().register(app, docsAccess);
+  openApi.serve(app, "/openapi.json", docsAccess); // OpenAPI 3.1
+  openApi.serveSwagger(app, "/swagger.json", docsAccess); // Swagger 2.0
+  SwaggerUi.builder() // Swagger UI at /docs
+      .spec("OpenAPI 3.1", "/openapi.json")
+      .spec("Swagger 2.0", "/swagger.json")
+      .build()
+      .register(app, docsAccess);
 }
 ```
 

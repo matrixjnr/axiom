@@ -67,562 +67,885 @@ import java.util.regex.Pattern;
 
 /** All mutable connection state belongs to the channel's event loop. */
 final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
-    private static final System.Logger LOG = System.getLogger(HttpConnection.class.getName());
-    private static final Object UNMATCHED = new Object();
-    /** Bound from a request's first byte until its head is complete; a slower client receives 408. */
-    static final Duration REQUEST_HEAD_TIMEOUT = ListenerOptions.defaults().headTimeout();
-    private static final Pattern CONTENT_LENGTH = Pattern.compile("[0-9]{1,18}");
-    /**
-     * Outstanding requests per connection, including the active one. A further request is not
-     * executed: it is answered 503 after the earlier responses, and the connection closes.
-     */
-    static final int MAX_PIPELINED = ListenerOptions.defaults().maxPipelinedRequests();
-    /**
-     * Input read and dropped, never buffered, after a listener error (while earlier pipelined
-     * requests finish, and again while lingering). Reading continues so that a client disconnect is
-     * noticed and cancels the running handler. A client that sends more is treated as abusive: the
-     * connection closes at once, cancelling any running handler.
-     */
-    static final int MAX_DISCARDED_INPUT = ListenerOptions.defaults().maxDiscardedInput();
-    /**
-     * After the last response on a connection the output is shut down and input is read and
-     * discarded for at most this long before the connection closes, so a client still sending (for
-     * example the rest of a rejected body, or pipelined requests) reads the whole response instead
-     * of a reset.
-     */
-    static final Duration LINGER_TIMEOUT = ListenerOptions.defaults().lingerTimeout();
-    /**
-     * Lingering ends once no input has arrived for this long. Lingering exists for a client that is
-     * still sending; one that has gone quiet has most likely finished, and closing a connection with
-     * no unread input sends no reset. The period is longer than a typical TCP retransmission timeout
-     * (200 ms minimum on Linux), so a single lost segment from a client still sending does not end
-     * it; a client that pauses longer while still sending may get a reset, which can destroy
-     * response bytes it has not read yet.
-     */
-    static final Duration LINGER_QUIET_TIMEOUT = ListenerOptions.defaults().lingerQuietTimeout();
-    /** Total linger bound once the listener is closing, so lingering connections barely delay shutdown. */
-    static final Duration SHUTDOWN_LINGER_TIMEOUT = ListenerOptions.defaults().shutdownLingerTimeout();
-    /**
-     * Bound on writing one response: from handing it to the socket until the operating system has
-     * accepted its last byte. A client that reads too slowly to take a whole response (at most 1 MiB
-     * of body) in this time loses the connection. The inactivity timeout alone would let a client
-     * that reads a few bytes now and then hold the connection indefinitely.
-     */
-    static final Duration RESPONSE_TIMEOUT = ListenerOptions.defaults().responseTimeout();
-    private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "transfer-encoding",
-            "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
-    private final Application application;
-    private final RequestDispatcher executor;
-    private final RequestDispatcher.Session session;
-    private final long headTimeoutNanos;
-    private final long lingerNanos;
-    private final long lingerQuietNanos;
-    private final long shutdownLingerNanos;
-    private final long responseNanos;
-    private final int maxPipelined;
-    private final int maxDiscardedInput;
-    /** Receives the listener's own error responses, or null. */
-    private final RejectionObserver rejections;
-    /**
-     * True once the listener has started closing. Read on every response, from the moment the
-     * listener's close begins, so a response sent after that carries {@code Connection: close} even
-     * before {@link #drain} has run on this connection.
-     */
-    private final BooleanSupplier listenerClosing;
-    /** The listener's slot for this connection, or null outside a listener; released by the listener. */
-    private final ConnectionSlots.Slot slot;
-    /** The listener's budget of request body bytes held at once, across all its connections. */
-    private final BodyBudget budget;
-    /** True for a channel of an HTTP/2 stream; framing and trailers then follow HTTP/2 rules. */
-    private final boolean http2;
-    private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
-    private Exchange receiving;
-    private boolean busy;
-    private boolean closing;
-    private boolean draining;
-    /**
-     * Status of a listener error waiting for earlier pipelined responses; zero when none. Once set,
-     * no further input is decoded or executed.
-     */
-    private int deferredStatus;
-    /** The deferred error answers a HEAD request, so it must be sent without a body. */
-    private boolean deferredHead;
-    /**
-     * The request whose head was accepted last and that is not yet complete is HEAD. A listener
-     * error for it is sent without body bytes, like any response to HEAD.
-     */
-    private boolean receivingHead;
-    /** Output is shut down after an error response; input is discarded until the connection closes. */
-    private boolean lingering;
-    private ScheduledFuture<?> lingerTimer;
-    /** While lingering: when it ends at the latest, and when input last arrived (event loop ticker). */
-    private long lingerDeadline;
-    private long lastInput;
-    /** Bounds the response write in progress; at most one response is written at a time. */
-    private ScheduledFuture<?> responseTimer;
-    /**
-     * Bounds the write of the interim {@code 100 Continue}. Separate from {@link #responseTimer}
-     * because the client may send the body, and the final response may start, while it is pending.
-     */
-    private ScheduledFuture<?> continueTimer;
-    private ChannelHandlerContext context;
-    private RequestDispatcher.Task<WireResponse> active;
-    /** The exchange whose handler is running, needed to cancel a streaming body reader. */
-    private Exchange activeExchange;
-    /**
-     * The streamed response whose head was sent and whose body the handler is still writing; null
-     * otherwise. Set when the head is written and cleared when the exchange ends.
-     */
-    private ChannelBodyWriter stream;
-    private boolean streamKeepAlive;
-    /** Headers of a streamed response nominated by its {@code Trailer} header, sent at stream end. */
-    private Map<String, String> streamTrailers = Map.of();
-    private final StreamMetrics streamMetrics;
-    private final ListenerMetrics listenerMetrics;
-    private ScheduledFuture<?> headTimer;
-    // Body of the request being received, copied out of each Netty buffer as it arrives. Its array
-    // grows by doubling as bytes arrive, capped at the declared Content-Length or, for chunked
-    // bodies, at the limit, so a stalled sender holds little memory. Dropped on every exit path
-    // (see releaseBody).
-    private Body.Builder bodyBuilder;
-    private StreamingBodyReader streaming;
-    /** Set when a streaming handler stopped before its body ended: the remaining input is discarded. */
-    private boolean forceClose;
-    /** The running exchange whose streaming body was rejected by a listener error; read off-thread. */
-    private volatile Exchange rejected;
-    private boolean bodyChunked;
-    private long declaredLength;
-    private int bodyLength;
-    private int bodyLimit;
-    /** Body bytes of requests buffered in {@code pending}, bounded by twice the body limit. */
-    private long queuedBodyBytes;
-    /** What the body being received holds of the listener's budget; null when no body is expected. */
-    private BodyBudget.Reservation receivingReservation;
-    /** An accepted {@code Expect: 100-continue} whose interim response is not yet written. */
-    private boolean continuePending;
-    private ScheduledFuture<?> bodyTimer;
-    /** First allocation for a body; doubled as needed up to its declared length or the body limit. */
-    private static final int INITIAL_BODY_CAPACITY = 8192;
+  private static final System.Logger LOG = System.getLogger(HttpConnection.class.getName());
+  private static final Object UNMATCHED = new Object();
 
-    /** A connection outside any listener, with the production bounds; for tests. */
-    HttpConnection(Application application, RequestDispatcher executor) {
-        this(application, executor, TransportSettings.DEFAULTS, null, () -> false);
+  /** Bound from a request's first byte until its head is complete; a slower client receives 408. */
+  static final Duration REQUEST_HEAD_TIMEOUT = ListenerOptions.defaults().headTimeout();
+
+  private static final Pattern CONTENT_LENGTH = Pattern.compile("[0-9]{1,18}");
+
+  /**
+   * Outstanding requests per connection, including the active one. A further request is not
+   * executed: it is answered 503 after the earlier responses, and the connection closes.
+   */
+  static final int MAX_PIPELINED = ListenerOptions.defaults().maxPipelinedRequests();
+
+  /**
+   * Input read and dropped, never buffered, after a listener error (while earlier pipelined
+   * requests finish, and again while lingering). Reading continues so that a client disconnect is
+   * noticed and cancels the running handler. A client that sends more is treated as abusive: the
+   * connection closes at once, cancelling any running handler.
+   */
+  static final int MAX_DISCARDED_INPUT = ListenerOptions.defaults().maxDiscardedInput();
+
+  /**
+   * After the last response on a connection the output is shut down and input is read and discarded
+   * for at most this long before the connection closes, so a client still sending (for example the
+   * rest of a rejected body, or pipelined requests) reads the whole response instead of a reset.
+   */
+  static final Duration LINGER_TIMEOUT = ListenerOptions.defaults().lingerTimeout();
+
+  /**
+   * Lingering ends once no input has arrived for this long. Lingering exists for a client that is
+   * still sending; one that has gone quiet has most likely finished, and closing a connection with
+   * no unread input sends no reset. The period is longer than a typical TCP retransmission timeout
+   * (200 ms minimum on Linux), so a single lost segment from a client still sending does not end
+   * it; a client that pauses longer while still sending may get a reset, which can destroy response
+   * bytes it has not read yet.
+   */
+  static final Duration LINGER_QUIET_TIMEOUT = ListenerOptions.defaults().lingerQuietTimeout();
+
+  /**
+   * Total linger bound once the listener is closing, so lingering connections barely delay
+   * shutdown.
+   */
+  static final Duration SHUTDOWN_LINGER_TIMEOUT =
+      ListenerOptions.defaults().shutdownLingerTimeout();
+
+  /**
+   * Bound on writing one response: from handing it to the socket until the operating system has
+   * accepted its last byte. A client that reads too slowly to take a whole response (at most 1 MiB
+   * of body) in this time loses the connection. The inactivity timeout alone would let a client
+   * that reads a few bytes now and then hold the connection indefinitely.
+   */
+  static final Duration RESPONSE_TIMEOUT = ListenerOptions.defaults().responseTimeout();
+
+  private static final Set<String> HOP_HEADERS =
+      Set.of(
+          "connection",
+          "keep-alive",
+          "transfer-encoding",
+          "content-length",
+          "trailer",
+          "upgrade",
+          "proxy-authenticate",
+          "proxy-authorization",
+          "te");
+  private final Application application;
+  private final RequestDispatcher executor;
+  private final RequestDispatcher.Session session;
+  private final long headTimeoutNanos;
+  private final long lingerNanos;
+  private final long lingerQuietNanos;
+  private final long shutdownLingerNanos;
+  private final long responseNanos;
+  private final int maxPipelined;
+  private final int maxDiscardedInput;
+
+  /** Receives the listener's own error responses, or null. */
+  private final RejectionObserver rejections;
+
+  /**
+   * True once the listener has started closing. Read on every response, from the moment the
+   * listener's close begins, so a response sent after that carries {@code Connection: close} even
+   * before {@link #drain} has run on this connection.
+   */
+  private final BooleanSupplier listenerClosing;
+
+  /**
+   * The listener's slot for this connection, or null outside a listener; released by the listener.
+   */
+  private final ConnectionSlots.Slot slot;
+
+  /** The listener's budget of request body bytes held at once, across all its connections. */
+  private final BodyBudget budget;
+
+  /** True for a channel of an HTTP/2 stream; framing and trailers then follow HTTP/2 rules. */
+  private final boolean http2;
+
+  private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
+  private Exchange receiving;
+  private boolean busy;
+  private boolean closing;
+  private boolean draining;
+
+  /**
+   * Status of a listener error waiting for earlier pipelined responses; zero when none. Once set,
+   * no further input is decoded or executed.
+   */
+  private int deferredStatus;
+
+  /** The deferred error answers a HEAD request, so it must be sent without a body. */
+  private boolean deferredHead;
+
+  /**
+   * The request whose head was accepted last and that is not yet complete is HEAD. A listener error
+   * for it is sent without body bytes, like any response to HEAD.
+   */
+  private boolean receivingHead;
+
+  /**
+   * Output is shut down after an error response; input is discarded until the connection closes.
+   */
+  private boolean lingering;
+
+  private ScheduledFuture<?> lingerTimer;
+
+  /**
+   * While lingering: when it ends at the latest, and when input last arrived (event loop ticker).
+   */
+  private long lingerDeadline;
+
+  private long lastInput;
+
+  /** Bounds the response write in progress; at most one response is written at a time. */
+  private ScheduledFuture<?> responseTimer;
+
+  /**
+   * Bounds the write of the interim {@code 100 Continue}. Separate from {@link #responseTimer}
+   * because the client may send the body, and the final response may start, while it is pending.
+   */
+  private ScheduledFuture<?> continueTimer;
+
+  private ChannelHandlerContext context;
+  private RequestDispatcher.Task<WireResponse> active;
+
+  /** The exchange whose handler is running, needed to cancel a streaming body reader. */
+  private Exchange activeExchange;
+
+  /**
+   * The streamed response whose head was sent and whose body the handler is still writing; null
+   * otherwise. Set when the head is written and cleared when the exchange ends.
+   */
+  private ChannelBodyWriter stream;
+
+  private boolean streamKeepAlive;
+
+  /** Headers of a streamed response nominated by its {@code Trailer} header, sent at stream end. */
+  private Map<String, String> streamTrailers = Map.of();
+
+  private final StreamMetrics streamMetrics;
+  private final ListenerMetrics listenerMetrics;
+  private ScheduledFuture<?> headTimer;
+  // Body of the request being received, copied out of each Netty buffer as it arrives. Its array
+  // grows by doubling as bytes arrive, capped at the declared Content-Length or, for chunked
+  // bodies, at the limit, so a stalled sender holds little memory. Dropped on every exit path
+  // (see releaseBody).
+  private Body.Builder bodyBuilder;
+  private StreamingBodyReader streaming;
+
+  /**
+   * Set when a streaming handler stopped before its body ended: the remaining input is discarded.
+   */
+  private boolean forceClose;
+
+  /**
+   * The running exchange whose streaming body was rejected by a listener error; read off-thread.
+   */
+  private volatile Exchange rejected;
+
+  private boolean bodyChunked;
+  private long declaredLength;
+  private int bodyLength;
+  private int bodyLimit;
+
+  /** Body bytes of requests buffered in {@code pending}, bounded by twice the body limit. */
+  private long queuedBodyBytes;
+
+  /** What the body being received holds of the listener's budget; null when no body is expected. */
+  private BodyBudget.Reservation receivingReservation;
+
+  /** An accepted {@code Expect: 100-continue} whose interim response is not yet written. */
+  private boolean continuePending;
+
+  private ScheduledFuture<?> bodyTimer;
+
+  /** First allocation for a body; doubled as needed up to its declared length or the body limit. */
+  private static final int INITIAL_BODY_CAPACITY = 8192;
+
+  /** A connection outside any listener, with the production bounds; for tests. */
+  HttpConnection(Application application, RequestDispatcher executor) {
+    this(application, executor, TransportSettings.DEFAULTS, null, () -> false);
+  }
+
+  /**
+   * A connection within a listener that has no body budget of its own; for tests of other bounds.
+   */
+  HttpConnection(
+      Application application,
+      RequestDispatcher executor,
+      TransportSettings settings,
+      ConnectionSlots.Slot slot,
+      BooleanSupplier listenerClosing) {
+    this(application, executor, settings, slot, listenerClosing, BodyBudget.unlimited());
+  }
+
+  /** Production uses {@link TransportSettings#DEFAULTS}; tests may vary single bounds. */
+  HttpConnection(
+      Application application,
+      RequestDispatcher executor,
+      TransportSettings settings,
+      ConnectionSlots.Slot slot,
+      BooleanSupplier listenerClosing,
+      BodyBudget budget) {
+    this(
+        application,
+        executor,
+        settings,
+        slot,
+        listenerClosing,
+        budget,
+        new StreamMetrics(application.metrics()),
+        ListenerMetrics.DISABLED);
+  }
+
+  /** Production: stream measurements are shared by all connections of the listener. */
+  HttpConnection(
+      Application application,
+      RequestDispatcher executor,
+      TransportSettings settings,
+      ConnectionSlots.Slot slot,
+      BooleanSupplier listenerClosing,
+      BodyBudget budget,
+      StreamMetrics streamMetrics,
+      ListenerMetrics listenerMetrics) {
+    this(
+        application,
+        executor,
+        null,
+        settings,
+        slot,
+        listenerClosing,
+        budget,
+        streamMetrics,
+        listenerMetrics);
+  }
+
+  /** Production with the listener's session on the application-owned shared budget. */
+  HttpConnection(
+      Application application,
+      RequestDispatcher executor,
+      RequestDispatcher.Session session,
+      TransportSettings settings,
+      ConnectionSlots.Slot slot,
+      BooleanSupplier listenerClosing,
+      BodyBudget budget,
+      StreamMetrics streamMetrics,
+      ListenerMetrics listenerMetrics) {
+    this(
+        application,
+        executor,
+        session,
+        settings,
+        slot,
+        listenerClosing,
+        budget,
+        streamMetrics,
+        listenerMetrics,
+        false);
+  }
+
+  /** As above, for a channel of an HTTP/2 stream. */
+  HttpConnection(
+      Application application,
+      RequestDispatcher executor,
+      RequestDispatcher.Session session,
+      TransportSettings settings,
+      ConnectionSlots.Slot slot,
+      BooleanSupplier listenerClosing,
+      BodyBudget budget,
+      StreamMetrics streamMetrics,
+      ListenerMetrics listenerMetrics,
+      boolean http2) {
+    this.budget = budget;
+    this.http2 = http2;
+    this.listenerMetrics = listenerMetrics;
+    this.slot = slot;
+    this.listenerClosing = listenerClosing;
+    this.application = application;
+    this.executor = executor;
+    this.session = session;
+    this.headTimeoutNanos = settings.headTimeout().toNanos();
+    this.lingerNanos = settings.linger().toNanos();
+    this.lingerQuietNanos = settings.lingerQuiet().toNanos();
+    this.shutdownLingerNanos = settings.shutdownLinger().toNanos();
+    this.responseNanos = settings.responseTimeout().toNanos();
+    this.maxPipelined = settings.options().maxPipelinedRequests();
+    this.maxDiscardedInput = settings.options().maxDiscardedInput();
+    this.rejections = settings.options().rejectionObserver().orElse(null);
+    this.streamMetrics = streamMetrics;
+  }
+
+  /**
+   * Starts the head deadline once a request head has started arriving, including when its first
+   * bytes came in the same read as the end of the previous request.
+   */
+  private void inputDecoded(ChannelHandlerContext ctx) {
+    var decoder = ctx.pipeline().get(RequestDecoder.class);
+    if (decoder == null || decoder.headStarted()) {
+      startHeadTimer(ctx);
     }
+  }
 
-    /** A connection within a listener that has no body budget of its own; for tests of other bounds. */
-    HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
-            ConnectionSlots.Slot slot, BooleanSupplier listenerClosing) {
-        this(application, executor, settings, slot, listenerClosing, BodyBudget.unlimited());
+  /** Starts the head deadline of an HTTP/2 stream, whose pipeline has no HTTP/1 request decoder. */
+  void headStarted(ChannelHandlerContext ctx) {
+    startHeadTimer(ctx);
+  }
+
+  private void startHeadTimer(ChannelHandlerContext ctx) {
+    // Body bytes are bounded by the request deadline, not the head timeout.
+    if (closing || deferredStatus != 0 || headTimer != null || receiving != null) {
+      return;
     }
+    headTimer =
+        ctx.executor()
+            .schedule(
+                () -> {
+                  headTimer = null;
+                  if (!closing) {
+                    fail(ctx, 408);
+                  }
+                },
+                headTimeoutNanos,
+                TimeUnit.NANOSECONDS);
+  }
 
-    /** Production uses {@link TransportSettings#DEFAULTS}; tests may vary single bounds. */
-    HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
-            ConnectionSlots.Slot slot, BooleanSupplier listenerClosing, BodyBudget budget) {
-        this(application, executor, settings, slot, listenerClosing, budget, new StreamMetrics(application.metrics()),
-                ListenerMetrics.DISABLED);
+  private void headComplete() {
+    if (headTimer != null) {
+      headTimer.cancel(false);
+      headTimer = null;
     }
+  }
 
-    /** Production: stream measurements are shared by all connections of the listener. */
-    HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
-            ConnectionSlots.Slot slot, BooleanSupplier listenerClosing, BodyBudget budget,
-            StreamMetrics streamMetrics, ListenerMetrics listenerMetrics) {
-        this(application, executor, null, settings, slot, listenerClosing, budget, streamMetrics, listenerMetrics);
+  /** Releases a partially received body and its deadline timer; idempotent. */
+  private void releaseBody() {
+    bodyBuilder = null;
+    if (streaming != null) {
+      streaming.close();
+      streaming = null;
     }
-
-    /** Production with the listener's session on the application-owned shared budget. */
-    HttpConnection(Application application, RequestDispatcher executor, RequestDispatcher.Session session,
-            TransportSettings settings, ConnectionSlots.Slot slot, BooleanSupplier listenerClosing,
-            BodyBudget budget, StreamMetrics streamMetrics, ListenerMetrics listenerMetrics) {
-        this(application, executor, session, settings, slot, listenerClosing, budget, streamMetrics, listenerMetrics,
-                false);
+    if (bodyTimer != null) {
+      bodyTimer.cancel(false);
+      bodyTimer = null;
     }
-
-    /** As above, for a channel of an HTTP/2 stream. */
-    HttpConnection(Application application, RequestDispatcher executor, RequestDispatcher.Session session,
-            TransportSettings settings, ConnectionSlots.Slot slot, BooleanSupplier listenerClosing,
-            BodyBudget budget, StreamMetrics streamMetrics, ListenerMetrics listenerMetrics, boolean http2) {
-        this.budget = budget;
-        this.http2 = http2;
-        this.listenerMetrics = listenerMetrics;
-        this.slot = slot;
-        this.listenerClosing = listenerClosing;
-        this.application = application;
-        this.executor = executor;
-        this.session = session;
-        this.headTimeoutNanos = settings.headTimeout().toNanos();
-        this.lingerNanos = settings.linger().toNanos();
-        this.lingerQuietNanos = settings.lingerQuiet().toNanos();
-        this.shutdownLingerNanos = settings.shutdownLinger().toNanos();
-        this.responseNanos = settings.responseTimeout().toNanos();
-        this.maxPipelined = settings.options().maxPipelinedRequests();
-        this.maxDiscardedInput = settings.options().maxDiscardedInput();
-        this.rejections = settings.options().rejectionObserver().orElse(null);
-        this.streamMetrics = streamMetrics;
+    bodyLength = 0;
+    continuePending = false;
+    if (receivingReservation != null) {
+      receivingReservation.release();
+      receivingReservation = null;
     }
+  }
 
-    /**
-     * Starts the head deadline once a request head has started arriving, including when its first
-     * bytes came in the same read as the end of the previous request.
-     */
-    private void inputDecoded(ChannelHandlerContext ctx) {
-        var decoder = ctx.pipeline().get(RequestDecoder.class);
-        if (decoder == null || decoder.headStarted()) { startHeadTimer(ctx); }
+  @Override
+  public void handlerAdded(ChannelHandlerContext ctx) {
+    context = ctx;
+  }
+
+  /**
+   * Starts graceful shutdown on the channel's event loop: an idle connection closes now, and a
+   * connection with a running exchange closes after that response. Queued requests are dropped.
+   */
+  void drain() {
+    // A lingering connection only waits for its client; shutdown does not wait long for it.
+    if (lingering && !draining) {
+      draining = true;
+      long now = now(context);
+      lingerDeadline = Math.min(lingerDeadline, now + shutdownLingerNanos);
+      scheduleLingerCheck(context, now);
+      return;
     }
-
-    /** Starts the head deadline of an HTTP/2 stream, whose pipeline has no HTTP/1 request decoder. */
-    void headStarted(ChannelHandlerContext ctx) { startHeadTimer(ctx); }
-
-    private void startHeadTimer(ChannelHandlerContext ctx) {
-        // Body bytes are bounded by the request deadline, not the head timeout.
-        if (closing || deferredStatus != 0 || headTimer != null || receiving != null) { return; }
-        headTimer = ctx.executor().schedule(() -> {
-            headTimer = null;
-            if (!closing) { fail(ctx, 408); }
-        }, headTimeoutNanos, TimeUnit.NANOSECONDS);
+    if (closing || draining) {
+      return;
     }
-
-    private void headComplete() {
-        if (headTimer != null) { headTimer.cancel(false); headTimer = null; }
+    draining = true;
+    if (stream != null) {
+      // A stream keeps the grace period: the body is told that shutdown began, so it can end
+      // normally with a final chunk (the connection then closes), and the listener cuts what
+      // is still running when the grace period ends.
+      stream.beginShutdown();
+      return;
     }
-
-    /** Releases a partially received body and its deadline timer; idempotent. */
-    private void releaseBody() {
-        bodyBuilder = null;
-        if (streaming != null) { streaming.close(); streaming = null; }
-        if (bodyTimer != null) { bodyTimer.cancel(false); bodyTimer = null; }
-        bodyLength = 0;
-        continuePending = false;
-        if (receivingReservation != null) { receivingReservation.release(); receivingReservation = null; }
+    if (!busy) {
+      abort(context);
     }
+  }
 
-    @Override public void handlerAdded(ChannelHandlerContext ctx) { context = ctx; }
-
-    /**
-     * Starts graceful shutdown on the channel's event loop: an idle connection closes now, and a
-     * connection with a running exchange closes after that response. Queued requests are dropped.
-     */
-    void drain() {
-        // A lingering connection only waits for its client; shutdown does not wait long for it.
-        if (lingering && !draining) {
-            draining = true;
-            long now = now(context);
-            lingerDeadline = Math.min(lingerDeadline, now + shutdownLingerNanos);
-            scheduleLingerCheck(context, now);
-            return;
+  @Override
+  protected void channelRead0(ChannelHandlerContext ctx, HttpObject message) {
+    // After an error, requests already decoded from the same read are dropped unexecuted.
+    if (closing || deferredStatus != 0) {
+      return;
+    }
+    if (!message.decoderResult().isSuccess()) {
+      fail(ctx, decoderFailureStatus(message.decoderResult().cause()));
+      return;
+    }
+    if (message instanceof HttpRequest request) {
+      if (receiving != null) {
+        fail(ctx, 400);
+        return;
+      }
+      headComplete();
+      if (!accept(ctx, request)) {
+        return;
+      }
+    }
+    if (message instanceof HttpContent content) {
+      if (receiving == null) {
+        fail(ctx, 400);
+        return;
+      }
+      if (content.content().isReadable() && !receiveBody(ctx, content.content())) {
+        return;
+      }
+      if (message instanceof LastHttpContent last) {
+        if (http2 && !last.trailingHeaders().isEmpty()) {
+          mergeTrailers(last);
         }
-        if (closing || draining) { return; }
-        draining = true;
-        if (stream != null) {
-            // A stream keeps the grace period: the body is told that shutdown began, so it can end
-            // normally with a final chunk (the connection then closes), and the listener cuts what
-            // is still running when the grace period ends.
-            stream.beginShutdown();
-            return;
-        }
-        if (!busy) { abort(context); }
+        completeRequest(ctx);
+      }
     }
+  }
 
-    @Override protected void channelRead0(ChannelHandlerContext ctx, HttpObject message) {
-        // After an error, requests already decoded from the same read are dropped unexecuted.
-        if (closing || deferredStatus != 0) { return; }
-        if (!message.decoderResult().isSuccess()) { fail(ctx, decoderFailureStatus(message.decoderResult().cause())); return; }
-        if (message instanceof HttpRequest request) {
-            if (receiving != null) { fail(ctx, 400); return; }
-            headComplete();
-            if (!accept(ctx, request)) { return; }
-        }
-        if (message instanceof HttpContent content) {
-            if (receiving == null) { fail(ctx, 400); return; }
-            if (content.content().isReadable() && !receiveBody(ctx, content.content())) { return; }
-            if (message instanceof LastHttpContent last) {
-                if (http2 && !last.trailingHeaders().isEmpty()) { mergeTrailers(last); }
-                completeRequest(ctx);
-            }
-        }
+  /**
+   * Validates a request head and starts receiving it; false when a response or close has been
+   * issued.
+   */
+  private boolean accept(ChannelHandlerContext ctx, HttpRequest request) {
+    receivingHead = request.method().name().equals("HEAD");
+    // The request beyond the bound is refused before its body is read; earlier ones still complete.
+    if (pending.size() + (busy ? 1 : 0) >= maxPipelined) {
+      fail(ctx, 503);
+      return false;
     }
-
-    /** Validates a request head and starts receiving it; false when a response or close has been issued. */
-    private boolean accept(ChannelHandlerContext ctx, HttpRequest request) {
-        receivingHead = request.method().name().equals("HEAD");
-        // The request beyond the bound is refused before its body is read; earlier ones still complete.
-        if (pending.size() + (busy ? 1 : 0) >= maxPipelined) { fail(ctx, 503); return false; }
-        boolean http10 = request.protocolVersion().equals(HttpVersion.HTTP_1_0);
-        if (!http10 && !request.protocolVersion().equals(HttpVersion.HTTP_1_1)) { fail(ctx, 505); return false; }
-        if (!validHost(request, http10)) { fail(ctx, 400); return false; }
-        if (request.method().name().equals("CONNECT") || request.headers().contains(HttpHeaderNames.UPGRADE)) {
-            fail(ctx, 501); return false;
-        }
-        var headers = request.headers();
-        boolean chunked = headers.contains(HttpHeaderNames.TRANSFER_ENCODING);
-        long length;
-        try {
-            if (chunked && headers.contains(HttpHeaderNames.CONTENT_LENGTH)) { fail(ctx, 400); return false; }
-            // Transfer codings do not exist in HTTP/1.0 (RFC 9112 6.1), so the framing is ambiguous.
-            if (chunked && http10) { fail(ctx, 400); return false; }
-            var codings = headers.getAll(HttpHeaderNames.TRANSFER_ENCODING);
-            // Repeated field lines are rejected outright rather than combined, so no intermediary
-            // can read the framing differently (the decoder already rejects lists that do not end in
-            // chunked or repeat it). A single list with another coding before chunked has
-            // unambiguous framing and an unsupported coding, so RFC 9112 6.1 suggests 501.
-            if (codings.size() > 1) { fail(ctx, 400); return false; }
-            if (chunked && !codings.getFirst().trim().equalsIgnoreCase(HttpHeaderValues.CHUNKED.toString())) {
-                fail(ctx, 501); return false;
-            }
-            var declared = headers.getAll(HttpHeaderNames.CONTENT_LENGTH);
-            // The decoder already rejects signs, empty values and non-digits; this keeps the rule
-            // explicit: exactly one value of 1 to 18 digits (surrounding whitespace is not part of it).
-            if (declared.size() > 1 || (declared.size() == 1 && !CONTENT_LENGTH.matcher(declared.getFirst().trim()).matches())) {
-                fail(ctx, 400); return false;
-            }
-            // RFC 9112 6.3: without Content-Length or Transfer-Encoding a request has no body.
-            length = chunked || declared.isEmpty() ? (chunked ? -1 : 0) : Long.parseLong(declared.getFirst().trim());
-        } catch (NumberFormatException invalid) { fail(ctx, 400); return false; }
-        bodyLimit = application.maxRequestBody();
-        // Rejected before any body byte is read; the connection closes after the response.
-        if (length > bodyLimit) { fail(ctx, 413); return false; }
-        var expect = headers.getAll(HttpHeaderNames.EXPECT);
-        if (!expect.isEmpty() && (expect.size() != 1 || !expect.getFirst().trim().equalsIgnoreCase("100-continue"))) {
-            fail(ctx, 417); return false;
-        }
-        var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-        for (var header : headers) { fields.merge(header.getKey(), header.getValue(), (first, next) -> first + ", " + next); }
-        try {
-            // Validates the path and query in one pass; any rejection is a 400.
-            // The peer is resolved by the socket; embedded test channels have no IP peer.
-            var peer = ctx.channel().remoteAddress() instanceof InetSocketAddress address && !address.isUnresolved()
-                    ? address : null;
-            // An absolute-form target is reduced to its path and query first; Host must agree with it.
-            var target = RequestTargets.originForm(request.uri(), headers.get(HttpHeaderNames.HOST));
-            receiving = new Exchange(Request.fromTarget(request.method().name(), target).withHeaders(fields)
-                    .withRemoteAddress(peer).withTls(secure(ctx)),
-                    HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
-        } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
-        var streams = application.resolve(receiving.request()).map(application::streamsBody).orElse(false);
-        if (chunked || length > 0) {
-            bodyChunked = chunked;
-            declaredLength = length;
-            // Declared bodies are reserved in full against the per-connection bound up front.
-            if (!chunked && queuedBodyBytes + length > 2L * bodyLimit) { fail(ctx, 503); return false; }
-            // The listener's budget covers this body from now until its response is final; a
-            // declared length is taken in full, a chunked body grows its share as bytes arrive.
-            receivingReservation = budget.reservation();
-            // A streamed body reserves only the bytes it holds; a buffered declared body takes its
-            // whole announced share at once, including bytes a slow client has not sent yet.
-            if (!chunked && !streams && !receivingReservation.grow(length)) { fail(ctx, 503); return false; }
-            if (streams) {
-                streaming = new StreamingBodyReader(ctx, receivingReservation);
-                receiving = receiving.withStream(streaming);
-            }
-            var exchange = receiving;
-            // A slow body counts against the request deadline that started with the head.
-            bodyTimer = ctx.executor().schedule(() -> {
-                bodyTimer = null;
-                if (!closing && receiving == exchange) { fail(ctx, 408); }
-            }, exchange.execution().remainingTime().toNanos(), TimeUnit.NANOSECONDS);
-            continuePending = !expect.isEmpty() && !http10; // HTTP/1.0 clients do not expect 100.
-            if (streams) {
-                // A streaming handler starts before the body is complete: it reads from the reader
-                // while the event loop delivers chunks, and the water marks stop a slow reader from
-                // making the connection buffer more than its bounded share.
-                pending.addLast(exchange);
-                dispatch(ctx);
-            }
-            sendContinue(ctx);
-        } else if (streams) {
-            // A streaming route with no body still gets a reader that ends at once, so the handler
-            // sees the same contract as one with bytes.
-            receivingReservation = budget.reservation();
-            streaming = new StreamingBodyReader(ctx, receivingReservation);
-            receiving = receiving.withStream(streaming).withReservation(receivingReservation);
-            streaming.end();
-            streaming = null;
-            pending.addLast(receiving);
-            dispatch(ctx);
-        }
-        return true;
+    boolean http10 = request.protocolVersion().equals(HttpVersion.HTTP_1_0);
+    if (!http10 && !request.protocolVersion().equals(HttpVersion.HTTP_1_1)) {
+      fail(ctx, 505);
+      return false;
     }
-
-    /**
-     * Copies body bytes out of the Netty buffer, which the inbound handler releases on return.
-     * Returns false when the limit was exceeded and the connection is closing.
-     */
-    private boolean receiveBody(ChannelHandlerContext ctx, ByteBuf content) {
-        continuePending = false; // The client sent the body without waiting; no interim response is needed.
-        int readable = content.readableBytes();
-        long total = (long) bodyLength + readable;
-        if (total > bodyLimit) { fail(ctx, 413); return false; }
-        // A streaming body's bytes are held in its reader rather than in a body array; it shares the
-        // per-connection bound with the buffered bodies waiting behind it.
-        long held = streaming == null ? 0 : streaming.bytesReceived();
-        if (queuedBodyBytes + held + readable > 2L * bodyLimit) { fail(ctx, 503); return false; }
-        // Growth is capped at the declared length, so a complete declared body fills its array exactly.
-        long cap = bodyChunked ? bodyLimit : declaredLength;
-        if (total > cap) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
-        if (streaming != null) {
-            if (!streaming.accept(content)) { fail(ctx, 503); return false; }
-            bodyLength = (int) total;
-            return true;
-        }
-        if (bodyBuilder == null) {
-            int capacity = (int) Math.min(cap, Math.max(INITIAL_BODY_CAPACITY, total));
-            if (bodyChunked && !receivingReservation.grow(capacity)) { fail(ctx, 503); return false; }
-            bodyBuilder = Body.builder(receiving.request().header("Content-Type").orElse(null), capacity);
-        } else if (total > bodyBuilder.capacity()) {
-            // Doubling keeps the copying linear in the body size.
-            int capacity = (int) Math.min(cap, Math.max(total, 2L * bodyBuilder.capacity()));
-            if (bodyChunked && !receivingReservation.grow(capacity - bodyBuilder.capacity())) { fail(ctx, 503); return false; }
-            bodyBuilder.capacity(capacity);
-        }
-        // Straight from the network buffer into the array that becomes the body.
-        for (var part : content.nioBuffers(content.readerIndex(), readable)) { bodyBuilder.write(part); }
-        content.skipBytes(readable);
-        bodyLength = (int) total;
-        return true;
+    if (!validHost(request, http10)) {
+      fail(ctx, 400);
+      return false;
     }
-
-    /**
-     * Makes HTTP/2 request trailers ordinary headers of a buffered request. A streaming handler
-     * already holds its request when the trailers arrive, so they are not visible to it.
-     */
-    private void mergeTrailers(LastHttpContent last) {
-        var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-        fields.putAll(receiving.request().headers());
-        last.trailingHeaders().forEach(header ->
-                fields.merge(header.getKey().toString(), header.getValue().toString(), (first, next) -> first + ", " + next));
-        receiving = receiving.withRequest(receiving.request().withHeaders(fields));
+    if (request.method().name().equals("CONNECT")
+        || request.headers().contains(HttpHeaderNames.UPGRADE)) {
+      fail(ctx, 501);
+      return false;
     }
-
-    private void completeRequest(ChannelHandlerContext ctx) {
-        var exchange = receiving;
-        if (exchange.reader() != null) {
-            if (streaming != null) { streaming.end(); }
-            exchange = exchange.withBodyBytes(streaming == null ? 0 : (int) streaming.bytesReceived());
-            var reservation = receivingReservation;
-            if (reservation != null) {
-                reservation.shrinkTo(streaming == null ? 0 : streaming.queuedBytes());
-                exchange = exchange.withReservation(reservation);
-                receivingReservation = null;
-            }
-            // The exchange owns the reader now; releaseBody must not cancel it.
-            streaming = null;
-            releaseBody();
-            receiving = null;
-            receivingHead = false;
-            dispatch(ctx);
-            return;
-        }
-        if (bodyBuilder != null) {
-            if (bodyLength != declaredLength && !bodyChunked) { fail(ctx, 400); return; }
-            try {
-                // The array is handed over, not copied again unless it is larger than the body.
-                var builder = bodyBuilder;
-                bodyBuilder = null;
-                var body = builder.build();
-                exchange = new Exchange(exchange.request().withBody(body), exchange.keepAlive(),
-                        exchange.http10(), exchange.execution(), null, null, bodyLength);
-            } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
-            queuedBodyBytes += bodyLength;
-        }
-        // The exchange takes over the reservation, trimmed to the bytes the body really holds, and
-        // returns it when its response is final.
-        var reservation = receivingReservation;
-        if (reservation != null) {
-            reservation.shrinkTo(bodyLength);
-            exchange = exchange.withReservation(reservation);
-            receivingReservation = null;
-        }
-        releaseBody();
+    var headers = request.headers();
+    boolean chunked = headers.contains(HttpHeaderNames.TRANSFER_ENCODING);
+    long length;
+    try {
+      if (chunked && headers.contains(HttpHeaderNames.CONTENT_LENGTH)) {
+        fail(ctx, 400);
+        return false;
+      }
+      // Transfer codings do not exist in HTTP/1.0 (RFC 9112 6.1), so the framing is ambiguous.
+      if (chunked && http10) {
+        fail(ctx, 400);
+        return false;
+      }
+      var codings = headers.getAll(HttpHeaderNames.TRANSFER_ENCODING);
+      // Repeated field lines are rejected outright rather than combined, so no intermediary
+      // can read the framing differently (the decoder already rejects lists that do not end in
+      // chunked or repeat it). A single list with another coding before chunked has
+      // unambiguous framing and an unsupported coding, so RFC 9112 6.1 suggests 501.
+      if (codings.size() > 1) {
+        fail(ctx, 400);
+        return false;
+      }
+      if (chunked
+          && !codings.getFirst().trim().equalsIgnoreCase(HttpHeaderValues.CHUNKED.toString())) {
+        fail(ctx, 501);
+        return false;
+      }
+      var declared = headers.getAll(HttpHeaderNames.CONTENT_LENGTH);
+      // The decoder already rejects signs, empty values and non-digits; this keeps the rule
+      // explicit: exactly one value of 1 to 18 digits (surrounding whitespace is not part of it).
+      if (declared.size() > 1
+          || (declared.size() == 1
+              && !CONTENT_LENGTH.matcher(declared.getFirst().trim()).matches())) {
+        fail(ctx, 400);
+        return false;
+      }
+      // RFC 9112 6.3: without Content-Length or Transfer-Encoding a request has no body.
+      length =
+          chunked || declared.isEmpty()
+              ? (chunked ? -1 : 0)
+              : Long.parseLong(declared.getFirst().trim());
+    } catch (NumberFormatException invalid) {
+      fail(ctx, 400);
+      return false;
+    }
+    bodyLimit = application.maxRequestBody();
+    // Rejected before any body byte is read; the connection closes after the response.
+    if (length > bodyLimit) {
+      fail(ctx, 413);
+      return false;
+    }
+    var expect = headers.getAll(HttpHeaderNames.EXPECT);
+    if (!expect.isEmpty()
+        && (expect.size() != 1 || !expect.getFirst().trim().equalsIgnoreCase("100-continue"))) {
+      fail(ctx, 417);
+      return false;
+    }
+    var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+    for (var header : headers) {
+      fields.merge(header.getKey(), header.getValue(), (first, next) -> first + ", " + next);
+    }
+    try {
+      // Validates the path and query in one pass; any rejection is a 400.
+      // The peer is resolved by the socket; embedded test channels have no IP peer.
+      var peer =
+          ctx.channel().remoteAddress() instanceof InetSocketAddress address
+                  && !address.isUnresolved()
+              ? address
+              : null;
+      // An absolute-form target is reduced to its path and query first; Host must agree with it.
+      var target = RequestTargets.originForm(request.uri(), headers.get(HttpHeaderNames.HOST));
+      receiving =
+          new Exchange(
+              Request.fromTarget(request.method().name(), target)
+                  .withHeaders(fields)
+                  .withRemoteAddress(peer)
+                  .withTls(secure(ctx)),
+              HttpUtil.isKeepAlive(request),
+              http10,
+              ExecutionContext.create(application.requestTimeout()));
+    } catch (IllegalArgumentException invalid) {
+      fail(ctx, 400);
+      return false;
+    }
+    var streams =
+        application.resolve(receiving.request()).map(application::streamsBody).orElse(false);
+    if (chunked || length > 0) {
+      bodyChunked = chunked;
+      declaredLength = length;
+      // Declared bodies are reserved in full against the per-connection bound up front.
+      if (!chunked && queuedBodyBytes + length > 2L * bodyLimit) {
+        fail(ctx, 503);
+        return false;
+      }
+      // The listener's budget covers this body from now until its response is final; a
+      // declared length is taken in full, a chunked body grows its share as bytes arrive.
+      receivingReservation = budget.reservation();
+      // A streamed body reserves only the bytes it holds; a buffered declared body takes its
+      // whole announced share at once, including bytes a slow client has not sent yet.
+      if (!chunked && !streams && !receivingReservation.grow(length)) {
+        fail(ctx, 503);
+        return false;
+      }
+      if (streams) {
+        streaming = new StreamingBodyReader(ctx, receivingReservation);
+        receiving = receiving.withStream(streaming);
+      }
+      var exchange = receiving;
+      // A slow body counts against the request deadline that started with the head.
+      bodyTimer =
+          ctx.executor()
+              .schedule(
+                  () -> {
+                    bodyTimer = null;
+                    if (!closing && receiving == exchange) {
+                      fail(ctx, 408);
+                    }
+                  },
+                  exchange.execution().remainingTime().toNanos(),
+                  TimeUnit.NANOSECONDS);
+      continuePending = !expect.isEmpty() && !http10; // HTTP/1.0 clients do not expect 100.
+      if (streams) {
+        // A streaming handler starts before the body is complete: it reads from the reader
+        // while the event loop delivers chunks, and the water marks stop a slow reader from
+        // making the connection buffer more than its bounded share.
         pending.addLast(exchange);
-        receiving = null;
-        receivingHead = false;
         dispatch(ctx);
+      }
+      sendContinue(ctx);
+    } else if (streams) {
+      // A streaming route with no body still gets a reader that ends at once, so the handler
+      // sees the same contract as one with bytes.
+      receivingReservation = budget.reservation();
+      streaming = new StreamingBodyReader(ctx, receivingReservation);
+      receiving = receiving.withStream(streaming).withReservation(receivingReservation);
+      streaming.end();
+      streaming = null;
+      pending.addLast(receiving);
+      dispatch(ctx);
     }
+    return true;
+  }
 
-    /**
-     * Writes {@code 100 Continue} for the request being received once every earlier response
-     * has been written, so the interim response never overtakes a pipelined final response.
-     */
-    private void sendContinue(ChannelHandlerContext ctx) {
-        if (!continuePending || busy || !pending.isEmpty() || closing || deferredStatus != 0) { return; }
-        continuePending = false;
-        var written = ctx.writeAndFlush(new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
-                HttpResponseStatus.CONTINUE, Unpooled.EMPTY_BUFFER));
-        // The interim response is a response write like any other: a client that never reads loses
-        // the connection after the response timeout instead of holding it for the inactivity timeout.
-        if (!written.isDone()) {
-            continueTimer = ctx.executor().schedule(() -> { continueTimer = null; abort(ctx); },
-                    responseNanos, TimeUnit.NANOSECONDS);
-        }
-        written.addListener(future -> {
-            if (continueTimer != null) { continueTimer.cancel(false); continueTimer = null; }
-            if (!future.isSuccess()) { abort(ctx); }
+  /**
+   * Copies body bytes out of the Netty buffer, which the inbound handler releases on return.
+   * Returns false when the limit was exceeded and the connection is closing.
+   */
+  private boolean receiveBody(ChannelHandlerContext ctx, ByteBuf content) {
+    continuePending =
+        false; // The client sent the body without waiting; no interim response is needed.
+    int readable = content.readableBytes();
+    long total = (long) bodyLength + readable;
+    if (total > bodyLimit) {
+      fail(ctx, 413);
+      return false;
+    }
+    // A streaming body's bytes are held in its reader rather than in a body array; it shares the
+    // per-connection bound with the buffered bodies waiting behind it.
+    long held = streaming == null ? 0 : streaming.bytesReceived();
+    if (queuedBodyBytes + held + readable > 2L * bodyLimit) {
+      fail(ctx, 503);
+      return false;
+    }
+    // Growth is capped at the declared length, so a complete declared body fills its array exactly.
+    long cap = bodyChunked ? bodyLimit : declaredLength;
+    if (total > cap) {
+      fail(ctx, 400);
+      return false;
+    } // More than declared; the decoder prevents this.
+    if (streaming != null) {
+      if (!streaming.accept(content)) {
+        fail(ctx, 503);
+        return false;
+      }
+      bodyLength = (int) total;
+      return true;
+    }
+    if (bodyBuilder == null) {
+      int capacity = (int) Math.min(cap, Math.max(INITIAL_BODY_CAPACITY, total));
+      if (bodyChunked && !receivingReservation.grow(capacity)) {
+        fail(ctx, 503);
+        return false;
+      }
+      bodyBuilder = Body.builder(receiving.request().header("Content-Type").orElse(null), capacity);
+    } else if (total > bodyBuilder.capacity()) {
+      // Doubling keeps the copying linear in the body size.
+      int capacity = (int) Math.min(cap, Math.max(total, 2L * bodyBuilder.capacity()));
+      if (bodyChunked && !receivingReservation.grow(capacity - bodyBuilder.capacity())) {
+        fail(ctx, 503);
+        return false;
+      }
+      bodyBuilder.capacity(capacity);
+    }
+    // Straight from the network buffer into the array that becomes the body.
+    for (var part : content.nioBuffers(content.readerIndex(), readable)) {
+      bodyBuilder.write(part);
+    }
+    content.skipBytes(readable);
+    bodyLength = (int) total;
+    return true;
+  }
+
+  /**
+   * Makes HTTP/2 request trailers ordinary headers of a buffered request. A streaming handler
+   * already holds its request when the trailers arrive, so they are not visible to it.
+   */
+  private void mergeTrailers(LastHttpContent last) {
+    var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+    fields.putAll(receiving.request().headers());
+    last.trailingHeaders()
+        .forEach(
+            header ->
+                fields.merge(
+                    header.getKey().toString(),
+                    header.getValue().toString(),
+                    (first, next) -> first + ", " + next));
+    receiving = receiving.withRequest(receiving.request().withHeaders(fields));
+  }
+
+  private void completeRequest(ChannelHandlerContext ctx) {
+    var exchange = receiving;
+    if (exchange.reader() != null) {
+      if (streaming != null) {
+        streaming.end();
+      }
+      exchange = exchange.withBodyBytes(streaming == null ? 0 : (int) streaming.bytesReceived());
+      var reservation = receivingReservation;
+      if (reservation != null) {
+        reservation.shrinkTo(streaming == null ? 0 : streaming.queuedBytes());
+        exchange = exchange.withReservation(reservation);
+        receivingReservation = null;
+      }
+      // The exchange owns the reader now; releaseBody must not cancel it.
+      streaming = null;
+      releaseBody();
+      receiving = null;
+      receivingHead = false;
+      dispatch(ctx);
+      return;
+    }
+    if (bodyBuilder != null) {
+      if (bodyLength != declaredLength && !bodyChunked) {
+        fail(ctx, 400);
+        return;
+      }
+      try {
+        // The array is handed over, not copied again unless it is larger than the body.
+        var builder = bodyBuilder;
+        bodyBuilder = null;
+        var body = builder.build();
+        exchange =
+            new Exchange(
+                exchange.request().withBody(body),
+                exchange.keepAlive(),
+                exchange.http10(),
+                exchange.execution(),
+                null,
+                null,
+                bodyLength);
+      } catch (IllegalArgumentException invalid) {
+        fail(ctx, 400);
+        return;
+      }
+      queuedBodyBytes += bodyLength;
+    }
+    // The exchange takes over the reservation, trimmed to the bytes the body really holds, and
+    // returns it when its response is final.
+    var reservation = receivingReservation;
+    if (reservation != null) {
+      reservation.shrinkTo(bodyLength);
+      exchange = exchange.withReservation(reservation);
+      receivingReservation = null;
+    }
+    releaseBody();
+    pending.addLast(exchange);
+    receiving = null;
+    receivingHead = false;
+    dispatch(ctx);
+  }
+
+  /**
+   * Writes {@code 100 Continue} for the request being received once every earlier response has been
+   * written, so the interim response never overtakes a pipelined final response.
+   */
+  private void sendContinue(ChannelHandlerContext ctx) {
+    if (!continuePending || busy || !pending.isEmpty() || closing || deferredStatus != 0) {
+      return;
+    }
+    continuePending = false;
+    var written =
+        ctx.writeAndFlush(
+            new DefaultFullHttpResponse(
+                HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE, Unpooled.EMPTY_BUFFER));
+    // The interim response is a response write like any other: a client that never reads loses
+    // the connection after the response timeout instead of holding it for the inactivity timeout.
+    if (!written.isDone()) {
+      continueTimer =
+          ctx.executor()
+              .schedule(
+                  () -> {
+                    continueTimer = null;
+                    abort(ctx);
+                  },
+                  responseNanos,
+                  TimeUnit.NANOSECONDS);
+    }
+    written.addListener(
+        future -> {
+          if (continueTimer != null) {
+            continueTimer.cancel(false);
+            continueTimer = null;
+          }
+          if (!future.isSuccess()) {
+            abort(ctx);
+          }
         });
-    }
+  }
 
-    /** The TLS state of the connection carrying this exchange, including an HTTP/2 stream's parent. */
-    private static boolean secure(ChannelHandlerContext ctx) {
-        var channel = ctx.channel();
-        if (channel instanceof Http2StreamChannel stream) { channel = stream.parent(); }
-        return channel.pipeline().get(SslHandler.class) != null;
+  /**
+   * The TLS state of the connection carrying this exchange, including an HTTP/2 stream's parent.
+   */
+  private static boolean secure(ChannelHandlerContext ctx) {
+    var channel = ctx.channel();
+    if (channel instanceof Http2StreamChannel stream) {
+      channel = stream.parent();
     }
+    return channel.pipeline().get(SslHandler.class) != null;
+  }
 
-    /** HTTP/1.1 requires exactly one Host; HTTP/1.0 may omit it but must not send an invalid one. */
-    private static boolean validHost(HttpRequest request, boolean http10) {
-        var hosts = request.headers().getAll(HttpHeaderNames.HOST);
-        if (http10 && hosts.isEmpty()) { return true; }
-        if (hosts.size() != 1 || hosts.getFirst().isEmpty()) { return false; }
-        return RequestTargets.validAuthority(hosts.getFirst());
+  /** HTTP/1.1 requires exactly one Host; HTTP/1.0 may omit it but must not send an invalid one. */
+  private static boolean validHost(HttpRequest request, boolean http10) {
+    var hosts = request.headers().getAll(HttpHeaderNames.HOST);
+    if (http10 && hosts.isEmpty()) {
+      return true;
     }
+    if (hosts.size() != 1 || hosts.getFirst().isEmpty()) {
+      return false;
+    }
+    return RequestTargets.validAuthority(hosts.getFirst());
+  }
 
-    private void dispatch(ChannelHandlerContext ctx) {
-        if (busy || closing) { return; }
-        if (pending.isEmpty()) {
-            // Every earlier response has been written; a deferred error is the last response.
-            if (deferredStatus != 0) { sendError(ctx, deferredStatus, deferredHead); }
-            return;
-        }
-        // Reads stay enabled so a client disconnect cancels the running handler; the
-        // pipeline bound checked in accept keeps buffered requests finite.
-        busy = true;
-        var exchange = pending.removeFirst();
-        queuedBodyBytes -= exchange.bodyBytes();
-        activeExchange = exchange;
-        if (exchange.execution().isExpired()) {
-            abandonReader(exchange);
-            exchange.release();
-            activeExchange = null;
-            send(ctx, exchange, error(504, exchange));
-            return;
-        }
-        try {
-            // A closed application or dispatcher cannot run the request; answer instead of
-            // leaving the connection busy. This also runs from a write listener, where an
-            // escaping exception would be swallowed.
-            if (application.state() != Application.State.RUNNING) { throw new RejectedExecutionException("Application closed"); }
-            var route = application.resolve(exchange.request());
-            var key = route.<Object>map(value -> value).orElse(UNMATCHED);
-            var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
-            var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
-            var tag = executor.endpointTag(key);
-            active = executor.submit(session, key, policy, exchange.execution(), () -> {
+  private void dispatch(ChannelHandlerContext ctx) {
+    if (busy || closing) {
+      return;
+    }
+    if (pending.isEmpty()) {
+      // Every earlier response has been written; a deferred error is the last response.
+      if (deferredStatus != 0) {
+        sendError(ctx, deferredStatus, deferredHead);
+      }
+      return;
+    }
+    // Reads stay enabled so a client disconnect cancels the running handler; the
+    // pipeline bound checked in accept keeps buffered requests finite.
+    busy = true;
+    var exchange = pending.removeFirst();
+    queuedBodyBytes -= exchange.bodyBytes();
+    activeExchange = exchange;
+    if (exchange.execution().isExpired()) {
+      abandonReader(exchange);
+      exchange.release();
+      activeExchange = null;
+      send(ctx, exchange, error(504, exchange));
+      return;
+    }
+    try {
+      // A closed application or dispatcher cannot run the request; answer instead of
+      // leaving the connection busy. This also runs from a write listener, where an
+      // escaping exception would be swallowed.
+      if (application.state() != Application.State.RUNNING) {
+        throw new RejectedExecutionException("Application closed");
+      }
+      var route = application.resolve(exchange.request());
+      var key = route.<Object>map(value -> value).orElse(UNMATCHED);
+      var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
+      var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
+      var tag = executor.endpointTag(key);
+      active =
+          executor.submit(
+              session,
+              key,
+              policy,
+              exchange.execution(),
+              () -> {
                 try {
-                    var response = application.handle(exchange.request(), exchange.execution(), exchange.reader());
-                    return response.isStreaming() ? stream(ctx, exchange, response, tag, key, streamPolicy)
-                            : prepare(response, exchange);
+                  var response =
+                      application.handle(
+                          exchange.request(), exchange.execution(), exchange.reader());
+                  return response.isStreaming()
+                      ? stream(ctx, exchange, response, tag, key, streamPolicy)
+                      : prepare(response, exchange);
                 } catch (Exception | Error failure) {
-                    if (exchange != rejected) { logFailure(exchange, failure); }
-                    throw failure;
+                  if (exchange != rejected) {
+                    logFailure(exchange, failure);
+                  }
+                  throw failure;
                 }
-            }, WireResponse::status);
-            active.result().whenComplete((response, thrown) -> {
+              },
+              WireResponse::status);
+      active
+          .result()
+          .whenComplete(
+              (response, thrown) -> {
                 // A handler that did not read its body to the end cannot leave its bytes to be
                 // parsed as another request: the response closes this connection and input is
                 // discarded after it, as for any request whose framing is no longer usable.
                 if (exchange.reader() instanceof StreamingBodyReader reader && !reader.finished()) {
-                    forceClose = true;
-                    dropPending();
-                    var decoder = ctx.pipeline().get(RequestDecoder.class);
-                    if (decoder != null) { decoder.discard(maxDiscardedInput); }
+                  forceClose = true;
+                  dropPending();
+                  var decoder = ctx.pipeline().get(RequestDecoder.class);
+                  if (decoder != null) {
+                    decoder.discard(maxDiscardedInput);
+                  }
                 }
                 boolean refused = exchange == rejected;
                 abandonReader(exchange);
@@ -630,478 +953,742 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 exchange.release();
                 var failure = unwrap(thrown);
                 try {
-                    ctx.executor().execute(() -> {
-                        active = null; // The outcome is final; only the response write remains.
-                        activeExchange = null;
-                        // The head of a stream is out, so there is no response left to choose: it ends
-                        // with a final chunk when the body completed, and by closing the connection otherwise.
-                        if (stream != null) { endStream(ctx, failure); return; }
-                        if (refused) {
-                            // The listener's error is the only response for this request.
-                            rejected = null;
-                            busy = false;
-                            dispatch(ctx);
-                            return;
-                        }
-                        if (closing || !ctx.channel().isActive()) { return; }
-                        if (failure instanceof Error) {
-                            abort(ctx);
-                        } else {
-                            send(ctx, exchange, failure == null ? response
-                                    : error(failure instanceof DeadlineExceededException ? 504
-                                            : failure instanceof QueueTimeoutException
-                                                    || failure instanceof DispatchRejectedException ? 503 : 500, exchange));
-                        }
-                    });
-                } catch (RejectedExecutionException stopped) { /* Channel shutdown owns cleanup. */ }
-            });
-        } catch (RuntimeException unavailable) {
-            if (!(unavailable instanceof RejectedExecutionException)) {
-                LOG.log(System.Logger.Level.WARNING,
-                        "HTTP request " + correlation(exchange) + " could not be dispatched", unavailable);
-            }
-            if (active != null) { active.cancel(); active = null; }
-            activeExchange = null;
-            abandonReader(exchange);
-            exchange.release();
-            send(ctx, exchange, error(503, exchange));
+                  ctx.executor()
+                      .execute(
+                          () -> {
+                            active = null; // The outcome is final; only the response write remains.
+                            activeExchange = null;
+                            // The head of a stream is out, so there is no response left to choose:
+                            // it ends
+                            // with a final chunk when the body completed, and by closing the
+                            // connection
+                            // otherwise.
+                            if (stream != null) {
+                              endStream(ctx, failure);
+                              return;
+                            }
+                            if (refused) {
+                              // The listener's error is the only response for this request.
+                              rejected = null;
+                              busy = false;
+                              dispatch(ctx);
+                              return;
+                            }
+                            if (closing || !ctx.channel().isActive()) {
+                              return;
+                            }
+                            if (failure instanceof Error) {
+                              abort(ctx);
+                            } else {
+                              send(
+                                  ctx,
+                                  exchange,
+                                  failure == null
+                                      ? response
+                                      : error(
+                                          failure instanceof DeadlineExceededException
+                                              ? 504
+                                              : failure instanceof QueueTimeoutException
+                                                      || failure
+                                                          instanceof DispatchRejectedException
+                                                  ? 503
+                                                  : 500,
+                                          exchange));
+                            }
+                          });
+                } catch (RejectedExecutionException stopped) {
+                  /* Channel shutdown owns cleanup. */
+                }
+              });
+    } catch (RuntimeException unavailable) {
+      if (!(unavailable instanceof RejectedExecutionException)) {
+        LOG.log(
+            System.Logger.Level.WARNING,
+            "HTTP request " + correlation(exchange) + " could not be dispatched",
+            unavailable);
+      }
+      if (active != null) {
+        active.cancel();
+        active = null;
+      }
+      activeExchange = null;
+      abandonReader(exchange);
+      exchange.release();
+      send(ctx, exchange, error(503, exchange));
+    }
+  }
+
+  /** Closes a streaming reader once; a buffered exchange has none. */
+  private static void abandonReader(Exchange exchange) {
+    if (exchange.reader() != null) {
+      exchange.reader().close();
+    }
+  }
+
+  private static Throwable unwrap(Throwable failure) {
+    while (failure instanceof CompletionException && failure.getCause() != null) {
+      failure = failure.getCause();
+    }
+    return failure;
+  }
+
+  /** Applies the shared serialization rules; a response they refuse becomes a framework 500. */
+  private static WireResponse prepare(Response response, Exchange exchange) {
+    var bytes = ResponseSerialization.bodyBytes(response.body());
+    if (bytes == null || !ResponseSerialization.headersSendable(response.headers())) {
+      return error(500, exchange);
+    }
+    return new WireResponse(
+        response.status(), response.headers(), bytes, closeRequested(response.headers()), false);
+  }
+
+  /**
+   * Reports a response the listener generated itself; a failing observer never affects the
+   * response.
+   */
+  private void observe(Exchange exchange, WireResponse response) {
+    if (rejections == null || !response.framework()) {
+      return;
+    }
+    try {
+      rejections.rejected(
+          response.status(),
+          HttpStatus.defaultCode(response.status()),
+          exchange.execution().requestId());
+    } catch (RuntimeException failure) {
+      LOG.log(
+          System.Logger.Level.WARNING,
+          "The rejection observer failed for HTTP request " + exchange.execution().requestId(),
+          failure);
+    }
+  }
+
+  private void send(ChannelHandlerContext ctx, Exchange exchange, WireResponse response) {
+    observe(exchange, response);
+    boolean head = exchange.request().method().equals("HEAD");
+    // Exactly one owner releases the body: this method until the write takes the message.
+    ReferenceCounted owned = null;
+    try {
+      var bytes = head ? new byte[0] : response.body();
+      var content = bytes.length == 0 ? Unpooled.EMPTY_BUFFER : ctx.alloc().buffer(bytes.length);
+      owned = content;
+      content.writeBytes(bytes);
+      var message =
+          new DefaultFullHttpResponse(
+              HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(response.status()), content);
+      owned = message;
+      var trailers = http2 ? trailers(response.headers()) : Map.<String, String>of();
+      trailers.forEach((name, value) -> message.trailingHeaders().set(name, value));
+      var omitted = new HashSet<>(HOP_HEADERS);
+      trailers.keySet().forEach(name -> omitted.add(name.toLowerCase(Locale.ROOT)));
+      for (var token : response.headers().getOrDefault("Connection", "").split(",")) {
+        omitted.add(token.trim().toLowerCase(Locale.ROOT));
+      }
+      response
+          .headers()
+          .forEach(
+              (name, value) -> {
+                if (!omitted.contains(name.toLowerCase(Locale.ROOT))) {
+                  message.headers().set(name, value);
+                }
+              });
+      if (!head && response.status() != 204 && response.status() != 304) {
+        HttpUtil.setContentLength(message, response.body().length);
+      } else if (head) {
+        // No body bytes follow; the length is the GET representation's, when known.
+        var length = headLength(response);
+        if (length != null) {
+          message.headers().set(HttpHeaderNames.CONTENT_LENGTH, length);
         }
-    }
-
-    /** Closes a streaming reader once; a buffered exchange has none. */
-    private static void abandonReader(Exchange exchange) {
-        if (exchange.reader() != null) { exchange.reader().close(); }
-    }
-
-    private static Throwable unwrap(Throwable failure) {
-        while (failure instanceof CompletionException && failure.getCause() != null) {
-            failure = failure.getCause();
-        }
-        return failure;
-    }
-
-    /** Applies the shared serialization rules; a response they refuse becomes a framework 500. */
-    private static WireResponse prepare(Response response, Exchange exchange) {
-        var bytes = ResponseSerialization.bodyBytes(response.body());
-        if (bytes == null || !ResponseSerialization.headersSendable(response.headers())) { return error(500, exchange); }
-        return new WireResponse(response.status(), response.headers(), bytes, closeRequested(response.headers()), false);
-    }
-
-    /** Reports a response the listener generated itself; a failing observer never affects the response. */
-    private void observe(Exchange exchange, WireResponse response) {
-        if (rejections == null || !response.framework()) { return; }
-        try {
-            rejections.rejected(response.status(), HttpStatus.defaultCode(response.status()),
-                    exchange.execution().requestId());
-        } catch (RuntimeException failure) {
-            LOG.log(System.Logger.Level.WARNING, "The rejection observer failed for HTTP request "
-                    + exchange.execution().requestId(), failure);
-        }
-    }
-
-    private void send(ChannelHandlerContext ctx, Exchange exchange, WireResponse response) {
-        observe(exchange, response);
-        boolean head = exchange.request().method().equals("HEAD");
-        // Exactly one owner releases the body: this method until the write takes the message.
-        ReferenceCounted owned = null;
-        try {
-            var bytes = head ? new byte[0] : response.body();
-            var content = bytes.length == 0 ? Unpooled.EMPTY_BUFFER : ctx.alloc().buffer(bytes.length);
-            owned = content;
-            content.writeBytes(bytes);
-            var message = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
-                    HttpResponseStatus.valueOf(response.status()), content);
-            owned = message;
-            var trailers = http2 ? trailers(response.headers()) : Map.<String, String>of();
-            trailers.forEach((name, value) -> message.trailingHeaders().set(name, value));
-            var omitted = new HashSet<>(HOP_HEADERS);
-            trailers.keySet().forEach(name -> omitted.add(name.toLowerCase(Locale.ROOT)));
-            for (var token : response.headers().getOrDefault("Connection", "").split(",")) {
-                omitted.add(token.trim().toLowerCase(Locale.ROOT));
-            }
-            response.headers().forEach((name, value) -> {
-                if (!omitted.contains(name.toLowerCase(Locale.ROOT))) { message.headers().set(name, value); }
-            });
-            if (!head && response.status() != 204 && response.status() != 304) {
-                HttpUtil.setContentLength(message, response.body().length);
-            } else if (head) {
-                // No body bytes follow; the length is the GET representation's, when known.
-                var length = headLength(response);
-                if (length != null) { message.headers().set(HttpHeaderNames.CONTENT_LENGTH, length); }
-            }
-            message.headers().set("X-Request-ID", exchange.execution().requestId());
-            message.headers().set(HttpHeaderNames.DATE, httpDate());
-            boolean ending = draining || listenerClosing.getAsBoolean() || forceClose;
-            boolean keepAlive = exchange.keepAlive() && !response.close() && !ending;
-            HttpUtil.setKeepAlive(message, keepAlive);
-            // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
-            if (keepAlive && exchange.http10()) { message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive"); }
-            if (!keepAlive) { closing = true; dropPending(); releaseBody(); }
-            owned = null;
-            finishWrite(ctx, ctx.writeAndFlush(message), keepAlive && !ending);
-        } catch (RuntimeException failure) {
-            if (owned != null) { owned.release(); }
-            abort(ctx);
-        }
-    }
-
-    /**
-     * Bounds the write of the last bytes of a response and, once the socket has taken them, ends
-     * the exchange: the connection lingers when it is not persistent, otherwise it serves the next
-     * request.
-     */
-    private void finishWrite(ChannelHandlerContext ctx, ChannelFuture written, boolean persistent) {
-        // Most responses are taken by the socket at once; only a pending write needs a bound.
-        if (!written.isDone()) {
-            responseTimer = ctx.executor().schedule(() -> { responseTimer = null; abort(ctx); },
-                    responseNanos, TimeUnit.NANOSECONDS);
-        }
-        written.addListener(future -> {
-            if (responseTimer != null) { responseTimer.cancel(false); responseTimer = null; }
-            active = null;
-            if (!future.isSuccess()) { ctx.close(); return; }
-            if (!persistent) { linger(ctx); return; }
-            busy = false;
-            dispatch(ctx);
-            sendContinue(ctx);
-        });
-    }
-
-    private static boolean closeRequested(Map<String, String> headers) {
-        return Arrays.stream(headers.getOrDefault("Connection", "").split(","))
-                .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
-    }
-
-    /**
-     * The fields an HTTP/2 response sends as trailers: those named by its {@code Trailer} header.
-     * The header itself is hop-by-hop and never reaches the ordinary response headers.
-     */
-    private static Map<String, String> trailers(Map<String, String> headers) {
-        var names = headers.get("Trailer");
-        if (names == null || names.isBlank()) { return Map.of(); }
-        var selected = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-        for (var name : names.split(",")) {
-            String key = name.trim();
-            var value = headers.get(key);
-            if (!key.isEmpty() && value != null) { selected.put(key, value); }
-        }
-        return selected;
-    }
-
-    /** The request ID for a log line, with the caller's trace id when it sent a valid traceparent. */
-    private static String correlation(Exchange exchange) {
-        return TraceContext.correlation(exchange.execution().requestId(), exchange.request());
-    }
-
-    private static void logFailure(Exchange exchange, Throwable failure) {
-        if (failure instanceof StreamAbortedException aborted) {
-            // Expected outcomes of a stream: a client leaving or shutdown is not an error. The cap is
-            // the application's mistake, so it is worth a warning.
-            var level = aborted.reason() == StreamAbortedException.Reason.LIMIT_EXCEEDED
-                    ? System.Logger.Level.WARNING : System.Logger.Level.DEBUG;
-            LOG.log(level, "HTTP request " + correlation(exchange) + " stream aborted: " + aborted.reason());
-        } else if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
-            LOG.log(System.Logger.Level.ERROR, "HTTP request " + correlation(exchange) + " failed", failure);
-        }
-    }
-
-    /**
-     * Sends the head of a streamed response, then runs its body on the calling handler thread, so
-     * the stream slot and the deadline cover the whole stream. The request slot is transferred into
-     * the stream lane before the head is written; a full lane answers 503 as an ordinary response.
-     * Returns once the body has finished; the final chunk is written by {@link #endStream} on the
-     * event loop. A body that ends in failure, or whose writer was aborted even if the body swallowed
-     * that, fails the task: the head is out, so the only honest ending is closing the connection.
-     */
-    private WireResponse stream(ChannelHandlerContext ctx, Exchange exchange, Response response,
-            EndpointTag tag, Object key, StreamPolicy streamPolicy) throws Exception {
-        if (!ResponseSerialization.headersSendable(response.headers())) { return error(500, exchange); }
-        // Everything that can refuse an ordinary response has been checked. Once the slot moves,
-        // a refusal can no longer replace the stream head, so the transfer comes immediately before it.
-        if (!executor.admitStream(key, streamPolicy)) { return error(503, exchange); }
-        boolean close = closeRequested(response.headers());
-        var scope = streamMetrics.scope(tag);
-        var writer = new ChannelBodyWriter(ctx.channel(), exchange.execution(), response.streamLimit(),
-                responseNanos, scope);
-        boolean started;
-        try {
-            started = ctx.executor().submit(() -> beginStream(ctx, exchange, response, close, writer)).get();
-        } catch (ExecutionException | RejectedExecutionException unavailable) {
-            started = false;
-        }
-        // Nothing was sent yet, so a refusal can still be an ordinary response.
-        if (!started) { return error(503, exchange); }
-        var run = StreamRun.begin(response, exchange.execution(), scope);
-        Throwable failure = null;
-        try {
-            response.streamBody().writeTo(writer);
-        } catch (Exception | Error thrown) {
-            failure = thrown;
-            throw thrown;
-        } finally {
-            writer.end();
-            run.end(writer.bytesWritten(), writer.aborted(), failure);
-        }
-        var reason = writer.aborted();
-        if (reason != null) { throw new StreamAbortedException(reason); }
-        return new WireResponse(response.status(), Map.of(), new byte[0], close, true);
-    }
-
-    /** Event loop: writes the head of a streamed response; false when the connection can no longer take it. */
-    private boolean beginStream(ChannelHandlerContext ctx, Exchange exchange, Response response, boolean close,
-            ChannelBodyWriter writer) {
-        if (closing || draining || listenerClosing.getAsBoolean() || !ctx.channel().isActive()
-                || exchange.execution().isExpired()) {
-            return false;
-        }
-        var message = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(response.status()));
-        streamTrailers = http2 ? trailers(response.headers()) : Map.of();
-        var omitted = new HashSet<>(HOP_HEADERS);
-        streamTrailers.keySet().forEach(name -> omitted.add(name.toLowerCase(Locale.ROOT)));
-        for (var token : response.headers().getOrDefault("Connection", "").split(",")) {
-            omitted.add(token.trim().toLowerCase(Locale.ROOT));
-        }
-        response.headers().forEach((name, value) -> {
-            if (!omitted.contains(name.toLowerCase(Locale.ROOT))) { message.headers().set(name, value); }
-        });
-        // HTTP/1.0 has no chunked coding: the body is delimited by closing the connection.
-        boolean keepAlive = exchange.keepAlive() && !close && !exchange.http10();
-        if (!exchange.http10()) { message.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED); }
-        message.headers().set("X-Request-ID", exchange.execution().requestId());
-        message.headers().set(HttpHeaderNames.DATE, httpDate());
-        HttpUtil.setKeepAlive(message, keepAlive);
-        stream = writer;
-        streamKeepAlive = keepAlive;
-        ctx.writeAndFlush(message).addListener(future -> {
-            if (!future.isSuccess()) { writer.abort(StreamAbortedException.Reason.CLIENT_DISCONNECTED); ctx.close(); }
-        });
-        return true;
-    }
-
-    /** Event loop: the body task has ended; finish the response or drop the connection. */
-    private void endStream(ChannelHandlerContext ctx, Throwable failure) {
-        var finished = stream;
-        stream = null;
-        if (closing || !ctx.channel().isActive()) { return; }
-        if (failure != null || finished.aborted() != null) { abort(ctx); return; }
-        boolean keepAlive = streamKeepAlive && !draining && !listenerClosing.getAsBoolean();
-        if (!keepAlive) { closing = true; dropPending(); releaseBody(); }
-        var last = LastHttpContent.EMPTY_LAST_CONTENT;
-        if (!streamTrailers.isEmpty()) {
-            var withTrailers = new DefaultLastHttpContent(Unpooled.EMPTY_BUFFER);
-            streamTrailers.forEach((name, value) -> withTrailers.trailingHeaders().set(name, value));
-            last = withTrailers;
-        }
-        streamTrailers = Map.of();
-        finishWrite(ctx, ctx.writeAndFlush(last), keepAlive);
-    }
-
-    /**
-     * The length a successful HEAD response advertises: the representation length the application
-     * computed (see {@code Application.handle}), for 2xx other than 204 and 205. Errors, bodiless
-     * statuses and anything that is not a plain decimal length send none.
-     */
-    private static String headLength(WireResponse response) {
-        int status = response.status();
-        if (status < 200 || status > 299 || status == 204 || status == 205) { return null; }
-        var value = response.headers().get("Content-Length");
-        return value != null && CONTENT_LENGTH.matcher(value).matches() ? value : null;
-    }
-
-    /** IMF-fixdate for the current second, formatted at most once per second across connections. */
-    static String httpDate() {
-        long second = System.currentTimeMillis() / 1000;
-        var cached = date;
-        if (cached.second() != second) {
-            cached = new CachedDate(second, DateFormatter.format(new Date(second * 1000)));
-            date = cached;
-        }
-        return cached.value();
-    }
-
-    /**
-     * A framework error: a problem+json body with only status, default code and request ID, and
-     * a connection close because the request's framing or the connection state may be unusable.
-     */
-    private static WireResponse error(int status, Exchange exchange) {
-        return new WireResponse(status, Map.of("Content-Type", Problems.MEDIA_TYPE),
-                Problems.body(status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()), true,
-                false, true);
-    }
-
-    /**
-     * Rejects the request being received (or the input that could not be parsed). Nothing after it
-     * is decoded or executed: input is discarded from now on, because after a framing error its
-     * boundaries cannot be trusted. Earlier pipelined requests, running or queued, still complete
-     * and are answered in order; the error follows them and closes the connection.
-     */
-    private void fail(ChannelHandlerContext ctx, int status) {
-        if (closing || deferredStatus != 0) { return; }
-        boolean head = receivingHead;
-        receivingHead = false;
-        headComplete();
-        // A streaming handler is already running: its reader is cancelled so a blocked read ends.
-        // Its own failure must not produce a second response after the listener's error.
-        if (activeExchange != null && receiving == activeExchange && activeExchange.reader() != null) {
-            rejected = activeExchange;
-        }
+      }
+      message.headers().set("X-Request-ID", exchange.execution().requestId());
+      message.headers().set(HttpHeaderNames.DATE, httpDate());
+      boolean ending = draining || listenerClosing.getAsBoolean() || forceClose;
+      boolean keepAlive = exchange.keepAlive() && !response.close() && !ending;
+      HttpUtil.setKeepAlive(message, keepAlive);
+      // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
+      if (keepAlive && exchange.http10()) {
+        message.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
+      }
+      if (!keepAlive) {
+        closing = true;
+        dropPending();
         releaseBody();
-        receiving = null;
-        var decoder = ctx.pipeline().get(RequestDecoder.class);
-        if (decoder != null) { decoder.discard(maxDiscardedInput); }
-        if (busy || !pending.isEmpty()) { deferredStatus = status; deferredHead = head; return; }
-        sendError(ctx, status, head);
+      }
+      owned = null;
+      finishWrite(ctx, ctx.writeAndFlush(message), keepAlive && !ending);
+    } catch (RuntimeException failure) {
+      if (owned != null) {
+        owned.release();
+      }
+      abort(ctx);
     }
+  }
 
-    /**
-     * Half-closes after the last response, whatever ended the connection (an error, {@code Connection:
-     * close}, HTTP/1.0, a drain): the client reads the response and end of stream, and input it is
-     * still sending is discarded rather than left unread, which would make the operating system reset
-     * the connection and could destroy response bytes not yet delivered. The connection closes when
-     * the client closes its side, once no input has arrived for {@link #LINGER_QUIET_TIMEOUT}, after
-     * {@link #LINGER_TIMEOUT} in total ({@link #SHUTDOWN_LINGER_TIMEOUT} while the listener closes),
-     * after {@link #MAX_DISCARDED_INPUT} bytes, or on inactivity, whichever comes first.
-     */
-    private void linger(ChannelHandlerContext ctx) {
-        var decoder = ctx.pipeline().get(RequestDecoder.class);
-        if (!(ctx.channel() instanceof DuplexChannel duplex) || decoder == null || !ctx.channel().isActive()) {
+  /**
+   * Bounds the write of the last bytes of a response and, once the socket has taken them, ends the
+   * exchange: the connection lingers when it is not persistent, otherwise it serves the next
+   * request.
+   */
+  private void finishWrite(ChannelHandlerContext ctx, ChannelFuture written, boolean persistent) {
+    // Most responses are taken by the socket at once; only a pending write needs a bound.
+    if (!written.isDone()) {
+      responseTimer =
+          ctx.executor()
+              .schedule(
+                  () -> {
+                    responseTimer = null;
+                    abort(ctx);
+                  },
+                  responseNanos,
+                  TimeUnit.NANOSECONDS);
+    }
+    written.addListener(
+        future -> {
+          if (responseTimer != null) {
+            responseTimer.cancel(false);
+            responseTimer = null;
+          }
+          active = null;
+          if (!future.isSuccess()) {
             ctx.close();
             return;
-        }
-        lingering = true;
-        // Only discarding remains, bounded in time and bytes, so the connection stops keeping
-        // new clients out (when the listener's separate lingering bound allows).
-        if (slot != null) { slot.linger(); }
-        decoder.discard(maxDiscardedInput);
-        long now = now(ctx);
-        lastInput = now;
-        boolean shuttingDown = draining || listenerClosing.getAsBoolean();
-        lingerDeadline = now + (shuttingDown ? Math.min(lingerNanos, shutdownLingerNanos) : lingerNanos);
-        scheduleLingerCheck(ctx, now);
-        // A TLS connection says goodbye with close_notify before the TCP half-close.
-        var ssl = ctx.pipeline().get(SslHandler.class);
-        if (ssl == null) {
-            duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
-        } else {
-            ssl.closeOutbound().addListener(sent -> {
-                if (!sent.isSuccess() || !ctx.channel().isActive()) { ctx.close(); return; }
-                duplex.shutdownOutput().addListener(done -> { if (!done.isSuccess()) { ctx.close(); } });
+          }
+          if (!persistent) {
+            linger(ctx);
+            return;
+          }
+          busy = false;
+          dispatch(ctx);
+          sendContinue(ctx);
+        });
+  }
+
+  private static boolean closeRequested(Map<String, String> headers) {
+    return Arrays.stream(headers.getOrDefault("Connection", "").split(","))
+        .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
+  }
+
+  /**
+   * The fields an HTTP/2 response sends as trailers: those named by its {@code Trailer} header. The
+   * header itself is hop-by-hop and never reaches the ordinary response headers.
+   */
+  private static Map<String, String> trailers(Map<String, String> headers) {
+    var names = headers.get("Trailer");
+    if (names == null || names.isBlank()) {
+      return Map.of();
+    }
+    var selected = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+    for (var name : names.split(",")) {
+      String key = name.trim();
+      var value = headers.get(key);
+      if (!key.isEmpty() && value != null) {
+        selected.put(key, value);
+      }
+    }
+    return selected;
+  }
+
+  /** The request ID for a log line, with the caller's trace id when it sent a valid traceparent. */
+  private static String correlation(Exchange exchange) {
+    return TraceContext.correlation(exchange.execution().requestId(), exchange.request());
+  }
+
+  private static void logFailure(Exchange exchange, Throwable failure) {
+    if (failure instanceof StreamAbortedException aborted) {
+      // Expected outcomes of a stream: a client leaving or shutdown is not an error. The cap is
+      // the application's mistake, so it is worth a warning.
+      var level =
+          aborted.reason() == StreamAbortedException.Reason.LIMIT_EXCEEDED
+              ? System.Logger.Level.WARNING
+              : System.Logger.Level.DEBUG;
+      LOG.log(
+          level, "HTTP request " + correlation(exchange) + " stream aborted: " + aborted.reason());
+    } else if (!exchange.execution().isExpired() && !Thread.currentThread().isInterrupted()) {
+      LOG.log(
+          System.Logger.Level.ERROR, "HTTP request " + correlation(exchange) + " failed", failure);
+    }
+  }
+
+  /**
+   * Sends the head of a streamed response, then runs its body on the calling handler thread, so the
+   * stream slot and the deadline cover the whole stream. The request slot is transferred into the
+   * stream lane before the head is written; a full lane answers 503 as an ordinary response.
+   * Returns once the body has finished; the final chunk is written by {@link #endStream} on the
+   * event loop. A body that ends in failure, or whose writer was aborted even if the body swallowed
+   * that, fails the task: the head is out, so the only honest ending is closing the connection.
+   */
+  private WireResponse stream(
+      ChannelHandlerContext ctx,
+      Exchange exchange,
+      Response response,
+      EndpointTag tag,
+      Object key,
+      StreamPolicy streamPolicy)
+      throws Exception {
+    if (!ResponseSerialization.headersSendable(response.headers())) {
+      return error(500, exchange);
+    }
+    // Everything that can refuse an ordinary response has been checked. Once the slot moves,
+    // a refusal can no longer replace the stream head, so the transfer comes immediately before it.
+    if (!executor.admitStream(key, streamPolicy)) {
+      return error(503, exchange);
+    }
+    boolean close = closeRequested(response.headers());
+    var scope = streamMetrics.scope(tag);
+    var writer =
+        new ChannelBodyWriter(
+            ctx.channel(), exchange.execution(), response.streamLimit(), responseNanos, scope);
+    boolean started;
+    try {
+      started =
+          ctx.executor().submit(() -> beginStream(ctx, exchange, response, close, writer)).get();
+    } catch (ExecutionException | RejectedExecutionException unavailable) {
+      started = false;
+    }
+    // Nothing was sent yet, so a refusal can still be an ordinary response.
+    if (!started) {
+      return error(503, exchange);
+    }
+    var run = StreamRun.begin(response, exchange.execution(), scope);
+    Throwable failure = null;
+    try {
+      response.streamBody().writeTo(writer);
+    } catch (Exception | Error thrown) {
+      failure = thrown;
+      throw thrown;
+    } finally {
+      writer.end();
+      run.end(writer.bytesWritten(), writer.aborted(), failure);
+    }
+    var reason = writer.aborted();
+    if (reason != null) {
+      throw new StreamAbortedException(reason);
+    }
+    return new WireResponse(response.status(), Map.of(), new byte[0], close, true);
+  }
+
+  /**
+   * Event loop: writes the head of a streamed response; false when the connection can no longer
+   * take it.
+   */
+  private boolean beginStream(
+      ChannelHandlerContext ctx,
+      Exchange exchange,
+      Response response,
+      boolean close,
+      ChannelBodyWriter writer) {
+    if (closing
+        || draining
+        || listenerClosing.getAsBoolean()
+        || !ctx.channel().isActive()
+        || exchange.execution().isExpired()) {
+      return false;
+    }
+    var message =
+        new DefaultHttpResponse(
+            HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(response.status()));
+    streamTrailers = http2 ? trailers(response.headers()) : Map.of();
+    var omitted = new HashSet<>(HOP_HEADERS);
+    streamTrailers.keySet().forEach(name -> omitted.add(name.toLowerCase(Locale.ROOT)));
+    for (var token : response.headers().getOrDefault("Connection", "").split(",")) {
+      omitted.add(token.trim().toLowerCase(Locale.ROOT));
+    }
+    response
+        .headers()
+        .forEach(
+            (name, value) -> {
+              if (!omitted.contains(name.toLowerCase(Locale.ROOT))) {
+                message.headers().set(name, value);
+              }
             });
-        }
+    // HTTP/1.0 has no chunked coding: the body is delimited by closing the connection.
+    boolean keepAlive = exchange.keepAlive() && !close && !exchange.http10();
+    if (!exchange.http10()) {
+      message.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
+    }
+    message.headers().set("X-Request-ID", exchange.execution().requestId());
+    message.headers().set(HttpHeaderNames.DATE, httpDate());
+    HttpUtil.setKeepAlive(message, keepAlive);
+    stream = writer;
+    streamKeepAlive = keepAlive;
+    ctx.writeAndFlush(message)
+        .addListener(
+            future -> {
+              if (!future.isSuccess()) {
+                writer.abort(StreamAbortedException.Reason.CLIENT_DISCONNECTED);
+                ctx.close();
+              }
+            });
+    return true;
+  }
+
+  /** Event loop: the body task has ended; finish the response or drop the connection. */
+  private void endStream(ChannelHandlerContext ctx, Throwable failure) {
+    var finished = stream;
+    stream = null;
+    if (closing || !ctx.channel().isActive()) {
+      return;
+    }
+    if (failure != null || finished.aborted() != null) {
+      abort(ctx);
+      return;
+    }
+    boolean keepAlive = streamKeepAlive && !draining && !listenerClosing.getAsBoolean();
+    if (!keepAlive) {
+      closing = true;
+      dropPending();
+      releaseBody();
+    }
+    var last = LastHttpContent.EMPTY_LAST_CONTENT;
+    if (!streamTrailers.isEmpty()) {
+      var withTrailers = new DefaultLastHttpContent(Unpooled.EMPTY_BUFFER);
+      streamTrailers.forEach((name, value) -> withTrailers.trailingHeaders().set(name, value));
+      last = withTrailers;
+    }
+    streamTrailers = Map.of();
+    finishWrite(ctx, ctx.writeAndFlush(last), keepAlive);
+  }
+
+  /**
+   * The length a successful HEAD response advertises: the representation length the application
+   * computed (see {@code Application.handle}), for 2xx other than 204 and 205. Errors, bodiless
+   * statuses and anything that is not a plain decimal length send none.
+   */
+  private static String headLength(WireResponse response) {
+    int status = response.status();
+    if (status < 200 || status > 299 || status == 204 || status == 205) {
+      return null;
+    }
+    var value = response.headers().get("Content-Length");
+    return value != null && CONTENT_LENGTH.matcher(value).matches() ? value : null;
+  }
+
+  /** IMF-fixdate for the current second, formatted at most once per second across connections. */
+  static String httpDate() {
+    long second = System.currentTimeMillis() / 1000;
+    var cached = date;
+    if (cached.second() != second) {
+      cached = new CachedDate(second, DateFormatter.format(new Date(second * 1000)));
+      date = cached;
+    }
+    return cached.value();
+  }
+
+  /**
+   * A framework error: a problem+json body with only status, default code and request ID, and a
+   * connection close because the request's framing or the connection state may be unusable.
+   */
+  private static WireResponse error(int status, Exchange exchange) {
+    return new WireResponse(
+        status,
+        Map.of("Content-Type", Problems.MEDIA_TYPE),
+        Problems.body(
+            status, HttpStatus.defaultCode(status), exchange.execution().requestId(), List.of()),
+        true,
+        false,
+        true);
+  }
+
+  /**
+   * Rejects the request being received (or the input that could not be parsed). Nothing after it is
+   * decoded or executed: input is discarded from now on, because after a framing error its
+   * boundaries cannot be trusted. Earlier pipelined requests, running or queued, still complete and
+   * are answered in order; the error follows them and closes the connection.
+   */
+  private void fail(ChannelHandlerContext ctx, int status) {
+    if (closing || deferredStatus != 0) {
+      return;
+    }
+    boolean head = receivingHead;
+    receivingHead = false;
+    headComplete();
+    // A streaming handler is already running: its reader is cancelled so a blocked read ends.
+    // Its own failure must not produce a second response after the listener's error.
+    if (activeExchange != null && receiving == activeExchange && activeExchange.reader() != null) {
+      rejected = activeExchange;
+    }
+    releaseBody();
+    receiving = null;
+    var decoder = ctx.pipeline().get(RequestDecoder.class);
+    if (decoder != null) {
+      decoder.discard(maxDiscardedInput);
+    }
+    if (busy || !pending.isEmpty()) {
+      deferredStatus = status;
+      deferredHead = head;
+      return;
+    }
+    sendError(ctx, status, head);
+  }
+
+  /**
+   * Half-closes after the last response, whatever ended the connection (an error, {@code
+   * Connection: close}, HTTP/1.0, a drain): the client reads the response and end of stream, and
+   * input it is still sending is discarded rather than left unread, which would make the operating
+   * system reset the connection and could destroy response bytes not yet delivered. The connection
+   * closes when the client closes its side, once no input has arrived for {@link
+   * #LINGER_QUIET_TIMEOUT}, after {@link #LINGER_TIMEOUT} in total ({@link
+   * #SHUTDOWN_LINGER_TIMEOUT} while the listener closes), after {@link #MAX_DISCARDED_INPUT} bytes,
+   * or on inactivity, whichever comes first.
+   */
+  private void linger(ChannelHandlerContext ctx) {
+    var decoder = ctx.pipeline().get(RequestDecoder.class);
+    if (!(ctx.channel() instanceof DuplexChannel duplex)
+        || decoder == null
+        || !ctx.channel().isActive()) {
+      ctx.close();
+      return;
+    }
+    lingering = true;
+    // Only discarding remains, bounded in time and bytes, so the connection stops keeping
+    // new clients out (when the listener's separate lingering bound allows).
+    if (slot != null) {
+      slot.linger();
+    }
+    decoder.discard(maxDiscardedInput);
+    long now = now(ctx);
+    lastInput = now;
+    boolean shuttingDown = draining || listenerClosing.getAsBoolean();
+    lingerDeadline =
+        now + (shuttingDown ? Math.min(lingerNanos, shutdownLingerNanos) : lingerNanos);
+    scheduleLingerCheck(ctx, now);
+    // A TLS connection says goodbye with close_notify before the TCP half-close.
+    var ssl = ctx.pipeline().get(SslHandler.class);
+    if (ssl == null) {
+      duplex
+          .shutdownOutput()
+          .addListener(
+              done -> {
+                if (!done.isSuccess()) {
+                  ctx.close();
+                }
+              });
+    } else {
+      ssl.closeOutbound()
+          .addListener(
+              sent -> {
+                if (!sent.isSuccess() || !ctx.channel().isActive()) {
+                  ctx.close();
+                  return;
+                }
+                duplex
+                    .shutdownOutput()
+                    .addListener(
+                        done -> {
+                          if (!done.isSuccess()) {
+                            ctx.close();
+                          }
+                        });
+              });
+    }
+  }
+
+  /** Arms the single linger timer for whichever comes first: the deadline or the quiet period. */
+  private void scheduleLingerCheck(ChannelHandlerContext ctx, long now) {
+    if (lingerTimer != null) {
+      lingerTimer.cancel(false);
+    }
+    long next = Math.min(lingerDeadline - now, lastInput + lingerQuietNanos - now);
+    lingerTimer =
+        ctx.executor()
+            .schedule(
+                () -> {
+                  lingerTimer = null;
+                  long at = now(ctx);
+                  if (at - lingerDeadline >= 0 || at - lastInput >= lingerQuietNanos) {
+                    ctx.close();
+                  } else {
+                    scheduleLingerCheck(ctx, at);
+                  }
+                },
+                Math.max(0, next),
+                TimeUnit.NANOSECONDS);
+  }
+
+  /** The event loop's clock, which tests can freeze and advance. */
+  private static long now(ChannelHandlerContext ctx) {
+    return ctx.executor().ticker().nanoTime();
+  }
+
+  /**
+   * Sends a listener error; for a HEAD request the problem body is omitted as for any HEAD
+   * response.
+   */
+  private void sendError(ChannelHandlerContext ctx, int status, boolean head) {
+    listenerMetrics.answered(status);
+    var exchange =
+        new Exchange(
+            new Request(head ? "HEAD" : "GET", "/"),
+            false,
+            false,
+            ExecutionContext.create(application.requestTimeout()));
+    send(ctx, exchange, error(status, exchange));
+  }
+
+  /** Maps a decoder failure: an overlong request line is 414, an overlong header section 431. */
+  private static int decoderFailureStatus(Throwable cause) {
+    if (cause instanceof TooLongHttpLineException) {
+      return 414;
+    }
+    if (cause instanceof TooLongHttpHeaderException) {
+      return 431;
+    }
+    return 400;
+  }
+
+  /**
+   * Forgets requests that were received but not started, returning their share of the body budget.
+   */
+  private void dropPending() {
+    for (var queued : pending) {
+      abandonReader(queued);
+      queued.release();
+    }
+    pending.clear();
+    queuedBodyBytes = 0;
+  }
+
+  private void abort(ChannelHandlerContext ctx) {
+    closing = true;
+    releaseBody();
+    if (activeExchange != null) {
+      abandonReader(activeExchange);
+      activeExchange = null;
+    }
+    ctx.close();
+  }
+
+  @Override
+  public void channelInactive(ChannelHandlerContext ctx) {
+    closing = true;
+    if (lingerTimer != null) {
+      lingerTimer.cancel(false);
+      lingerTimer = null;
+    }
+    if (responseTimer != null) {
+      responseTimer.cancel(false);
+      responseTimer = null;
+    }
+    if (continueTimer != null) {
+      continueTimer.cancel(false);
+      continueTimer = null;
+    }
+    headComplete();
+    releaseBody();
+    receiving = null;
+    dropPending();
+    // The stream learns why before the cancellation interrupts its thread, so the reason is the
+    // disconnect.
+    if (stream != null) {
+      stream.abort(
+          draining || listenerClosing.getAsBoolean()
+              ? StreamAbortedException.Reason.SHUTDOWN
+              : StreamAbortedException.Reason.CLIENT_DISCONNECTED);
+      stream = null;
+    }
+    if (active != null) {
+      active.cancel();
+      active = null;
+    }
+    if (activeExchange != null) {
+      abandonReader(activeExchange);
+      activeExchange = null;
+    }
+  }
+
+  @Override
+  public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+    if (stream != null) {
+      stream.signal();
+    }
+    super.channelWritabilityChanged(ctx);
+  }
+
+  @Override
+  public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
+    // A running handler is bounded by its own deadline, so inactivity is ignored only while it
+    // executes; idle connections and stalled response writes still close.
+    if (event == RequestDecoder.DECODED) {
+      inputDecoded(ctx);
+    }
+    // Input keeps a lingering connection open, up to the linger deadline.
+    else if (event == RequestDecoder.DISCARDED) {
+      if (lingering) {
+        lastInput = now(ctx);
+      }
+    }
+    // Closing keeps a client that keeps sending after an error from occupying the event loop.
+    else if (event == RequestDecoder.DISCARD_LIMIT) {
+      abort(ctx);
+    } else if (event instanceof IdleStateEvent) {
+      if (active == null) {
+        abort(ctx);
+      }
+    } else {
+      super.userEventTriggered(ctx, event);
+    }
+  }
+
+  @Override
+  public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+    abort(ctx);
+  }
+
+  private record CachedDate(long second, String value) {}
+
+  private static volatile CachedDate date = new CachedDate(Long.MIN_VALUE, "");
+
+  private record Exchange(
+      Request request,
+      boolean keepAlive,
+      boolean http10,
+      ExecutionContext execution,
+      BodyBudget.Reservation reservation,
+      BodyReader reader,
+      int bodyBytes) {
+    Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) {
+      this(request, keepAlive, http10, execution, null, null, 0);
     }
 
-    /** Arms the single linger timer for whichever comes first: the deadline or the quiet period. */
-    private void scheduleLingerCheck(ChannelHandlerContext ctx, long now) {
-        if (lingerTimer != null) { lingerTimer.cancel(false); }
-        long next = Math.min(lingerDeadline - now, lastInput + lingerQuietNanos - now);
-        lingerTimer = ctx.executor().schedule(() -> {
-            lingerTimer = null;
-            long at = now(ctx);
-            if (at - lingerDeadline >= 0 || at - lastInput >= lingerQuietNanos) { ctx.close(); }
-            else { scheduleLingerCheck(ctx, at); }
-        }, Math.max(0, next), TimeUnit.NANOSECONDS);
+    Exchange withReservation(BodyBudget.Reservation held) {
+      return new Exchange(request, keepAlive, http10, execution, held, reader, bodyBytes);
     }
 
-    /** The event loop's clock, which tests can freeze and advance. */
-    private static long now(ChannelHandlerContext ctx) { return ctx.executor().ticker().nanoTime(); }
-
-    /** Sends a listener error; for a HEAD request the problem body is omitted as for any HEAD response. */
-    private void sendError(ChannelHandlerContext ctx, int status, boolean head) {
-        listenerMetrics.answered(status);
-        var exchange = new Exchange(new Request(head ? "HEAD" : "GET", "/"), false, false,
-                ExecutionContext.create(application.requestTimeout()));
-        send(ctx, exchange, error(status, exchange));
+    Exchange withRequest(Request updated) {
+      return new Exchange(updated, keepAlive, http10, execution, reservation, reader, bodyBytes);
     }
 
-    /** Maps a decoder failure: an overlong request line is 414, an overlong header section 431. */
-    private static int decoderFailureStatus(Throwable cause) {
-        if (cause instanceof TooLongHttpLineException) { return 414; }
-        if (cause instanceof TooLongHttpHeaderException) { return 431; }
-        return 400;
+    Exchange withStream(BodyReader stream) {
+      return new Exchange(request, keepAlive, http10, execution, reservation, stream, bodyBytes);
     }
 
-    /** Forgets requests that were received but not started, returning their share of the body budget. */
-    private void dropPending() {
-        for (var queued : pending) {
-            abandonReader(queued);
-            queued.release();
-        }
-        pending.clear();
-        queuedBodyBytes = 0;
+    Exchange withBodyBytes(int bytes) {
+      return new Exchange(request, keepAlive, http10, execution, reservation, reader, bytes);
     }
 
-    private void abort(ChannelHandlerContext ctx) {
-        closing = true;
-        releaseBody();
-        if (activeExchange != null) { abandonReader(activeExchange); activeExchange = null; }
-        ctx.close();
+    /** Returns the request body's share of the listener's budget; idempotent. */
+    void release() {
+      if (reservation != null) {
+        reservation.release();
+      }
     }
+  }
 
-    @Override public void channelInactive(ChannelHandlerContext ctx) {
-        closing = true;
-        if (lingerTimer != null) { lingerTimer.cancel(false); lingerTimer = null; }
-        if (responseTimer != null) { responseTimer.cancel(false); responseTimer = null; }
-        if (continueTimer != null) { continueTimer.cancel(false); continueTimer = null; }
-        headComplete();
-        releaseBody();
-        receiving = null;
-        dropPending();
-        // The stream learns why before the cancellation interrupts its thread, so the reason is the disconnect.
-        if (stream != null) {
-            stream.abort(draining || listenerClosing.getAsBoolean()
-                    ? StreamAbortedException.Reason.SHUTDOWN : StreamAbortedException.Reason.CLIENT_DISCONNECTED);
-            stream = null;
-        }
-        if (active != null) { active.cancel(); active = null; }
-        if (activeExchange != null) { abandonReader(activeExchange); activeExchange = null; }
+  /**
+   * A prepared response; {@code streamed} marks a stream that was already written, with no body
+   * here.
+   */
+  private record WireResponse(
+      int status,
+      Map<String, String> headers,
+      byte[] body,
+      boolean close,
+      boolean streamed,
+      boolean framework) {
+    WireResponse(
+        int status, Map<String, String> headers, byte[] body, boolean close, boolean streamed) {
+      this(status, headers, body, close, streamed, false);
     }
-
-    @Override public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
-        if (stream != null) { stream.signal(); }
-        super.channelWritabilityChanged(ctx);
-    }
-
-    @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
-        // A running handler is bounded by its own deadline, so inactivity is ignored only while it
-        // executes; idle connections and stalled response writes still close.
-        if (event == RequestDecoder.DECODED) { inputDecoded(ctx); }
-        // Input keeps a lingering connection open, up to the linger deadline.
-        else if (event == RequestDecoder.DISCARDED) { if (lingering) { lastInput = now(ctx); } }
-        // Closing keeps a client that keeps sending after an error from occupying the event loop.
-        else if (event == RequestDecoder.DISCARD_LIMIT) { abort(ctx); }
-        else if (event instanceof IdleStateEvent) { if (active == null) { abort(ctx); } }
-        else { super.userEventTriggered(ctx, event); }
-    }
-
-    @Override public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) { abort(ctx); }
-
-    private record CachedDate(long second, String value) { }
-    private static volatile CachedDate date = new CachedDate(Long.MIN_VALUE, "");
-    private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution,
-            BodyBudget.Reservation reservation, BodyReader reader, int bodyBytes) {
-        Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) {
-            this(request, keepAlive, http10, execution, null, null, 0);
-        }
-        Exchange withReservation(BodyBudget.Reservation held) {
-            return new Exchange(request, keepAlive, http10, execution, held, reader, bodyBytes);
-        }
-        Exchange withRequest(Request updated) {
-            return new Exchange(updated, keepAlive, http10, execution, reservation, reader, bodyBytes);
-        }
-        Exchange withStream(BodyReader stream) {
-            return new Exchange(request, keepAlive, http10, execution, reservation, stream, bodyBytes);
-        }
-        Exchange withBodyBytes(int bytes) {
-            return new Exchange(request, keepAlive, http10, execution, reservation, reader, bytes);
-        }
-        /** Returns the request body's share of the listener's budget; idempotent. */
-        void release() { if (reservation != null) { reservation.release(); } }
-    }
-    /** A prepared response; {@code streamed} marks a stream that was already written, with no body here. */
-    private record WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean streamed,
-            boolean framework) {
-        WireResponse(int status, Map<String, String> headers, byte[] body, boolean close, boolean streamed) {
-            this(status, headers, body, close, streamed, false);
-        }
-    }
+  }
 }

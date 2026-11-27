@@ -32,478 +32,565 @@ import java.util.concurrent.RejectedExecutionException;
  * a network listener. A stream leaves the request lane for the separate stream lane before its head
  * is returned, so idle streams cannot exhaust request capacity. Admission outcomes map to the same
  * statuses as the HTTP listener: 503 when capacity, stream capacity or the queue is exhausted or
- * the queue wait expires, and 504 when the request deadline expires.
- * Framework errors use the same {@code application/problem+json} bodies as the listener: request
- * bodies over the application's {@code maxRequestBody} get 413, unknown routes 404 (501 for an
- * unrecognized method), CONNECT 501, method mismatches 405 with {@code Allow}, OPTIONS without an
- * OPTIONS route 204 with {@code Allow}, and {@link com.jsgalactic.axiom.error.AxiomException}s thrown by
- * handlers (including body decoding failures) their own status. Other exceptions thrown by a handler
- * propagate to the test by default, which helps debugging; {@link #startMappingFailures} answers them
- * like the listener does, with the generic 500 problem response. After codec encoding, response bodies
- * must be {@code null}, {@code String} or {@code byte[]} and within the transport size limits;
- * anything else fails the call with {@link IllegalStateException}, where the listener would answer
- * 500 (also answered 500 by {@link #startMappingFailures}); streamed responses (see {@code Response.stream}) are collected into bytes by {@link #execute} and
- * {@link #submit}, with the listener's byte cap and deadline, and read incrementally with
- * {@link #stream}; HEAD follows the same rules and returns the {@code Content-Length} a listener sends. Bodies are sent as raw bytes; this module installs no codec, so decoding uses whatever codec
- * the test's runtime classpath provides. Request targets may carry a query and are split and
- * validated by {@link Request#fromTarget(String, String)}, as the listener does; a target the
- * listener would answer with 400 throws {@link IllegalArgumentException} instead. Transport rules such as 414, 431, Expect handling,
- * pipelining and keep-alive are not modeled. Admission draws from the application's budget, which
- * is shared with every listener and other test client of that application.
+ * the queue wait expires, and 504 when the request deadline expires. Framework errors use the same
+ * {@code application/problem+json} bodies as the listener: request bodies over the application's
+ * {@code maxRequestBody} get 413, unknown routes 404 (501 for an unrecognized method), CONNECT 501,
+ * method mismatches 405 with {@code Allow}, OPTIONS without an OPTIONS route 204 with {@code
+ * Allow}, and {@link com.jsgalactic.axiom.error.AxiomException}s thrown by handlers (including body
+ * decoding failures) their own status. Other exceptions thrown by a handler propagate to the test
+ * by default, which helps debugging; {@link #startMappingFailures} answers them like the listener
+ * does, with the generic 500 problem response. After codec encoding, response bodies must be {@code
+ * null}, {@code String} or {@code byte[]} and within the transport size limits; anything else fails
+ * the call with {@link IllegalStateException}, where the listener would answer 500 (also answered
+ * 500 by {@link #startMappingFailures}); streamed responses (see {@code Response.stream}) are
+ * collected into bytes by {@link #execute} and {@link #submit}, with the listener's byte cap and
+ * deadline, and read incrementally with {@link #stream}; HEAD follows the same rules and returns
+ * the {@code Content-Length} a listener sends. Bodies are sent as raw bytes; this module installs
+ * no codec, so decoding uses whatever codec the test's runtime classpath provides. Request targets
+ * may carry a query and are split and validated by {@link Request#fromTarget(String, String)}, as
+ * the listener does; a target the listener would answer with 400 throws {@link
+ * IllegalArgumentException} instead. Transport rules such as 414, 431, Expect handling, pipelining
+ * and keep-alive are not modeled. Admission draws from the application's budget, which is shared
+ * with every listener and other test client of that application.
  */
 public final class TestClient implements AutoCloseable {
-    private static final Object UNMATCHED = new Object();
-    private final Application application;
-    private static final System.Logger LOG = System.getLogger(TestClient.class.getName());
-    private final RequestDispatcher dispatcher;
-    private final RequestDispatcher.Session session;
-    private final boolean mapFailures;
-    private final StreamMetrics streamMetrics;
-    private final StreamBuffering buffering;
+  private static final Object UNMATCHED = new Object();
+  private final Application application;
+  private static final System.Logger LOG = System.getLogger(TestClient.class.getName());
+  private final RequestDispatcher dispatcher;
+  private final RequestDispatcher.Session session;
+  private final boolean mapFailures;
+  private final StreamMetrics streamMetrics;
+  private final StreamBuffering buffering;
 
-    private TestClient(Application application, StreamBuffering buffering, boolean mapFailures) {
-        this.mapFailures = mapFailures;
-        this.buffering = Objects.requireNonNull(buffering, "buffering");
-        this.application = Objects.requireNonNull(application, "application").start();
-        this.dispatcher = ExecutionAccess.of(application).execution();
-        this.session = dispatcher.openSession();
-        this.streamMetrics = new StreamMetrics(application.metrics());
+  private TestClient(Application application, StreamBuffering buffering, boolean mapFailures) {
+    this.mapFailures = mapFailures;
+    this.buffering = Objects.requireNonNull(buffering, "buffering");
+    this.application = Objects.requireNonNull(application, "application").start();
+    this.dispatcher = ExecutionAccess.of(application).execution();
+    this.session = dispatcher.openSession();
+    this.streamMetrics = new StreamMetrics(application.metrics());
+  }
+
+  /**
+   * Freezes registration and takes responsibility for closing the application.
+   *
+   * @param application configured application
+   * @return a client to use with try-with-resources
+   */
+  public static TestClient start(Application application) {
+    return new TestClient(application, StreamBuffering.HAND_OFF, false);
+  }
+
+  /**
+   * Like {@link #start}, but answers a handler failure the way the HTTP listener does, so a test
+   * sees what a client would. An exception that is not an {@link
+   * com.jsgalactic.axiom.error.AxiomException} and that no error handler maps becomes the generic
+   * 500 {@code application/problem+json} response (status, code and request ID only, with {@code
+   * Connection: close}), and a response the transport could not send is a 500 too, instead of
+   * failing the call. Each such failure is logged at ERROR with its request ID, as the listener
+   * does. Interruption, cancellation and a stream aborted after its head was sent still fail the
+   * call, because the listener sends no response for them.
+   *
+   * @param application configured application
+   * @return a client to use with try-with-resources
+   */
+  public static TestClient startMappingFailures(Application application) {
+    return new TestClient(application, StreamBuffering.HAND_OFF, true);
+  }
+
+  /**
+   * Freezes registration and takes responsibility for closing the application, with streamed
+   * responses (see {@link #stream}) buffered like a connection instead of handed over one write at
+   * a time.
+   *
+   * @param application configured application
+   * @param buffering water marks, piece size and stall bound of streams; {@link
+   *     StreamBuffering#listener()} uses the HTTP listener's
+   * @return a client to use with try-with-resources
+   */
+  public static TestClient start(Application application, StreamBuffering buffering) {
+    return new TestClient(application, buffering, false);
+  }
+
+  /**
+   * Executes a GET request for the supplied target.
+   *
+   * @param target absolute raw path, optionally followed by {@code ?} and a raw query
+   * @return response
+   * @throws IllegalArgumentException for a path or query the listener would answer with 400,
+   *     validated as by {@link Request#fromTarget(String, String)}
+   * @throws Exception if the handler fails
+   */
+  public Response get(String target) throws Exception {
+    return execute(Request.fromTarget("GET", target));
+  }
+
+  /**
+   * Executes a POST request with a UTF-8 text body, for example raw JSON.
+   *
+   * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
+   * @param contentType Content-Type header value, or null to send none
+   * @param body text encoded as UTF-8
+   * @return response
+   * @throws Exception if the handler fails
+   */
+  public Response post(String target, String contentType, String body) throws Exception {
+    return send("POST", target, contentType, body.getBytes(StandardCharsets.UTF_8));
+  }
+
+  /**
+   * Executes a POST request with a binary body.
+   *
+   * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
+   * @param contentType Content-Type header value, or null to send none
+   * @param body content; copied
+   * @return response
+   * @throws Exception if the handler fails
+   */
+  public Response post(String target, String contentType, byte[] body) throws Exception {
+    return send("POST", target, contentType, body);
+  }
+
+  /**
+   * Executes a PUT request with a UTF-8 text body.
+   *
+   * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
+   * @param contentType Content-Type header value, or null to send none
+   * @param body text encoded as UTF-8
+   * @return response
+   * @throws Exception if the handler fails
+   */
+  public Response put(String target, String contentType, String body) throws Exception {
+    return send("PUT", target, contentType, body.getBytes(StandardCharsets.UTF_8));
+  }
+
+  /**
+   * Executes a PUT request with a binary body.
+   *
+   * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
+   * @param contentType Content-Type header value, or null to send none
+   * @param body content; copied
+   * @return response
+   * @throws Exception if the handler fails
+   */
+  public Response put(String target, String contentType, byte[] body) throws Exception {
+    return send("PUT", target, contentType, body);
+  }
+
+  /**
+   * Executes a PATCH request with a UTF-8 text body.
+   *
+   * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
+   * @param contentType Content-Type header value, or null to send none
+   * @param body text encoded as UTF-8
+   * @return response
+   * @throws Exception if the handler fails
+   */
+  public Response patch(String target, String contentType, String body) throws Exception {
+    return send("PATCH", target, contentType, body.getBytes(StandardCharsets.UTF_8));
+  }
+
+  /**
+   * Executes a PATCH request with a binary body.
+   *
+   * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
+   * @param contentType Content-Type header value, or null to send none
+   * @param body content; copied
+   * @return response
+   * @throws Exception if the handler fails
+   */
+  public Response patch(String target, String contentType, byte[] body) throws Exception {
+    return send("PATCH", target, contentType, body);
+  }
+
+  private Response send(String method, String target, String contentType, byte[] body)
+      throws Exception {
+    var headers =
+        contentType == null ? Map.<String, String>of() : Map.of("Content-Type", contentType);
+    return execute(
+        Request.fromTarget(method, target)
+            .withHeaders(headers)
+            .withBody(Body.of(contentType, body)));
+  }
+
+  /**
+   * Executes a request through admission and waits for its outcome.
+   *
+   * @param request request to execute
+   * @return the response, or a 503 or 504 problem response for admission and deadline failures
+   * @throws Exception if the handler fails, unless this client maps failures
+   * @throws IllegalStateException if the response body or headers cannot be sent by the transport
+   *     (a 500 response when this client maps failures)
+   */
+  public Response execute(Request request) throws Exception {
+    return execute(request, null);
+  }
+
+  /**
+   * Executes a request whose body is handed to the handler incrementally through the supplied
+   * reader, with the same aggregate cap as a listener: a read past {@code maxRequestBody} fails the
+   * request with 413. The client closes the reader when the exchange ends.
+   *
+   * @param request request to execute; its buffered body is not used when a reader is supplied
+   * @param reader source of body bytes, or null for the buffered hand-off of {@link
+   *     #execute(Request)}
+   * @return response
+   * @throws Exception if the handler fails
+   */
+  public Response execute(Request request, BodyReader reader) throws Exception {
+    try {
+      return submit(request, reader).join();
+    } catch (CompletionException failure) {
+      var cause = failure.getCause();
+      if (cause instanceof Exception exception) {
+        throw exception;
+      }
+      if (cause instanceof Error error) {
+        throw error;
+      }
+      throw failure;
     }
+  }
 
-    /**
-     * Freezes registration and takes responsibility for closing the application.
-     * @param application configured application
-     * @return a client to use with try-with-resources
-     */
-    public static TestClient start(Application application) {
-        return new TestClient(application, StreamBuffering.HAND_OFF, false);
-    }
+  /**
+   * Starts a request without waiting, so tests can hold capacity and observe queueing. The future
+   * completes with a 503 or 504 response for admission and deadline failures, and exceptionally for
+   * handler failures (with a 500 response when started with {@link #startMappingFailures}). A
+   * streamed response completes the future once its body has ended, with the whole body as bytes;
+   * use {@link #stream} to read it while it is written.
+   *
+   * @param request request to execute
+   * @return the request outcome
+   */
+  public CompletableFuture<Response> submit(Request request) {
+    return submit(request, null);
+  }
 
-    /**
-     * Like {@link #start}, but answers a handler failure the way the HTTP listener does, so a test
-     * sees what a client would. An exception that is not an {@link com.jsgalactic.axiom.error.AxiomException}
-     * and that no error handler maps becomes the generic 500 {@code application/problem+json}
-     * response (status, code and request ID only, with {@code Connection: close}), and a response
-     * the transport could not send is a 500 too, instead of failing the call. Each such failure is
-     * logged at ERROR with its request ID, as the listener does. Interruption, cancellation and a
-     * stream aborted after its head was sent still fail the call, because the listener sends no
-     * response for them.
-     *
-     * @param application configured application
-     * @return a client to use with try-with-resources
-     */
-    public static TestClient startMappingFailures(Application application) {
-        return new TestClient(application, StreamBuffering.HAND_OFF, true);
-    }
-
-    /**
-     * Freezes registration and takes responsibility for closing the application, with streamed
-     * responses (see {@link #stream}) buffered like a connection instead of handed over one write
-     * at a time.
-     * @param application configured application
-     * @param buffering water marks, piece size and stall bound of streams; {@link StreamBuffering#listener()}
-     *        uses the HTTP listener's
-     * @return a client to use with try-with-resources
-     */
-    public static TestClient start(Application application, StreamBuffering buffering) {
-        return new TestClient(application, buffering, false);
-    }
-
-    /**
-     * Executes a GET request for the supplied target.
-     *
-     * @param target absolute raw path, optionally followed by {@code ?} and a raw query
-     * @return response
-     * @throws IllegalArgumentException for a path or query the listener would answer with 400,
-     *         validated as by {@link Request#fromTarget(String, String)}
-     * @throws Exception if the handler fails
-     */
-    public Response get(String target) throws Exception {
-        return execute(Request.fromTarget("GET", target));
-    }
-
-    /**
-     * Executes a POST request with a UTF-8 text body, for example raw JSON.
-     *
-     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
-     * @param contentType Content-Type header value, or null to send none
-     * @param body text encoded as UTF-8
-     * @return response
-     * @throws Exception if the handler fails
-     */
-    public Response post(String target, String contentType, String body) throws Exception {
-        return send("POST", target, contentType, body.getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * Executes a POST request with a binary body.
-     *
-     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
-     * @param contentType Content-Type header value, or null to send none
-     * @param body content; copied
-     * @return response
-     * @throws Exception if the handler fails
-     */
-    public Response post(String target, String contentType, byte[] body) throws Exception {
-        return send("POST", target, contentType, body);
-    }
-
-    /**
-     * Executes a PUT request with a UTF-8 text body.
-     *
-     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
-     * @param contentType Content-Type header value, or null to send none
-     * @param body text encoded as UTF-8
-     * @return response
-     * @throws Exception if the handler fails
-     */
-    public Response put(String target, String contentType, String body) throws Exception {
-        return send("PUT", target, contentType, body.getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * Executes a PUT request with a binary body.
-     *
-     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
-     * @param contentType Content-Type header value, or null to send none
-     * @param body content; copied
-     * @return response
-     * @throws Exception if the handler fails
-     */
-    public Response put(String target, String contentType, byte[] body) throws Exception {
-        return send("PUT", target, contentType, body);
-    }
-
-    /**
-     * Executes a PATCH request with a UTF-8 text body.
-     *
-     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
-     * @param contentType Content-Type header value, or null to send none
-     * @param body text encoded as UTF-8
-     * @return response
-     * @throws Exception if the handler fails
-     */
-    public Response patch(String target, String contentType, String body) throws Exception {
-        return send("PATCH", target, contentType, body.getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * Executes a PATCH request with a binary body.
-     *
-     * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
-     * @param contentType Content-Type header value, or null to send none
-     * @param body content; copied
-     * @return response
-     * @throws Exception if the handler fails
-     */
-    public Response patch(String target, String contentType, byte[] body) throws Exception {
-        return send("PATCH", target, contentType, body);
-    }
-
-    private Response send(String method, String target, String contentType, byte[] body) throws Exception {
-        var headers = contentType == null ? Map.<String, String>of() : Map.of("Content-Type", contentType);
-        return execute(Request.fromTarget(method, target).withHeaders(headers).withBody(Body.of(contentType, body)));
-    }
-
-    /**
-     * Executes a request through admission and waits for its outcome.
-     *
-     * @param request request to execute
-     * @return the response, or a 503 or 504 problem response for admission and deadline failures
-     * @throws Exception if the handler fails, unless this client maps failures
-     * @throws IllegalStateException if the response body or headers cannot be sent by the transport
-     *         (a 500 response when this client maps failures)
-     */
-    public Response execute(Request request) throws Exception {
-        return execute(request, null);
-    }
-
-    /**
-     * Executes a request whose body is handed to the handler incrementally through the supplied
-     * reader, with the same aggregate cap as a listener: a read past {@code maxRequestBody} fails
-     * the request with 413. The client closes the reader when the exchange ends.
-     *
-     * @param request request to execute; its buffered body is not used when a reader is supplied
-     * @param reader source of body bytes, or null for the buffered hand-off of {@link #execute(Request)}
-     * @return response
-     * @throws Exception if the handler fails
-     */
-    public Response execute(Request request, BodyReader reader) throws Exception {
-        try {
-            return submit(request, reader).join();
-        } catch (CompletionException failure) {
-            var cause = failure.getCause();
-            if (cause instanceof Exception exception) { throw exception; }
-            if (cause instanceof Error error) { throw error; }
-            throw failure;
-        }
-    }
-
-    /**
-     * Starts a request without waiting, so tests can hold capacity and observe queueing.
-     * The future completes with a 503 or 504 response for admission and deadline failures, and
-     * exceptionally for handler failures (with a 500 response when started with
-     * {@link #startMappingFailures}). A streamed response completes the future once its body
-     * has ended, with the whole body as bytes; use {@link #stream} to read it while it is written.
-     *
-     * @param request request to execute
-     * @return the request outcome
-     */
-    public CompletableFuture<Response> submit(Request request) {
-        return submit(request, null);
-    }
-
-    /**
-     * Starts a request with an incremental body reader for the handler, mirroring the listener's
-     * hand-off: buffering is replaced by reads from the reader, and its bytes are bounded by the
-     * application's body limit. The reader is closed when the exchange completes.
-     *
-     * @param request request to execute
-     * @param reader source of body bytes, or null for the buffered hand-off
-     * @return the request outcome
-     */
-    public CompletableFuture<Response> submit(Request request, BodyReader reader) {
-        Objects.requireNonNull(request, "request");
-        var body = handoff(request, reader);
-        var context = ExecutionContext.create(application.requestTimeout());
-        var route = application.resolve(request);
-        var key = route.<Object>map(value -> value).orElse(UNMATCHED);
-        var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
-        var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
-        RequestDispatcher.Task<Response> task;
-        try {
-            task = dispatcher.submit(session, key, policy, context, () -> {
-                var response = application.handle(request, context, body);
-                checkSerializable(response);
-                if (!response.isStreaming()) { return response; }
-                if (!dispatcher.admitStream(key, streamPolicy)) {
-                    return Problems.response(503, context.requestId());
-                }
-                return collect(response, context, streamScope(route));
-            }, Response::status);
-        } catch (RejectedExecutionException overloaded) {
-            body.close();
-            return CompletableFuture.completedFuture(Problems.response(503, context.requestId()));
-        }
-        return task.result().handle((response, thrown) -> {
-            body.close();
-            var failure = unwrap(thrown);
-            if (failure == null) { return response; }
-            var problem = problem(failure, context);
-            if (problem != null) { return problem; }
-            throw new CompletionException(failure);
-        }).toCompletableFuture();
-    }
-
-    /** Wraps the buffered body, or the caller's reader, with the listener's aggregate body cap. */
-    private BodyReader handoff(Request request, BodyReader supplied) {
-        var source = supplied != null ? supplied : BodyReader.of(request.body().bytes());
-        int limit = application.maxRequestBody();
-        return new BodyReader() {
-            private long count;
-
-            @Override public int read(byte[] bytes, int offset, int length) throws IOException {
-                int read = source.read(bytes, offset, length);
-                if (read > 0) {
-                    count += read;
-                    if (count > limit) { throw new BodyReadException(BodyReadException.Reason.LIMIT_EXCEEDED); }
-                }
-                return read;
-            }
-
-            @Override public void pause() { source.pause(); }
-
-            @Override public void resume() { source.resume(); }
-
-            @Override public boolean paused() { return source.paused(); }
-
-            @Override public long bytesRead() { return source.bytesRead(); }
-
-            @Override public void close() { source.close(); }
-        };
-    }
-
-    /**
-     * Executes a request and returns as soon as the response head is known, so that a streamed
-     * body (see {@code Response.stream} and {@code Response.sse}) can be read piece by piece with
-     * {@link StreamedResponse#next()} while the handler is still writing it. A response that is
-     * not streamed is returned as a single chunk. A stream transfers its request slot into the
-     * stream lane before the head is returned and holds that slot until the body ends or the
-     * response is {@linkplain StreamedResponse#close() closed}; ordinary requests keep their own
-     * capacity throughout.
-     *
-     * <p>Failures before the head is known behave as for {@link #execute}: admission and deadline
-     * failures give a 503 or 504 problem response, and handler exceptions are thrown. Failures
-     * after it surface through {@link StreamedResponse#completion()}.
-     *
-     * @param request request to execute
-     * @return the response head and a reader for its body
-     * @throws Exception if the handler fails before the head is known
-     * @throws IllegalStateException if the response headers cannot be sent by the transport
-     */
-    public StreamedResponse stream(Request request) throws Exception {
-        return stream(request, null);
-    }
-
-    /**
-     * Like {@link #stream(Request)}, with the request body handed to the handler incrementally
-     * through {@code reader}. The client closes the reader when the exchange ends.
-     *
-     * @param request request to execute
-     * @param reader source of body bytes, or null for the buffered hand-off
-     * @return the response head and a reader for its body
-     * @throws Exception if the handler fails before the head is known
-     */
-    public StreamedResponse stream(Request request, BodyReader reader) throws Exception {
-        Objects.requireNonNull(request, "request");
-        var body = handoff(request, reader);
-        var context = ExecutionContext.create(application.requestTimeout());
-        var route = application.resolve(request);
-        var key = route.<Object>map(value -> value).orElse(UNMATCHED);
-        var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
-        var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
-        var head = new CompletableFuture<StreamedResponse>();
-        RequestDispatcher.Task<Response> task;
-        try {
-            task = dispatcher.submit(session, key, policy, context, () -> {
+  /**
+   * Starts a request with an incremental body reader for the handler, mirroring the listener's
+   * hand-off: buffering is replaced by reads from the reader, and its bytes are bounded by the
+   * application's body limit. The reader is closed when the exchange completes.
+   *
+   * @param request request to execute
+   * @param reader source of body bytes, or null for the buffered hand-off
+   * @return the request outcome
+   */
+  public CompletableFuture<Response> submit(Request request, BodyReader reader) {
+    Objects.requireNonNull(request, "request");
+    var body = handoff(request, reader);
+    var context = ExecutionContext.create(application.requestTimeout());
+    var route = application.resolve(request);
+    var key = route.<Object>map(value -> value).orElse(UNMATCHED);
+    var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
+    var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
+    RequestDispatcher.Task<Response> task;
+    try {
+      task =
+          dispatcher.submit(
+              session,
+              key,
+              policy,
+              context,
+              () -> {
                 var response = application.handle(request, context, body);
                 checkSerializable(response);
                 if (!response.isStreaming()) {
-                    head.complete(answered(response));
-                    return response;
+                  return response;
+                }
+                if (!dispatcher.admitStream(key, streamPolicy)) {
+                  return Problems.response(503, context.requestId());
+                }
+                return collect(response, context, streamScope(route));
+              },
+              Response::status);
+    } catch (RejectedExecutionException overloaded) {
+      body.close();
+      return CompletableFuture.completedFuture(Problems.response(503, context.requestId()));
+    }
+    return task.result()
+        .handle(
+            (response, thrown) -> {
+              body.close();
+              var failure = unwrap(thrown);
+              if (failure == null) {
+                return response;
+              }
+              var problem = problem(failure, context);
+              if (problem != null) {
+                return problem;
+              }
+              throw new CompletionException(failure);
+            })
+        .toCompletableFuture();
+  }
+
+  /** Wraps the buffered body, or the caller's reader, with the listener's aggregate body cap. */
+  private BodyReader handoff(Request request, BodyReader supplied) {
+    var source = supplied != null ? supplied : BodyReader.of(request.body().bytes());
+    int limit = application.maxRequestBody();
+    return new BodyReader() {
+      private long count;
+
+      @Override
+      public int read(byte[] bytes, int offset, int length) throws IOException {
+        int read = source.read(bytes, offset, length);
+        if (read > 0) {
+          count += read;
+          if (count > limit) {
+            throw new BodyReadException(BodyReadException.Reason.LIMIT_EXCEEDED);
+          }
+        }
+        return read;
+      }
+
+      @Override
+      public void pause() {
+        source.pause();
+      }
+
+      @Override
+      public void resume() {
+        source.resume();
+      }
+
+      @Override
+      public boolean paused() {
+        return source.paused();
+      }
+
+      @Override
+      public long bytesRead() {
+        return source.bytesRead();
+      }
+
+      @Override
+      public void close() {
+        source.close();
+      }
+    };
+  }
+
+  /**
+   * Executes a request and returns as soon as the response head is known, so that a streamed body
+   * (see {@code Response.stream} and {@code Response.sse}) can be read piece by piece with {@link
+   * StreamedResponse#next()} while the handler is still writing it. A response that is not streamed
+   * is returned as a single chunk. A stream transfers its request slot into the stream lane before
+   * the head is returned and holds that slot until the body ends or the response is {@linkplain
+   * StreamedResponse#close() closed}; ordinary requests keep their own capacity throughout.
+   *
+   * <p>Failures before the head is known behave as for {@link #execute}: admission and deadline
+   * failures give a 503 or 504 problem response, and handler exceptions are thrown. Failures after
+   * it surface through {@link StreamedResponse#completion()}.
+   *
+   * @param request request to execute
+   * @return the response head and a reader for its body
+   * @throws Exception if the handler fails before the head is known
+   * @throws IllegalStateException if the response headers cannot be sent by the transport
+   */
+  public StreamedResponse stream(Request request) throws Exception {
+    return stream(request, null);
+  }
+
+  /**
+   * Like {@link #stream(Request)}, with the request body handed to the handler incrementally
+   * through {@code reader}. The client closes the reader when the exchange ends.
+   *
+   * @param request request to execute
+   * @param reader source of body bytes, or null for the buffered hand-off
+   * @return the response head and a reader for its body
+   * @throws Exception if the handler fails before the head is known
+   */
+  public StreamedResponse stream(Request request, BodyReader reader) throws Exception {
+    Objects.requireNonNull(request, "request");
+    var body = handoff(request, reader);
+    var context = ExecutionContext.create(application.requestTimeout());
+    var route = application.resolve(request);
+    var key = route.<Object>map(value -> value).orElse(UNMATCHED);
+    var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
+    var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
+    var head = new CompletableFuture<StreamedResponse>();
+    RequestDispatcher.Task<Response> task;
+    try {
+      task =
+          dispatcher.submit(
+              session,
+              key,
+              policy,
+              context,
+              () -> {
+                var response = application.handle(request, context, body);
+                checkSerializable(response);
+                if (!response.isStreaming()) {
+                  head.complete(answered(response));
+                  return response;
                 }
                 // A full stream lane is refused before the head, as an ordinary response.
                 if (!dispatcher.admitStream(key, streamPolicy)) {
-                    var refused = Problems.response(503, context.requestId());
-                    head.complete(answered(refused));
-                    return refused;
+                  var refused = Problems.response(503, context.requestId());
+                  head.complete(answered(refused));
+                  return refused;
                 }
                 var scope = streamScope(route);
-                var stream = new StreamedResponse(response.status(), response.headers(), response.streamLimit(),
-                        context, buffering, scope);
+                var stream =
+                    new StreamedResponse(
+                        response.status(),
+                        response.headers(),
+                        response.streamLimit(),
+                        context,
+                        buffering,
+                        scope);
                 var run = StreamRun.begin(response, context, scope);
                 head.complete(stream);
                 Throwable failure = null;
                 try {
-                    response.streamBody().writeTo(stream.writer());
+                  response.streamBody().writeTo(stream.writer());
                 } catch (Exception | Error thrown) {
-                    failure = thrown;
-                    throw thrown;
+                  failure = thrown;
+                  throw thrown;
                 } finally {
-                    run.end(stream.writer().bytesWritten(), stream.aborted(), failure);
+                  run.end(stream.writer().bytesWritten(), stream.aborted(), failure);
                 }
-                // A body that swallowed the abort did not complete: the listener would have cut the connection.
+                // A body that swallowed the abort did not complete: the listener would have cut the
+                // connection.
                 var reason = stream.aborted();
-                if (reason != null) { throw new StreamAbortedException(reason); }
+                if (reason != null) {
+                  throw new StreamAbortedException(reason);
+                }
                 return response.withoutBody();
-            }, Response::status);
-        } catch (RejectedExecutionException overloaded) {
-            body.close();
-            return answered(Problems.response(503, context.requestId()));
-        }
-        task.result().whenComplete((response, thrown) -> {
-            body.close();
-            var failure = unwrap(thrown);
-            if (!head.isDone()) {
-                // The head was never known: the outcome is an admission or deadline answer, or a failure.
+              },
+              Response::status);
+    } catch (RejectedExecutionException overloaded) {
+      body.close();
+      return answered(Problems.response(503, context.requestId()));
+    }
+    task.result()
+        .whenComplete(
+            (response, thrown) -> {
+              body.close();
+              var failure = unwrap(thrown);
+              if (!head.isDone()) {
+                // The head was never known: the outcome is an admission or deadline answer, or a
+                // failure.
                 var problem = failure == null ? null : problem(failure, context);
-                if (failure == null) { head.complete(answered(response)); }
-                else if (problem != null) { head.complete(answered(problem)); }
-                else { head.completeExceptionally(failure); }
-            } else {
-                // After the head, the reader learns the end and its cause; unread chunks stay readable.
+                if (failure == null) {
+                  head.complete(answered(response));
+                } else if (problem != null) {
+                  head.complete(answered(problem));
+                } else {
+                  head.completeExceptionally(failure);
+                }
+              } else {
+                // After the head, the reader learns the end and its cause; unread chunks stay
+                // readable.
                 head.join().end(failure);
-            }
-        });
-        StreamedResponse stream;
-        try {
-            stream = head.join();
-        } catch (CompletionException failure) {
-            var cause = unwrap(failure);
-            if (cause instanceof Exception exception) { throw exception; }
-            if (cause instanceof Error error) { throw error; }
-            throw failure;
-        }
-        stream.attach(task::cancel);
-        return stream;
+              }
+            });
+    StreamedResponse stream;
+    try {
+      stream = head.join();
+    } catch (CompletionException failure) {
+      var cause = unwrap(failure);
+      if (cause instanceof Exception exception) {
+        throw exception;
+      }
+      if (cause instanceof Error error) {
+        throw error;
+      }
+      throw failure;
     }
+    stream.attach(task::cancel);
+    return stream;
+  }
 
-    private static Throwable unwrap(Throwable failure) {
-        while (failure instanceof CompletionException && failure.getCause() != null) { failure = failure.getCause(); }
-        return failure;
+  private static Throwable unwrap(Throwable failure) {
+    while (failure instanceof CompletionException && failure.getCause() != null) {
+      failure = failure.getCause();
     }
+    return failure;
+  }
 
-    /**
-     * The response a client sees for an admission or deadline failure, for a handler failure the
-     * listener would answer 500 when this client maps failures, or null for any other failure.
-     */
-    private Response problem(Throwable failure, ExecutionContext context) {
-        if (failure instanceof BodyReadException read && read.reason() == BodyReadException.Reason.LIMIT_EXCEEDED) {
-            return Problems.response(413, context.requestId());
-        }
-        if (failure instanceof RequestDispatcher.DeadlineExceededException) {
-            return Problems.response(504, context.requestId());
-        }
-        if (failure instanceof RequestDispatcher.QueueTimeoutException
-                || failure instanceof RequestDispatcher.DispatchRejectedException) {
-            return Problems.response(503, context.requestId());
-        }
-        boolean answered = failure instanceof Exception && !(failure instanceof InterruptedException)
-                && !(failure instanceof CancellationException)
-                && !(failure instanceof StreamAbortedException);
-        if (mapFailures && answered) {
-            LOG.log(System.Logger.Level.ERROR, "Request " + context.requestId() + " failed", failure);
-            return Problems.response(500, context.requestId()).withHeader("Connection", "close");
-        }
-        return null;
+  /**
+   * The response a client sees for an admission or deadline failure, for a handler failure the
+   * listener would answer 500 when this client maps failures, or null for any other failure.
+   */
+  private Response problem(Throwable failure, ExecutionContext context) {
+    if (failure instanceof BodyReadException read
+        && read.reason() == BodyReadException.Reason.LIMIT_EXCEEDED) {
+      return Problems.response(413, context.requestId());
     }
+    if (failure instanceof RequestDispatcher.DeadlineExceededException) {
+      return Problems.response(504, context.requestId());
+    }
+    if (failure instanceof RequestDispatcher.QueueTimeoutException
+        || failure instanceof RequestDispatcher.DispatchRejectedException) {
+      return Problems.response(503, context.requestId());
+    }
+    boolean answered =
+        failure instanceof Exception
+            && !(failure instanceof InterruptedException)
+            && !(failure instanceof CancellationException)
+            && !(failure instanceof StreamAbortedException);
+    if (mapFailures && answered) {
+      LOG.log(System.Logger.Level.ERROR, "Request " + context.requestId() + " failed", failure);
+      return Problems.response(500, context.requestId()).withHeader("Connection", "close");
+    }
+    return null;
+  }
 
-    /** A response that is complete already, as a stream of one chunk that has ended. */
-    private static StreamedResponse answered(Response response) {
-        var body = ResponseSerialization.bodyBytes(response.body());
-        var stream = StreamedResponse.whole(response.status(), response.headers(), body == null ? new byte[0] : body);
-        stream.end(null);
-        return stream;
-    }
+  /** A response that is complete already, as a stream of one chunk that has ended. */
+  private static StreamedResponse answered(Response response) {
+    var body = ResponseSerialization.bodyBytes(response.body());
+    var stream =
+        StreamedResponse.whole(
+            response.status(), response.headers(), body == null ? new byte[0] : body);
+    stream.end(null);
+    return stream;
+  }
 
-    /** Runs a stream body to its end in memory, with the listener's cap and deadline rules. */
-    private static Response collect(Response response, ExecutionContext context, StreamMetrics.Scope scope)
-            throws Exception {
-        var collector = new StreamedResponse.Collector(response.streamLimit(), context);
-        var run = StreamRun.begin(response, context, scope);
-        Throwable failure = null;
-        try {
-            response.streamBody().writeTo(collector);
-        } catch (Exception | Error thrown) {
-            failure = thrown;
-            throw thrown;
-        } finally {
-            run.end(collector.bytesWritten(), collector.aborted(), failure);
-        }
-        // A body that swallowed the abort did not complete: the listener would have cut the connection.
-        if (collector.aborted() != null) { throw new StreamAbortedException(collector.aborted()); }
-        var collected = Response.of(response.status(), collector.toByteArray());
-        for (var header : response.headers().entrySet()) {
-            collected = collected.withHeader(header.getKey(), header.getValue());
-        }
-        return collected;
+  /** Runs a stream body to its end in memory, with the listener's cap and deadline rules. */
+  private static Response collect(
+      Response response, ExecutionContext context, StreamMetrics.Scope scope) throws Exception {
+    var collector = new StreamedResponse.Collector(response.streamLimit(), context);
+    var run = StreamRun.begin(response, context, scope);
+    Throwable failure = null;
+    try {
+      response.streamBody().writeTo(collector);
+    } catch (Exception | Error thrown) {
+      failure = thrown;
+      throw thrown;
+    } finally {
+      run.end(collector.bytesWritten(), collector.aborted(), failure);
     }
+    // A body that swallowed the abort did not complete: the listener would have cut the connection.
+    if (collector.aborted() != null) {
+      throw new StreamAbortedException(collector.aborted());
+    }
+    var collected = Response.of(response.status(), collector.toByteArray());
+    for (var header : response.headers().entrySet()) {
+      collected = collected.withHeader(header.getKey(), header.getValue());
+    }
+    return collected;
+  }
 
-    /** The recorder of the stream measurements of a route's endpoint. */
-    private StreamMetrics.Scope streamScope(Optional<? extends Object> route) {
-        return streamMetrics.scope(dispatcher.endpointTag(route.<Object>map(value -> value).orElse(UNMATCHED)));
-    }
+  /** The recorder of the stream measurements of a route's endpoint. */
+  private StreamMetrics.Scope streamScope(Optional<? extends Object> route) {
+    return streamMetrics.scope(
+        dispatcher.endpointTag(route.<Object>map(value -> value).orElse(UNMATCHED)));
+  }
 
-    /** Applies the listener's serialization rules; where it would answer 500, the call fails. */
-    private static void checkSerializable(Response response) {
-        var rejection = ResponseSerialization.rejection(response);
-        if (rejection != null) { throw new IllegalStateException(rejection + "; the listener would return 500"); }
+  /** Applies the listener's serialization rules; where it would answer 500, the call fails. */
+  private static void checkSerializable(Response response) {
+    var rejection = ResponseSerialization.rejection(response);
+    if (rejection != null) {
+      throw new IllegalStateException(rejection + "; the listener would return 500");
     }
+  }
 
-    /** Cancels this client's requests and closes the application. */
-    @Override
-    public void close() {
-        session.close();
-        application.close();
-    }
+  /** Cancels this client's requests and closes the application. */
+  @Override
+  public void close() {
+    session.close();
+    application.close();
+  }
 }
