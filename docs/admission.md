@@ -6,24 +6,30 @@ nav_order: 1
 
 # Admission and bounded queues
 
-Admission reserves execution capacity before creating a virtual thread. Each
-listener has aggregate active and waiting limits for requests, and a separate
-aggregate limit for streams. Requests to a registered route also share limits
-by method and template: `/users/a` and `/users/b` both count against
-`GET /users/:id`. Parameter values cannot create new admission buckets.
+Admission reserves execution capacity before creating a virtual thread. The
+application owns one execution budget, shared by every listener and test client
+of that application: aggregate active and waiting limits for requests, plus a
+separate aggregate limit for streams. Requests to a registered route also carry
+a per-route cap keyed by method and template: `/users/a` and `/users/b` both
+count against `GET /users/:id`. Parameter values cannot create new admission
+buckets, and a cap followed in one listener is a cap followed by the whole
+application.
 
 ## Configuration
 
 ```java
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.execution.ExecutionBudget;
 import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Response;
 import java.time.Duration;
+import java.util.Map;
 
 var app = Axiom.create();
-app.admissionPolicy(new AdmissionPolicy(32, 64, Duration.ofMillis(200)));
 var report = app.get("/reports/:id", ctx -> buildReport(ctx.path("id")));
-app.admissionPolicy(report, new AdmissionPolicy(2, 8, Duration.ofMillis(100)));
+app.executionBudget(new ExecutionBudget(
+        new AdmissionPolicy(32, 64, Duration.ofMillis(200)),
+        Map.of(report, new AdmissionPolicy(2, 8, Duration.ofMillis(100)))));
 var events = app.get("/events", ctx -> Response.sse(sink -> sink.send("ready")));
 app.streamPolicy(StreamPolicy.reject(8));
 app.streamPolicy(events, StreamPolicy.reject(2));
@@ -33,7 +39,21 @@ app.listen(8080);
 `AdmissionPolicy(maxActive, maxQueued, queueTimeout)` validates a positive active
 limit, a waiting limit from zero to 100,000, and a positive wait of at most one day when
 queuing is enabled. `AdmissionPolicy.reject(36)` is the default: 36 active tasks
-and no dispatcher queue. Use `reject(n)` for immediate overload rejection.
+and no dispatcher queue. Use `reject(n)` for immediate overload rejection. The
+default is unchanged from the earlier per-listener policy: an application with
+one listener keeps the same bound, and 36 virtual threads remains a bounded
+amount of concurrent work per process. Controlled benchmark evidence for a
+different default is not available here, so no throughput claim is made; size
+the budget from your own load tests and the memory each handler holds.
+
+`ExecutionBudget(aggregate, routePolicies)` packages the aggregate policy and
+immutable per-route overrides. `ExecutionBudget.of(policy)` starts with no
+overrides, `withRoute` and `withoutRoute` return changed copies, and `policy(route)`
+resolves the effective bound. The four `app.executionBudget(...)` methods mirror
+the `app.admissionPolicy(...)` methods: the latter are views of the aggregate
+policy and route overrides of the same budget, so existing configuration keeps
+working. The budget is not shared across processes or hosts; each application
+instance owns one.
 
 Configure policies before startup; startup freezes them along with routes.
 Overrides require an already registered route. A route without an override uses
@@ -42,10 +62,13 @@ route values, while aggregate limits continue to apply. Setting either queue
 capacity to zero disables waiting for that request. The effective wait is the
 smaller of the aggregate and route queue timeouts.
 
-**Limits apply independently to each listener**, including listeners sharing one
-application. They are not a budget shared across listeners, processes or hosts.
-Direct `handle` calls remain synchronous and bypass admission. `TestClient` applies
-the policies through its own dispatcher.
+**Every listener and test client of one application draws from the same
+counters**, including active slots, route caps, the waiting queue and the
+stream lane. A request admitted through a test client occupies capacity that a
+listener cannot use until it finishes. Closing one listener stops only that
+listener's admissions and fails its waiting requests; other listeners and test
+clients keep using the shared budget. Direct `handle` calls remain synchronous
+and bypass admission.
 `app.resolve(request)` exposes the compiled route identity for adapters; it
 requires a running application and returns empty for 404/405 and for OPTIONS
 requests the application answers automatically (see [methods](routing.md#methods)).
@@ -55,11 +78,13 @@ so a saturated listener answers them 503 like any other request.
 
 ## Stream capacity
 
-Streams have their own lane. `StreamPolicy(maxActive)` and `StreamPolicy.reject(n)`
-set one positive bound on streams running at the same time, configured before
-startup like the request policy. The default is `reject(36)`, also the default for
-each route; a route override replaces that route's bound while the aggregate bound
-still applies. There is no stream queue: when either bound is full, the response is
+Streams have their own lane on the same application-owned execution budget.
+`StreamPolicy(maxActive)` and `StreamPolicy.reject(n)` set one positive bound on
+streams running at the same time, configured before startup like the request
+policy. The default is `reject(36)`, also the default for each route; a route
+override replaces that route's bound while the aggregate bound still applies.
+The stream bound is shared by all listeners and test clients just like the
+request bound. There is no stream queue: when either bound is full, the response is
 an ordinary **503** with no stream head at all. Middleware and error handling have
 finished before the transfer, so the refusal cannot be mistaken for a stream that
 failed partway through.
@@ -122,17 +147,20 @@ active capacity until the request action exits. Code that ignores interruption
 cannot cause a queued request to be promoted early. Cancelled or timed-out
 requests have one terminal outcome; late handler results are discarded.
 
-Closing a listener stops admission at once: new requests are rejected and waiting
-requests are answered 503 and their connections closed; the handler is never
-invoked. Shutdown never promotes waiting work. Active requests, including streams,
-get the listener's drain grace period (see [HTTP listeners](http.md)), after which
-they are cancelled. Listener termination still waits for active code to exit, and
+Closing a listener stops that listener's admission at once: its new requests are
+rejected and its waiting requests are answered 503 and their connections closed;
+the handler is never invoked. Other listeners and test clients keep their
+admission until the application closes. Shutdown never promotes waiting work.
+The closing listener's active requests, including streams, get its drain grace
+period (see [HTTP listeners](http.md)), after which they are cancelled. Listener termination still waits for active code to exit, and
 the stream slot is returned when the body does. See
 [execution and deadlines](execution.md) for interruption.
 
 ## Observation
 
-`server.admission()` returns a consistent immutable `AdmissionSnapshot`:
+`server.admission()` returns a consistent immutable `AdmissionSnapshot` of the
+application's shared counters; every listener and test client of that
+application observes the same values:
 
 | Field | Meaning |
 | --- | --- |
@@ -145,7 +173,8 @@ the stream slot is returned when the body does. See
 The metrics reason tag `stream_capacity` identifies a stream refused because its
 aggregate or route bound was full. That refusal is counted as a 503 request, while
 `rejected` counts it separately from refusals at submission. Counters are scoped to
-one listener and remain readable after shutdown. Snapshots
+the application, remain readable after shutdown, and include refusals from every
+listener and test client. Snapshots
 are a polling surface for diagnostics and future metrics adapters. No observer
 callbacks run under admission locks or on transport threads. Per-route metrics,
 adaptive limits, CPU execution classes and distributed budgets remain future work.

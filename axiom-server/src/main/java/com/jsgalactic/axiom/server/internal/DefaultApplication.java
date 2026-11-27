@@ -9,6 +9,7 @@ import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.error.AxiomException;
 import com.jsgalactic.axiom.error.PayloadTooLargeException;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.execution.ExecutionBudget;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Request;
@@ -21,6 +22,7 @@ import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteDoc;
 import com.jsgalactic.axiom.routing.RouteGroup;
+import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
@@ -39,18 +41,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
-final class DefaultApplication implements Application {
+final class DefaultApplication implements Application, ExecutionAccess {
     /**
      * Immutable configuration published at startup. The request path reads it through one
      * volatile field and takes no lock; {@code router} is null once the application closes.
+     * The dispatcher is the single budget every listener and test client of this application
+     * draws from.
      */
     private record Runtime(CompiledRouter router, Handler unmatched, List<Route> routes, Set<Route> routeSet,
-                           Map<Route, AdmissionPolicy> routePolicies, AdmissionPolicy defaultPolicy,
+                           ExecutionBudget budget, RequestDispatcher execution,
                            Map<Route, StreamPolicy> streamPolicies, StreamPolicy defaultStreamPolicy,
                            Codecs codecs, int maxRequestBody) {
         /** Drops every reference to application handlers, middleware and error handlers. */
         Runtime withoutRouter() {
-            return new Runtime(null, null, routes, routeSet, routePolicies, defaultPolicy,
+            return new Runtime(null, null, routes, routeSet, budget, execution,
                     streamPolicies, defaultStreamPolicy, codecs, maxRequestBody);
         }
     }
@@ -67,7 +71,6 @@ final class DefaultApplication implements Application {
     // Configuration state; guarded by this until startup publishes a runtime snapshot.
     private final Map<Route, Registration> registrations = new LinkedHashMap<>();
     private final Scope root = new Scope(null, "");
-    private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
     private final Map<Route, StreamPolicy> streamPolicies = new LinkedHashMap<>();
     private final Map<Route, RouteDoc> routeDocs = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
@@ -78,7 +81,7 @@ final class DefaultApplication implements Application {
     /** Group callbacks currently running; startup is refused while any is open. */
     private int openGroups;
     private final List<Server> listeners = new ArrayList<>();
-    private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
+    private volatile ExecutionBudget executionBudget = ExecutionBudget.defaults();
     private volatile StreamPolicy streamPolicy = DEFAULT_STREAM_POLICY;
     private volatile Metrics metrics = Metrics.NOOP;
     private volatile FailureLog failureLog = FailureLog.DEFAULT;
@@ -447,7 +450,7 @@ final class DefaultApplication implements Application {
             if (!entry.getValue().scope().within(scope)) { continue; }
             var route = entry.getKey();
             shapes.remove(route.method() + " " + shape(route.path()), route);
-            routePolicies.remove(route);
+            executionBudget = executionBudget.withoutRoute(route);
             streamPolicies.remove(route);
             routeDocs.remove(route);
             removed.remove();
@@ -536,7 +539,10 @@ final class DefaultApplication implements Application {
 
     private Runtime snapshot(CompiledRouter router, Handler unmatched, Codecs codecs) {
         var routes = List.copyOf(registrations.keySet());
-        return new Runtime(router, unmatched, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
+        var budget = executionBudget;
+        // One dispatcher owns the counters, queue and workers for the whole application.
+        var execution = router == null ? null : new RequestDispatcher(budget, streamPolicy, metrics);
+        return new Runtime(router, unmatched, routes, Set.copyOf(routes), budget, execution,
                 Map.copyOf(streamPolicies), streamPolicy, codecs, maxRequestBody);
     }
 
@@ -566,22 +572,39 @@ final class DefaultApplication implements Application {
     @Override public int maxRequestBody() { return maxRequestBody; }
 
     @Override public synchronized Application admissionPolicy(AdmissionPolicy policy) {
+        Objects.requireNonNull(policy, "policy");
+        return executionBudget(new ExecutionBudget(policy, executionBudget.routePolicies()));
+    }
+
+    @Override public AdmissionPolicy admissionPolicy() { return executionBudget().aggregate(); }
+
+    @Override public Application admissionPolicy(Route route, AdmissionPolicy policy) {
+        return executionBudget(route, policy);
+    }
+
+    @Override public AdmissionPolicy admissionPolicy(Route route) { return executionBudget(route); }
+
+    @Override public synchronized Application executionBudget(ExecutionBudget budget) {
         requireState(State.CONFIGURING);
-        admissionPolicy = Objects.requireNonNull(policy, "policy");
+        Objects.requireNonNull(budget, "budget");
+        for (var route : budget.routePolicies().keySet()) {
+            if (!registrations.containsKey(route)) { throw notRegistered(route); }
+        }
+        executionBudget = budget;
         return this;
     }
 
-    @Override public AdmissionPolicy admissionPolicy() { return admissionPolicy; }
+    @Override public ExecutionBudget executionBudget() { return executionBudget; }
 
-    @Override public synchronized Application admissionPolicy(Route route, AdmissionPolicy policy) {
+    @Override public synchronized Application executionBudget(Route route, AdmissionPolicy policy) {
         requireState(State.CONFIGURING);
         Objects.requireNonNull(route, "route");
         if (!registrations.containsKey(route)) { throw notRegistered(route); }
-        routePolicies.put(route, Objects.requireNonNull(policy, "policy"));
+        executionBudget = executionBudget.withRoute(route, Objects.requireNonNull(policy, "policy"));
         return this;
     }
 
-    @Override public AdmissionPolicy admissionPolicy(Route route) {
+    @Override public AdmissionPolicy executionBudget(Route route) {
         Objects.requireNonNull(route, "route");
         var published = runtime;
         if (published == null) {
@@ -589,12 +612,23 @@ final class DefaultApplication implements Application {
                 published = runtime;
                 if (published == null) {
                     if (!registrations.containsKey(route)) { throw notRegistered(route); }
-                    return routePolicies.getOrDefault(route, admissionPolicy);
+                    return executionBudget.policy(route);
                 }
             }
         }
         if (!published.routeSet().contains(route)) { throw notRegistered(route); }
-        return published.routePolicies().getOrDefault(route, published.defaultPolicy());
+        return published.budget().policy(route);
+    }
+
+    /**
+     * Returns the application-owned execution budget for a transport or the test client. Reading
+     * starts a still-configuring application so that a directly bound listener shares the same
+     * dispatcher as one bound through {@link #listen}.
+     */
+    @Override public synchronized RequestDispatcher execution() {
+        if (runtime == null) { start(); }
+        var published = acceptingRuntime();
+        return published.execution();
     }
 
     @Override public synchronized Application streamPolicy(StreamPolicy policy) {
@@ -766,10 +800,13 @@ final class DefaultApplication implements Application {
     public void close() {
         List<Server> owned;
         Thread hook;
+        RequestDispatcher execution;
         synchronized (this) {
             hook = shutdownHook;
             shutdownHook = null;
-            runtime = runtime == null ? snapshot(null, null, Codecs.of(List.of())) : runtime.withoutRouter();
+            var published = runtime;
+            runtime = published == null ? snapshot(null, null, Codecs.of(List.of())) : published.withoutRouter();
+            execution = published == null ? null : published.execution();
             state = State.CLOSED;
             drainActions.clear();
             registrations.clear();
@@ -780,11 +817,13 @@ final class DefaultApplication implements Application {
             methodNotAllowedHandler = null;
             notImplementedHandler = null;
             shapes.clear();
-            routePolicies.clear();
             streamPolicies.clear();
             owned = List.copyOf(listeners);
             listeners.clear();
         }
+        // Stopping admission is global; each listener still drains its own running work before
+        // its session closes and the shared dispatcher shuts its executors down.
+        if (execution != null) { execution.retire(); }
         owned.forEach(Server::close);
         // An explicit close makes the hook unnecessary; the hook itself, or a JVM already shutting
         // down, must not unregister.

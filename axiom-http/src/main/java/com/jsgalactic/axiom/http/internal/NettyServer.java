@@ -1,13 +1,13 @@
 package com.jsgalactic.axiom.http.internal;
 
 import com.jsgalactic.axiom.application.Application;
-import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
 import com.jsgalactic.axiom.lifecycle.Server;
 import com.jsgalactic.axiom.lifecycle.TlsConfigurationException;
 import com.jsgalactic.axiom.lifecycle.TransportKind;
 import com.jsgalactic.axiom.observability.Metrics;
+import com.jsgalactic.axiom.server.internal.ExecutionAccess;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import io.netty.bootstrap.ServerBootstrap;
@@ -56,6 +56,7 @@ final class NettyServer implements Server {
     final MultiThreadIoEventLoopGroup io;
     private final DefaultChannelGroup channels;
     private final RequestDispatcher handlers;
+    private final RequestDispatcher.Session session;
     private final CompletableFuture<Void> stopped;
     private final AtomicBoolean closing = new AtomicBoolean();
     private final ConnectionSlots slots;
@@ -76,9 +77,12 @@ final class NettyServer implements Server {
 
     private final Transport transport;
 
-    private NettyServer(AdmissionPolicy policy, Metrics metrics, TransportSettings settings, TlsMaterial tls, Transport transport) {
+    private NettyServer(RequestDispatcher handlers, RequestDispatcher.Session session, Metrics metrics,
+            TransportSettings settings, TlsMaterial tls, Transport transport) {
         this.settings = settings;
         this.transport = transport;
+        this.handlers = handlers;
+        this.session = session;
         acceptors = new MultiThreadIoEventLoopGroup(
                 1, Thread.ofPlatform().name("axiom-http-accept-", 0).factory(), transport.handlers().get());
         this.tls = tls;
@@ -91,9 +95,8 @@ final class NettyServer implements Server {
         io = new MultiThreadIoEventLoopGroup(options.ioThreads(),
                 Thread.ofPlatform().name("axiom-http-io-", 0).factory(), transport.handlers().get());
         channels = new DefaultChannelGroup(io.next(), true);
-        handlers = new RequestDispatcher(policy, metrics);
         streamMetrics = new StreamMetrics(metrics);
-        stopped = CompletableFuture.allOf(handlers.termination().toCompletableFuture(),
+        stopped = CompletableFuture.allOf(session.termination().toCompletableFuture(),
                 completion(acceptors.terminationFuture()), completion(io.terminationFuture()));
     }
 
@@ -114,7 +117,9 @@ final class NettyServer implements Server {
         var material = tlsOptions.isPresent() ? TlsMaterial.load(tlsOptions.get()) : null;
         // An unusable explicitly requested transport also fails before any thread or socket exists.
         var transport = Transport.resolve(settings.options().transport());
-        var server = new NettyServer(application.admissionPolicy(), application.metrics(), settings, material, transport);
+        var execution = ExecutionAccess.of(application).execution();
+        var session = execution.openSession();
+        var server = new NettyServer(execution, session, application.metrics(), settings, material, transport);
         try {
             var bootstrap = new ServerBootstrap().group(server.acceptors, server.io)
                     .channel(transport.serverChannel())
@@ -175,8 +180,8 @@ final class NettyServer implements Server {
         channel.pipeline().addLast(
                 new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS),
                 new RequestDecoder(decoderConfig), new HttpResponseEncoder(),
-                new HttpConnection(application, handlers, settings, slot, closing::get, bodyBudget, streamMetrics,
-                        listenerMetrics));
+                new HttpConnection(application, handlers, session, settings, slot, closing::get, bodyBudget,
+                        streamMetrics, listenerMetrics));
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */
@@ -263,7 +268,7 @@ final class NettyServer implements Server {
         // so the drain is in force before stopping admission answers waiting requests below. The
         // per-connection drain also runs at once rather than after the listening socket has closed,
         // which completes on the acceptor thread and may be delayed.
-        handlers.stopAdmission();
+        session.stop();
         if (tlsPoll != null) { tlsPoll.cancel(false); }
         if (listener == null) { stop(); return; }
         // Accepts racing with this see the flag and close themselves (see accept).
@@ -281,7 +286,7 @@ final class NettyServer implements Server {
     }
 
     private void stop() {
-        handlers.close();
+        session.close();
         acceptors.shutdownGracefully(0, 5, TimeUnit.SECONDS);
         io.shutdownGracefully(0, 5, TimeUnit.SECONDS);
     }

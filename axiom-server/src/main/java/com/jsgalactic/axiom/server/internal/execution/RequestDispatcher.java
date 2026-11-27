@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.server.internal.execution;
 
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
+import com.jsgalactic.axiom.execution.ExecutionBudget;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.observability.Metrics;
@@ -29,7 +30,11 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
 import java.util.function.ToIntFunction;
 
-/** Protocol-neutral, listener-owned execution. All admission state is protected by this object's lock. */
+/**
+ * Protocol-neutral execution shared by every listener and test client of one application. All
+ * admission state is protected by this object's lock; a session scopes one submitter's lifetime
+ * without giving it a private copy of the budget.
+ */
 public final class RequestDispatcher implements AutoCloseable {
     private static final Object DEFAULT_KEY = new Object();
     private static final StreamPolicy DEFAULT_STREAM_POLICY = StreamPolicy.reject(36);
@@ -40,6 +45,7 @@ public final class RequestDispatcher implements AutoCloseable {
     private final LongSupplier clock;
     private final DispatchMetrics metrics;
     private final Set<Task<?>> tasks = new HashSet<>();
+    private final Set<Session> sessions = new HashSet<>();
     private final Set<Bucket> queuedBuckets = new LinkedHashSet<>();
     private final Map<Object, Bucket> buckets = new HashMap<>();
     private final Map<Object, StreamBucket> streamBuckets = new HashMap<>();
@@ -60,6 +66,7 @@ public final class RequestDispatcher implements AutoCloseable {
     private long rejected;
     private long queueTimeouts;
     private boolean stopping;
+    private boolean retiring;
     private boolean closed;
 
     /**
@@ -102,7 +109,18 @@ public final class RequestDispatcher implements AutoCloseable {
      * @param metrics receiver of measurements; {@link Metrics#NOOP} disables recording
      */
     public RequestDispatcher(AdmissionPolicy policy, StreamPolicy streamPolicy, Metrics metrics) {
-        this(policy, streamPolicy, Executors.newThreadPerTaskExecutor(
+        this(ExecutionBudget.of(policy), streamPolicy, metrics);
+    }
+
+    /**
+     * Creates the application-owned budget with its aggregate limits, streams and measurements.
+     * Route overrides are supplied per submission by the application's compiled routes.
+     * @param budget aggregate admission limits of the application
+     * @param streamPolicy aggregate limit on active streams
+     * @param metrics receiver of measurements; {@link Metrics#NOOP} disables recording
+     */
+    public RequestDispatcher(ExecutionBudget budget, StreamPolicy streamPolicy, Metrics metrics) {
+        this(budget, streamPolicy, Executors.newThreadPerTaskExecutor(
                 Thread.ofVirtual().name("axiom-handler-", 0).factory()), scheduler(), System::nanoTime, metrics);
     }
 
@@ -127,9 +145,14 @@ public final class RequestDispatcher implements AutoCloseable {
 
     RequestDispatcher(AdmissionPolicy policy, StreamPolicy streamPolicy, ExecutorService workers,
             ScheduledExecutorService deadlines, LongSupplier clock, Metrics metrics) {
+        this(ExecutionBudget.of(policy), streamPolicy, workers, deadlines, clock, metrics);
+    }
+
+    private RequestDispatcher(ExecutionBudget budget, StreamPolicy streamPolicy, ExecutorService workers,
+            ScheduledExecutorService deadlines, LongSupplier clock, Metrics metrics) {
         Objects.requireNonNull(metrics, "metrics");
         this.metrics = metrics == Metrics.NOOP ? DispatchMetrics.DISABLED : new DispatchMetrics(metrics);
-        this.policy = Objects.requireNonNull(policy, "policy");
+        this.policy = Objects.requireNonNull(budget, "budget").aggregate();
         this.streamPolicy = Objects.requireNonNull(streamPolicy, "streamPolicy");
         this.workers = workers;
         this.deadlines = deadlines;
@@ -186,6 +209,46 @@ public final class RequestDispatcher implements AutoCloseable {
      */
     public <T> Task<T> submit(Object key, AdmissionPolicy endpointPolicy,
             ExecutionContext context, Callable<T> action, ToIntFunction<? super T> status) {
+        return submitWithSession(null, key, endpointPolicy, context, action, status);
+    }
+
+    /**
+     * Admits work on behalf of one session, so closing that session alone stops its new work and
+     * fails its waiting work. The budget, queue and workers remain shared with every other session.
+     * @param session submitting listener or test client, or null for a submitter with no lifetime
+     * @param key stable endpoint identity, never a request-specific path
+     * @param endpointPolicy immutable policy for this endpoint
+     * @param context request identity and remaining deadline
+     * @param action framework-owned work, including response preparation
+     * @param <T> result type
+     * @return cancellation handle; queued work has no execution thread
+     * @throws RejectedExecutionException if the session, dispatcher or capacity is closed
+     */
+    public <T> Task<T> submit(Session session, Object key, AdmissionPolicy endpointPolicy,
+            ExecutionContext context, Callable<T> action) {
+        return submitWithSession(session, key, endpointPolicy, context, action, null);
+    }
+
+    /**
+     * Like {@link #submit(Session, Object, AdmissionPolicy, ExecutionContext, Callable)}, also
+     * reporting the status class of the result to the metrics.
+     * @param session submitting listener or test client, or null for a submitter with no lifetime
+     * @param key stable endpoint identity, never a request-specific path
+     * @param endpointPolicy immutable policy for this endpoint
+     * @param context request identity and remaining deadline
+     * @param action framework-owned work, including response preparation
+     * @param status maps a result to its HTTP status code, or null to count results as unknown
+     * @param <T> result type
+     * @return cancellation handle; queued work has no execution thread
+     * @throws RejectedExecutionException if the session, dispatcher or capacity is closed
+     */
+    public <T> Task<T> submit(Session session, Object key, AdmissionPolicy endpointPolicy,
+            ExecutionContext context, Callable<T> action, ToIntFunction<? super T> status) {
+        return submitWithSession(session, key, endpointPolicy, context, action, status);
+    }
+
+    private <T> Task<T> submitWithSession(Session session, Object key, AdmissionPolicy endpointPolicy,
+            ExecutionContext context, Callable<T> action, ToIntFunction<? super T> status) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(endpointPolicy, "endpointPolicy");
         Objects.requireNonNull(context, "context");
@@ -195,7 +258,7 @@ public final class RequestDispatcher implements AutoCloseable {
         Throwable submissionFailure = null;
         var series = metrics.series(key);
         synchronized (this) {
-            if (closed || stopping) {
+            if (closed || stopping || (session != null && !session.accepting)) {
                 rejected++;
                 metrics.refused(series, DispatchMetrics.Reason.SHUTDOWN);
                 throw new RejectedExecutionException("Dispatcher closed");
@@ -219,8 +282,9 @@ public final class RequestDispatcher implements AutoCloseable {
                 submissionFailure = new RejectedExecutionException("Request capacity unavailable");
             } else {
                 buckets.put(key, bucket);
-                task = new Task<>(context, action, bucket, series, status, clock.getAsLong());
+                task = new Task<>(session, context, action, bucket, series, status, clock.getAsLong());
                 tasks.add(task);
+                if (session != null) { session.outstanding++; }
                 if (room) {
                     submissionFailure = activate(task, signals);
                 } else {
@@ -348,6 +412,106 @@ public final class RequestDispatcher implements AutoCloseable {
     public CompletionStage<Void> termination() { return stopped.minimalCompletionStage(); }
 
     /**
+     * Registers one submitter. Closing a session stops only that submitter: the aggregate counters,
+     * queue and workers remain shared with the other sessions of the application.
+     *
+     * @return session for one listener or test client
+     * @throws RejectedExecutionException if the dispatcher is closed, stopping or retired
+     */
+    public Session openSession() {
+        synchronized (this) {
+            if (closed || stopping || retiring) { throw new RejectedExecutionException("Dispatcher closed"); }
+            var session = new Session();
+            sessions.add(session);
+            return session;
+        }
+    }
+
+    /**
+     * Stops admission for the whole application and shuts its executors down once the sessions
+     * have closed. Running work keeps its capacity until its session finishes its drain.
+     */
+    public void retire() {
+        synchronized (this) { retiring = true; }
+        stopAdmission();
+        maybeCloseDispatcher();
+    }
+
+    private void maybeCloseDispatcher() {
+        boolean shutdown;
+        synchronized (this) { shutdown = retiring && sessions.isEmpty() && !closed; }
+        if (shutdown) { close(); }
+    }
+
+    /**
+     * One submitter's lifetime. A session shares all capacity with the other sessions of its
+     * dispatcher; closing it refuses new requests, fails its waiting requests and cancels its
+     * running work, without touching the work of another session.
+     */
+    public final class Session implements AutoCloseable {
+        private final CompletableFuture<Void> stopped = new CompletableFuture<>();
+        private boolean accepting = true;
+        private boolean closed;
+        private boolean terminated;
+        private int outstanding;
+
+        /** Refuses new submissions and fails this session's waiting requests with 503. */
+        public void stop() {
+            var signals = new ArrayList<Runnable>();
+            synchronized (RequestDispatcher.this) {
+                accepting = false;
+                for (var task : List.copyOf(tasks)) {
+                    if (task.session == this && task.waiting) {
+                        finish(task, null, new DispatchRejectedException(
+                                new RejectedExecutionException("Session stopped")), false, signals);
+                        metrics.rejected(task.series, DispatchMetrics.Reason.SHUTDOWN);
+                    }
+                }
+                expireDue(signals);
+                drain(signals);
+            }
+            publish(signals);
+        }
+
+        /** Stops this session, cancels its remaining work and completes its termination. */
+        @Override public void close() {
+            var signals = new ArrayList<Runnable>();
+            synchronized (RequestDispatcher.this) {
+                accepting = false;
+                closed = true;
+                sessions.remove(this);
+                for (var task : List.copyOf(tasks)) {
+                    if (task.session == this) {
+                        finish(task, null, new CancellationException("Session closed"), true, signals);
+                    }
+                }
+                maybeTerminate(signals);
+            }
+            publish(signals);
+            maybeCloseDispatcher();
+        }
+
+        /**
+         * Observes when this session has closed and all of its work has exited, including handlers
+         * that ignored interruption.
+         * @return completion after the session's work ends
+         */
+        public CompletionStage<Void> termination() { return stopped.minimalCompletionStage(); }
+
+        private void finished(List<Runnable> signals) {
+            outstanding--;
+            maybeTerminate(signals);
+        }
+
+        private void maybeTerminate(List<Runnable> signals) {
+            if (closed && outstanding == 0 && !terminated) {
+                terminated = true;
+                signals.add(() -> stopped.complete(null));
+            }
+        }
+    }
+
+    /**
      * Stops admission without interrupting running work, for a graceful drain. Later submissions are
      * rejected and queued work fails with {@link DispatchRejectedException}, so it is never promoted.
      * Active work keeps its capacity until it exits or {@link #close()} cancels it.
@@ -374,6 +538,12 @@ public final class RequestDispatcher implements AutoCloseable {
         synchronized (this) {
             if (closed) { return; }
             closed = true;
+            retiring = true;
+            for (var session : sessions) {
+                session.accepting = false;
+                session.closed = true;
+                session.maybeTerminate(signals);
+            }
             for (var task : List.copyOf(tasks)) {
                 finish(task, null, new CancellationException("Dispatcher closed"), true, signals);
             }
@@ -456,6 +626,7 @@ public final class RequestDispatcher implements AutoCloseable {
             tasks.remove(task);
             prune(task.bucket);
         }
+        if (task.session != null) { task.session.finished(signals); }
         if (interrupt && task.runner != null) { task.runner.interrupt(); }
         signals.add(() -> {
             if (failure == null) { task.result.complete(value); }
@@ -611,6 +782,7 @@ public final class RequestDispatcher implements AutoCloseable {
      * @param <T> result type
      */
     public final class Task<T> {
+        private final Session session;
         private final ExecutionContext context;
         private final Callable<T> action;
         private final Bucket bucket;
@@ -633,8 +805,9 @@ public final class RequestDispatcher implements AutoCloseable {
         private StreamBucket streamBucket;
         private boolean finished;
 
-        private Task(ExecutionContext context, Callable<T> action, Bucket bucket,
+        private Task(Session session, ExecutionContext context, Callable<T> action, Bucket bucket,
                 DispatchMetrics.Series series, ToIntFunction<? super T> status, long submittedAt) {
+            this.session = session;
             this.context = context;
             this.action = action;
             this.bucket = bucket;

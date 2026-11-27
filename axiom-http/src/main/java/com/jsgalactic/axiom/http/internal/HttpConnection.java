@@ -110,6 +110,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             "content-length", "trailer", "upgrade", "proxy-authenticate", "proxy-authorization", "te");
     private final Application application;
     private final RequestDispatcher executor;
+    private final RequestDispatcher.Session session;
     private final long headTimeoutNanos;
     private final long lingerNanos;
     private final long lingerQuietNanos;
@@ -211,12 +212,20 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     HttpConnection(Application application, RequestDispatcher executor, TransportSettings settings,
             ConnectionSlots.Slot slot, BooleanSupplier listenerClosing, BodyBudget budget,
             StreamMetrics streamMetrics, ListenerMetrics listenerMetrics) {
+        this(application, executor, null, settings, slot, listenerClosing, budget, streamMetrics, listenerMetrics);
+    }
+
+    /** Production with the listener's session on the application-owned shared budget. */
+    HttpConnection(Application application, RequestDispatcher executor, RequestDispatcher.Session session,
+            TransportSettings settings, ConnectionSlots.Slot slot, BooleanSupplier listenerClosing,
+            BodyBudget budget, StreamMetrics streamMetrics, ListenerMetrics listenerMetrics) {
         this.budget = budget;
         this.listenerMetrics = listenerMetrics;
         this.slot = slot;
         this.listenerClosing = listenerClosing;
         this.application = application;
         this.executor = executor;
+        this.session = session;
         this.headTimeoutNanos = settings.headTimeout().toNanos();
         this.lingerNanos = settings.linger().toNanos();
         this.lingerQuietNanos = settings.lingerQuiet().toNanos();
@@ -487,7 +496,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
             var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
             var tag = executor.endpointTag(key);
-            active = executor.submit(key, policy, exchange.execution(), () -> {
+            active = executor.submit(session, key, policy, exchange.execution(), () -> {
                 try {
                     var response = application.handle(exchange.request(), exchange.execution());
                     return response.isStreaming() ? stream(ctx, exchange, response, tag, key, streamPolicy)

@@ -4,6 +4,7 @@ import com.jsgalactic.axiom.context.ErrorHandler;
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.execution.ExecutionBudget;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Request;
@@ -250,34 +251,81 @@ public interface Application extends RouteGroup, AutoCloseable {
     int maxRequestBody();
 
     /**
-     * Sets aggregate limits for each listener before startup. Defaults to reject(36).
-     * @param policy immutable listener limits; also the default policy for each route
+     * Sets the aggregate policy of the application-wide execution budget before startup. Every
+     * listener and test client of this application draws from the same counters, so this is the
+     * only aggregate admission bound. Defaults to reject(36). The aggregate also supplies the
+     * policy of routes without an override; this method leaves those overrides unchanged.
+     *
+     * @param policy immutable aggregate limits, also the default for routes without an override
      * @return this application
+     * @throws IllegalStateException after configuration has ended
      */
     Application admissionPolicy(AdmissionPolicy policy);
 
     /**
-     * Returns the aggregate listener limits.
-     * @return configured default policy
+     * Returns the aggregate policy of the application-wide execution budget.
+     * @return configured aggregate policy
      */
     AdmissionPolicy admissionPolicy();
 
     /**
-     * Sets limits for one registered route before startup. Aggregate limits still apply.
+     * Sets the bound of one registered route in the application-wide budget before startup. The
+     * aggregate bound still applies, and the route's override is shared by every listener and test
+     * client of this application.
+     *
      * @param route registered route identity
      * @param policy complete route policy
      * @return this application
      * @throws IllegalArgumentException if the route is not registered
+     * @throws IllegalStateException after configuration has ended
      */
     Application admissionPolicy(Route route, AdmissionPolicy policy);
 
     /**
-     * Returns a registered route's override, or the default policy.
+     * Returns a registered route's bound in the application-wide budget, or the aggregate policy.
      * @param route registered route identity
      * @return effective route policy
      * @throws IllegalArgumentException if the route is not registered
      */
     AdmissionPolicy admissionPolicy(Route route);
+
+    /**
+     * Installs the application-wide execution budget before startup. Every listener and test
+     * client of this application draws from one set of aggregate and route counters; the budget
+     * replaces both the aggregate policy and all route overrides.
+     *
+     * @param budget immutable aggregate limits and per-route overrides
+     * @return this application
+     * @throws IllegalArgumentException if an overridden route is not registered
+     * @throws IllegalStateException after configuration has ended
+     */
+    Application executionBudget(ExecutionBudget budget);
+
+    /**
+     * Returns the application-wide execution budget, including its route overrides.
+     * @return configured budget
+     */
+    ExecutionBudget executionBudget();
+
+    /**
+     * Sets the bound of one registered route in the application-wide budget before startup. The
+     * aggregate bound still applies.
+     *
+     * @param route registered route identity
+     * @param policy complete route policy
+     * @return this application
+     * @throws IllegalArgumentException if the route is not registered
+     * @throws IllegalStateException after configuration has ended
+     */
+    Application executionBudget(Route route, AdmissionPolicy policy);
+
+    /**
+     * Returns a registered route's bound in the application-wide budget, or the aggregate policy.
+     * @param route registered route identity
+     * @return effective route policy
+     * @throws IllegalArgumentException if the route is not registered
+     */
+    AdmissionPolicy executionBudget(Route route);
 
     /**
      * Sets the aggregate bound on active streams for each listener before startup. The default is

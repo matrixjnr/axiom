@@ -19,6 +19,10 @@ public interface com.jsgalactic.axiom.application.Application extends com.jsgala
     descriptor: (Lcom/jsgalactic/axiom/routing/Route;Lcom/jsgalactic/axiom/routing/RouteDoc;)Lcom/jsgalactic/axiom/application/Application;
   public abstract com.jsgalactic.axiom.application.Application developmentErrors();
     descriptor: ()Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application executionBudget(com.jsgalactic.axiom.execution.ExecutionBudget);
+    descriptor: (Lcom/jsgalactic/axiom/execution/ExecutionBudget;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application executionBudget(com.jsgalactic.axiom.routing.Route, com.jsgalactic.axiom.execution.AdmissionPolicy);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;Lcom/jsgalactic/axiom/execution/AdmissionPolicy;)Lcom/jsgalactic/axiom/application/Application;
   public abstract com.jsgalactic.axiom.application.Application failureLog(java.lang.System$Logger, java.lang.System$Logger$Level);
     descriptor: (Ljava/lang/System$Logger;Ljava/lang/System$Logger$Level;)Lcom/jsgalactic/axiom/application/Application;
   public abstract com.jsgalactic.axiom.application.Application group(java.lang.String, java.util.function.Consumer<com.jsgalactic.axiom.routing.RouteGroup>);
@@ -53,6 +57,10 @@ public interface com.jsgalactic.axiom.application.Application extends com.jsgala
     descriptor: ()Lcom/jsgalactic/axiom/execution/AdmissionPolicy;
   public abstract com.jsgalactic.axiom.execution.AdmissionPolicy admissionPolicy(com.jsgalactic.axiom.routing.Route);
     descriptor: (Lcom/jsgalactic/axiom/routing/Route;)Lcom/jsgalactic/axiom/execution/AdmissionPolicy;
+  public abstract com.jsgalactic.axiom.execution.AdmissionPolicy executionBudget(com.jsgalactic.axiom.routing.Route);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;)Lcom/jsgalactic/axiom/execution/AdmissionPolicy;
+  public abstract com.jsgalactic.axiom.execution.ExecutionBudget executionBudget();
+    descriptor: ()Lcom/jsgalactic/axiom/execution/ExecutionBudget;
   public abstract com.jsgalactic.axiom.execution.StreamPolicy streamPolicy();
     descriptor: ()Lcom/jsgalactic/axiom/execution/StreamPolicy;
   public abstract com.jsgalactic.axiom.execution.StreamPolicy streamPolicy(com.jsgalactic.axiom.routing.Route);
@@ -502,6 +510,31 @@ public final class com.jsgalactic.axiom.execution.AdmissionSnapshot extends java
     descriptor: ()J
   public long rejected();
     descriptor: ()J
+}
+
+public final class com.jsgalactic.axiom.execution.ExecutionBudget extends java.lang.Record {
+  public com.jsgalactic.axiom.execution.AdmissionPolicy aggregate();
+    descriptor: ()Lcom/jsgalactic/axiom/execution/AdmissionPolicy;
+  public com.jsgalactic.axiom.execution.AdmissionPolicy policy(com.jsgalactic.axiom.routing.Route);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;)Lcom/jsgalactic/axiom/execution/AdmissionPolicy;
+  public com.jsgalactic.axiom.execution.ExecutionBudget withRoute(com.jsgalactic.axiom.routing.Route, com.jsgalactic.axiom.execution.AdmissionPolicy);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;Lcom/jsgalactic/axiom/execution/AdmissionPolicy;)Lcom/jsgalactic/axiom/execution/ExecutionBudget;
+  public com.jsgalactic.axiom.execution.ExecutionBudget withoutRoute(com.jsgalactic.axiom.routing.Route);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;)Lcom/jsgalactic/axiom/execution/ExecutionBudget;
+  public com.jsgalactic.axiom.execution.ExecutionBudget(com.jsgalactic.axiom.execution.AdmissionPolicy, java.util.Map<com.jsgalactic.axiom.routing.Route, com.jsgalactic.axiom.execution.AdmissionPolicy>);
+    descriptor: (Lcom/jsgalactic/axiom/execution/AdmissionPolicy;Ljava/util/Map;)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.util.Map<com.jsgalactic.axiom.routing.Route, com.jsgalactic.axiom.execution.AdmissionPolicy> routePolicies();
+    descriptor: ()Ljava/util/Map;
+  public static com.jsgalactic.axiom.execution.ExecutionBudget defaults();
+    descriptor: ()Lcom/jsgalactic/axiom/execution/ExecutionBudget;
+  public static com.jsgalactic.axiom.execution.ExecutionBudget of(com.jsgalactic.axiom.execution.AdmissionPolicy);
+    descriptor: (Lcom/jsgalactic/axiom/execution/AdmissionPolicy;)Lcom/jsgalactic/axiom/execution/ExecutionBudget;
 }
 
 public final class com.jsgalactic.axiom.execution.ExecutionContext {
