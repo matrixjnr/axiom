@@ -19,9 +19,11 @@ import java.util.concurrent.TimeUnit;
  */
 public final class JakartaSmoke {
     /** JSON request body, annotated with Jakarta constraints. */
-    public record Signup(@NotBlank @Size(max = 20) String name, @Email String email) { }
+    public record Signup(@NotBlank @Size(max = 20) String name, @Email String email) {
+    }
 
-    private JakartaSmoke() {}
+    private JakartaSmoke() {
+    }
 
     /**
      * Runs the smoke test.

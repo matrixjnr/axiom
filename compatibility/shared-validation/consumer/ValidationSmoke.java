@@ -22,13 +22,15 @@ import java.util.concurrent.TimeUnit;
  */
 public final class ValidationSmoke {
     /** JSON request body. */
-    public record Signup(String name, String email) { }
+    public record Signup(String name, String email) {
+    }
 
     private static final Validator<Signup> SIGNUP = Rules.of(Signup.class)
             .field("name", Signup::name, notBlank(), maxLength(20))
             .field("email", Signup::email, notNull(), email());
 
-    private ValidationSmoke() {}
+    private ValidationSmoke() {
+    }
 
     /**
      * Runs the smoke test.

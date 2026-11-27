@@ -33,33 +33,41 @@ import org.openjdk.jmh.annotations.Warmup;
 @Measurement(iterations = 5, time = 1)
 @Fork(2)
 public class MiddlewareChainBenchmark {
-    @Param({"0", "1", "5", "20"})
-    public int depth;
+  @Param({"0", "1", "5", "20"})
+  public int depth;
 
-    @Param({"global", "route"})
-    public String scope;
+  @Param({"global", "route"})
+  public String scope;
 
-    private Application app;
-    private Request request;
+  private Application app;
+  private Request request;
 
-    @Setup
-    public void setup() {
-        app = Axiom.create();
-        var middleware = new Middleware[depth];
-        for (int i = 0; i < depth; i++) { middleware[i] = (ctx, next) -> next.run(); }
-        if (scope.equals("global")) {
-            for (var each : middleware) { app.use(each); }
-            app.get("/ping", ctx -> "ok");
-        } else {
-            app.get("/ping", ctx -> "ok", middleware);
-        }
-        app.start();
-        request = Request.get("/ping");
+  @Setup
+  public void setup() {
+    app = Axiom.create();
+    var middleware = new Middleware[depth];
+    for (int i = 0; i < depth; i++) {
+      middleware[i] = (ctx, next) -> next.run();
     }
+    if (scope.equals("global")) {
+      for (var each : middleware) {
+        app.use(each);
+      }
+      app.get("/ping", ctx -> "ok");
+    } else {
+      app.get("/ping", ctx -> "ok", middleware);
+    }
+    app.start();
+    request = Request.get("/ping");
+  }
 
-    @TearDown
-    public void teardown() { app.close(); }
+  @TearDown
+  public void teardown() {
+    app.close();
+  }
 
-    @Benchmark
-    public Response handle() throws Exception { return app.handle(request); }
+  @Benchmark
+  public Response handle() throws Exception {
+    return app.handle(request);
+  }
 }

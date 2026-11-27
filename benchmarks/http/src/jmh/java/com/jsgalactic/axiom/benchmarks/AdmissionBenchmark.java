@@ -23,8 +23,8 @@ import org.openjdk.jmh.annotations.Warmup;
 /**
  * Measures the request dispatcher that listeners and the test client share. {@code uncontended}
  * admits a trivial task with free capacity and waits for its result, so it includes starting a
- * virtual thread and completing the outcome. {@code fullQueue} submits while every active slot
- * and queue slot is held, measuring the rejection that becomes a 503.
+ * virtual thread and completing the outcome. {@code fullQueue} submits while every active slot and
+ * queue slot is held, measuring the rejection that becomes a 503.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -32,60 +32,70 @@ import org.openjdk.jmh.annotations.Warmup;
 @Measurement(iterations = 5, time = 1)
 @Fork(2)
 public class AdmissionBenchmark {
-    private static final Duration DEADLINE = Duration.ofHours(1);
+  private static final Duration DEADLINE = Duration.ofHours(1);
 
-    /** A dispatcher with capacity to spare. */
-    @State(Scope.Benchmark)
-    public static class Uncontended {
-        RequestDispatcher dispatcher;
+  /** A dispatcher with capacity to spare. */
+  @State(Scope.Benchmark)
+  public static class Uncontended {
+    RequestDispatcher dispatcher;
 
-        @Setup(Level.Trial)
-        public void setup() { dispatcher = new RequestDispatcher(AdmissionPolicy.reject(64)); }
-
-        @TearDown(Level.Trial)
-        public void teardown() { dispatcher.close(); }
+    @Setup(Level.Trial)
+    public void setup() {
+      dispatcher = new RequestDispatcher(AdmissionPolicy.reject(64));
     }
 
-    /** A dispatcher whose single active slot and single queue slot are held for the whole trial. */
-    @State(Scope.Benchmark)
-    public static class Full {
-        RequestDispatcher dispatcher;
-        final CountDownLatch release = new CountDownLatch(1);
+    @TearDown(Level.Trial)
+    public void teardown() {
+      dispatcher.close();
+    }
+  }
 
-        @Setup(Level.Trial)
-        public void setup() {
-            dispatcher = new RequestDispatcher(new AdmissionPolicy(1, 1, DEADLINE));
-            for (int i = 0; i < 2; i++) {
-                dispatcher.submit(ExecutionContext.create(DEADLINE), () -> {
-                    release.await();
-                    return null;
-                });
-            }
-            var snapshot = dispatcher.snapshot();
-            if (snapshot.active() != 1 || snapshot.queued() != 1) {
-                throw new IllegalStateException("Dispatcher is not full: " + snapshot);
-            }
-        }
+  /** A dispatcher whose single active slot and single queue slot are held for the whole trial. */
+  @State(Scope.Benchmark)
+  public static class Full {
+    RequestDispatcher dispatcher;
+    final CountDownLatch release = new CountDownLatch(1);
 
-        @TearDown(Level.Trial)
-        public void teardown() {
-            release.countDown();
-            dispatcher.close();
-        }
+    @Setup(Level.Trial)
+    public void setup() {
+      dispatcher = new RequestDispatcher(new AdmissionPolicy(1, 1, DEADLINE));
+      for (int i = 0; i < 2; i++) {
+        dispatcher.submit(
+            ExecutionContext.create(DEADLINE),
+            () -> {
+              release.await();
+              return null;
+            });
+      }
+      var snapshot = dispatcher.snapshot();
+      if (snapshot.active() != 1 || snapshot.queued() != 1) {
+        throw new IllegalStateException("Dispatcher is not full: " + snapshot);
+      }
     }
 
-    @Benchmark
-    public Object uncontended(Uncontended state) throws Exception {
-        return state.dispatcher.submit(ExecutionContext.create(DEADLINE), () -> Boolean.TRUE)
-                .result().toCompletableFuture().get();
+    @TearDown(Level.Trial)
+    public void teardown() {
+      release.countDown();
+      dispatcher.close();
     }
+  }
 
-    @Benchmark
-    public Object fullQueue(Full state) {
-        try {
-            return state.dispatcher.submit(ExecutionContext.create(DEADLINE), () -> Boolean.TRUE);
-        } catch (RejectedExecutionException rejected) {
-            return rejected;
-        }
+  @Benchmark
+  public Object uncontended(Uncontended state) throws Exception {
+    return state
+        .dispatcher
+        .submit(ExecutionContext.create(DEADLINE), () -> Boolean.TRUE)
+        .result()
+        .toCompletableFuture()
+        .get();
+  }
+
+  @Benchmark
+  public Object fullQueue(Full state) {
+    try {
+      return state.dispatcher.submit(ExecutionContext.create(DEADLINE), () -> Boolean.TRUE);
+    } catch (RejectedExecutionException rejected) {
+      return rejected;
     }
+  }
 }

@@ -5,5 +5,7 @@ import java.util.Map;
 
 /** A parsed response. */
 record Reply(int status, Map<String, String> headers, byte[] body) {
-    String text() { return new String(body, StandardCharsets.UTF_8); }
+  String text() {
+    return new String(body, StandardCharsets.UTF_8);
+  }
 }

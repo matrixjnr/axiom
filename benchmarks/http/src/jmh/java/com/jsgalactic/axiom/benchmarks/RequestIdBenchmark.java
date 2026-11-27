@@ -20,8 +20,8 @@ import org.openjdk.jmh.annotations.Warmup;
  * process-wide counter, so {@code createContext} (the context and its identity) shows the cost of
  * that shared counter when several threads create contexts at once, and {@code requestId} adds
  * reading the identity string. {@code uuid} is the {@link UUID#randomUUID()} call the counter
- * replaced, kept as a reference point on the same machine. Runs with one JMH thread per
- * available processor; override with {@code -t 1} for the uncontended cost.
+ * replaced, kept as a reference point on the same machine. Runs with one JMH thread per available
+ * processor; override with {@code -t 1} for the uncontended cost.
  */
 @State(Scope.Benchmark)
 @BenchmarkMode(Mode.AverageTime)
@@ -31,14 +31,20 @@ import org.openjdk.jmh.annotations.Warmup;
 @Fork(2)
 @Threads(Threads.MAX)
 public class RequestIdBenchmark {
-    private static final Duration TIMEOUT = Duration.ofSeconds(10);
+  private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
-    @Benchmark
-    public ExecutionContext createContext() { return ExecutionContext.create(TIMEOUT); }
+  @Benchmark
+  public ExecutionContext createContext() {
+    return ExecutionContext.create(TIMEOUT);
+  }
 
-    @Benchmark
-    public String requestId() { return ExecutionContext.create(TIMEOUT).requestId(); }
+  @Benchmark
+  public String requestId() {
+    return ExecutionContext.create(TIMEOUT).requestId();
+  }
 
-    @Benchmark
-    public String uuid() { return UUID.randomUUID().toString(); }
+  @Benchmark
+  public String uuid() {
+    return UUID.randomUUID().toString();
+  }
 }

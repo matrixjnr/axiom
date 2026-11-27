@@ -9,12 +9,12 @@ import java.net.InetSocketAddress;
 
 /** ServiceLoader entry point; not part of the application API. */
 public final class NettyTransportProvider implements HttpTransportProvider {
-    /** Creates the service provider. */
-    public NettyTransportProvider() { }
+  /** Creates the service provider. */
+  public NettyTransportProvider() {}
 
-    @Override
-    public Server bind(Application application, InetSocketAddress address, ListenerOptions options)
-            throws IOException {
-        return NettyServer.bind(application, address, TransportSettings.of(options));
-    }
+  @Override
+  public Server bind(Application application, InetSocketAddress address, ListenerOptions options)
+      throws IOException {
+    return NettyServer.bind(application, address, TransportSettings.of(options));
+  }
 }

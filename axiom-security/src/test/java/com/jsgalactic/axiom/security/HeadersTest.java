@@ -11,74 +11,119 @@ import org.junit.jupiter.api.Test;
 
 /** Header redaction and the security headers middleware. */
 class HeadersTest {
-    @Test
-    void redactsCredentialHeadersCaseInsensitivelyAndKeepsOthers() {
-        var headers = Map.of("authorization", "Bearer secret", "COOKIE", "session=abc", "Set-Cookie", "id=1",
-                "X-Api-Key", "k", "Accept", "application/json", "X-Tenant-Secret", "t");
-        var redacted = HeaderRedaction.defaults().and("x-tenant-secret").redact(headers);
-        assertThat(redacted).containsEntry("Authorization", HeaderRedaction.REDACTED)
-                .containsEntry("Cookie", HeaderRedaction.REDACTED).containsEntry("set-cookie", HeaderRedaction.REDACTED)
-                .containsEntry("X-Api-Key", HeaderRedaction.REDACTED).containsEntry("X-Tenant-Secret", HeaderRedaction.REDACTED)
-                .containsEntry("Accept", "application/json");
-        assertThat(redacted.toString()).doesNotContain("secret", "abc");
-        assertThat(HeaderRedaction.defaults().isSensitive("Proxy-Authorization")).isTrue();
-        assertThat(HeaderRedaction.defaults().isSensitive("X-Tenant-Secret")).isFalse();
-        assertThatIllegalArgumentException().isThrownBy(() -> HeaderRedaction.defaults().and("bad name"));
-    }
+  @Test
+  void redactsCredentialHeadersCaseInsensitivelyAndKeepsOthers() {
+    var headers =
+        Map.of(
+            "authorization",
+            "Bearer secret",
+            "COOKIE",
+            "session=abc",
+            "Set-Cookie",
+            "id=1",
+            "X-Api-Key",
+            "k",
+            "Accept",
+            "application/json",
+            "X-Tenant-Secret",
+            "t");
+    var redacted = HeaderRedaction.defaults().and("x-tenant-secret").redact(headers);
+    assertThat(redacted)
+        .containsEntry("Authorization", HeaderRedaction.REDACTED)
+        .containsEntry("Cookie", HeaderRedaction.REDACTED)
+        .containsEntry("set-cookie", HeaderRedaction.REDACTED)
+        .containsEntry("X-Api-Key", HeaderRedaction.REDACTED)
+        .containsEntry("X-Tenant-Secret", HeaderRedaction.REDACTED)
+        .containsEntry("Accept", "application/json");
+    assertThat(redacted.toString()).doesNotContain("secret", "abc");
+    assertThat(HeaderRedaction.defaults().isSensitive("Proxy-Authorization")).isTrue();
+    assertThat(HeaderRedaction.defaults().isSensitive("X-Tenant-Secret")).isFalse();
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> HeaderRedaction.defaults().and("bad name"));
+  }
 
-    @Test
-    void addsDefaultHeadersWithoutOverridingTheHandlersOwn() throws Exception {
-        var app = Axiom.create();
-        app.use(SecurityHeaders.defaults());
-        app.get("/api", ctx -> "api");
-        app.get("/page", ctx -> ctx.text("<p>").withHeader("Content-Security-Policy", "default-src 'self'"));
-        try (var client = TestClient.start(app)) {
-            var api = client.get("/api");
-            assertThat(api.headers()).containsEntry("X-Content-Type-Options", "nosniff")
-                    .containsEntry("X-Frame-Options", "DENY").containsEntry("Referrer-Policy", "no-referrer")
-                    .containsEntry("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-                    .containsEntry("Cross-Origin-Resource-Policy", "same-origin")
-                    .doesNotContainKey("Strict-Transport-Security");
-            assertThat(client.get("/page").headers()).containsEntry("Content-Security-Policy", "default-src 'self'");
-            // Global middleware wrap the router's own answers.
-            assertThat(client.get("/missing").headers()).containsEntry("X-Content-Type-Options", "nosniff");
-        }
+  @Test
+  void addsDefaultHeadersWithoutOverridingTheHandlersOwn() throws Exception {
+    var app = Axiom.create();
+    app.use(SecurityHeaders.defaults());
+    app.get("/api", ctx -> "api");
+    app.get(
+        "/page",
+        ctx -> ctx.text("<p>").withHeader("Content-Security-Policy", "default-src 'self'"));
+    try (var client = TestClient.start(app)) {
+      var api = client.get("/api");
+      assertThat(api.headers())
+          .containsEntry("X-Content-Type-Options", "nosniff")
+          .containsEntry("X-Frame-Options", "DENY")
+          .containsEntry("Referrer-Policy", "no-referrer")
+          .containsEntry("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+          .containsEntry("Cross-Origin-Resource-Policy", "same-origin")
+          .doesNotContainKey("Strict-Transport-Security");
+      assertThat(client.get("/page").headers())
+          .containsEntry("Content-Security-Policy", "default-src 'self'");
+      // Global middleware wrap the router's own answers.
+      assertThat(client.get("/missing").headers())
+          .containsEntry("X-Content-Type-Options", "nosniff");
     }
+  }
 
-    @Test
-    void decoratesResponsesMappedFromExceptions() throws Exception {
-        var app = Axiom.create();
-        app.use(SecurityHeaders.defaults());
-        app.get("/denied", ctx -> { throw new ForbiddenException(); });
-        app.get("/broken", ctx -> { throw new IllegalStateException(); });
-        app.get("/mapped", ctx -> { throw new UnsupportedOperationException(); });
-        app.error(IllegalStateException.class, (ctx, failure) -> ctx.status(503).text("later")
-                .withHeader("X-Frame-Options", "SAMEORIGIN"));
-        app.error(UnsupportedOperationException.class, (ctx, failure) -> { throw new IllegalArgumentException(); });
-        try (var client = TestClient.start(app)) {
-            var denied = client.get("/denied");
-            assertThat(denied.status()).isEqualTo(403);
-            assertThat(denied.headers()).containsEntry("X-Content-Type-Options", "nosniff")
-                    .containsEntry("X-Frame-Options", "DENY").containsEntry("Content-Type", "application/problem+json");
-            // An error handler's own header is kept, like a handler's.
-            var mapped = client.get("/broken");
-            assertThat(mapped.status()).isEqualTo(503);
-            assertThat(mapped.headers()).containsEntry("X-Frame-Options", "SAMEORIGIN")
-                    .containsEntry("X-Content-Type-Options", "nosniff");
-            // The generic 500 of a failing error handler.
-            var generic = client.get("/mapped");
-            assertThat(generic.status()).isEqualTo(500);
-            assertThat(generic.headers()).containsEntry("X-Content-Type-Options", "nosniff");
-        }
+  @Test
+  void decoratesResponsesMappedFromExceptions() throws Exception {
+    var app = Axiom.create();
+    app.use(SecurityHeaders.defaults());
+    app.get(
+        "/denied",
+        ctx -> {
+          throw new ForbiddenException();
+        });
+    app.get(
+        "/broken",
+        ctx -> {
+          throw new IllegalStateException();
+        });
+    app.get(
+        "/mapped",
+        ctx -> {
+          throw new UnsupportedOperationException();
+        });
+    app.error(
+        IllegalStateException.class,
+        (ctx, failure) ->
+            ctx.status(503).text("later").withHeader("X-Frame-Options", "SAMEORIGIN"));
+    app.error(
+        UnsupportedOperationException.class,
+        (ctx, failure) -> {
+          throw new IllegalArgumentException();
+        });
+    try (var client = TestClient.start(app)) {
+      var denied = client.get("/denied");
+      assertThat(denied.status()).isEqualTo(403);
+      assertThat(denied.headers())
+          .containsEntry("X-Content-Type-Options", "nosniff")
+          .containsEntry("X-Frame-Options", "DENY")
+          .containsEntry("Content-Type", "application/problem+json");
+      // An error handler's own header is kept, like a handler's.
+      var mapped = client.get("/broken");
+      assertThat(mapped.status()).isEqualTo(503);
+      assertThat(mapped.headers())
+          .containsEntry("X-Frame-Options", "SAMEORIGIN")
+          .containsEntry("X-Content-Type-Options", "nosniff");
+      // The generic 500 of a failing error handler.
+      var generic = client.get("/mapped");
+      assertThat(generic.status()).isEqualTo(500);
+      assertThat(generic.headers()).containsEntry("X-Content-Type-Options", "nosniff");
     }
+  }
 
-    @Test
-    void configuresHeadersImmutably() {
-        var hsts = SecurityHeaders.defaults().with("Strict-Transport-Security", "max-age=31536000");
-        assertThat(hsts.headers()).containsKey("strict-transport-security");
-        assertThat(SecurityHeaders.defaults().headers()).doesNotContainKey("Strict-Transport-Security");
-        assertThat(hsts.without("x-frame-options").headers()).doesNotContainKey("X-Frame-Options");
-        assertThatIllegalArgumentException().isThrownBy(() -> SecurityHeaders.defaults().with("X-A", "a\r\nSet-Cookie: b"));
-        assertThatIllegalArgumentException().isThrownBy(() -> SecurityHeaders.defaults().with("X A", "a"));
-    }
+  @Test
+  void configuresHeadersImmutably() {
+    var hsts = SecurityHeaders.defaults().with("Strict-Transport-Security", "max-age=31536000");
+    assertThat(hsts.headers()).containsKey("strict-transport-security");
+    assertThat(SecurityHeaders.defaults().headers()).doesNotContainKey("Strict-Transport-Security");
+    assertThat(hsts.without("x-frame-options").headers()).doesNotContainKey("X-Frame-Options");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> SecurityHeaders.defaults().with("X-A", "a\r\nSet-Cookie: b"));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> SecurityHeaders.defaults().with("X A", "a"));
+  }
 }

@@ -241,16 +241,21 @@ nested types. Exact exceptions cover the same-name Axiom and Jakarta `Validator`
 types that Java requires us to disambiguate. Strings containing runtime class names
 and the generated API signature files keep their qualified names.
 
-Checkstyle (version in `gradle/libs.versions.toml`) is applied to every Java module by the
-`axiom.java-base` convention plugin. `checkstyleMain` and `checkstyleTest` are part of each
-module's `check` and fail the build on any violation (`maxWarnings = 0`); run one module with
-`./gradlew :axiom-core:checkstyleMain :axiom-core:checkstyleTest`. The single shared ruleset is
-`config/checkstyle/checkstyle.xml`. It encodes only conventions the tree already follows: no tabs,
+Spotless and Checkstyle are applied to every Java module by the `axiom.java-base` convention
+plugin. `spotlessCheck`, `checkstyleMain` and `checkstyleTest` are part of each module's `check`
+and fail the build on any violation; run `./gradlew spotlessApply` to format and
+`./gradlew :axiom-core:checkstyleMain :axiom-core:checkstyleTest` to check one module. Spotless
+uses google-java-format (version in `gradle/libs.versions.toml`); the JMH source set is formatted
+explicitly because it is not a default Java source set. The shared ruleset is Google's official
+`config/checkstyle/google_checks.xml`, with checks that duplicate the formatter or conflict with
+default-package README examples removed, plus Axiom's rule that a method body must not be written
+on one line. The ruleset encodes: no tabs,
 trailing whitespace or star imports, a final newline, no unused or redundant imports, imports in
 one ASCII-sorted block with static imports first, 4-space indentation, lines of at most 200
 characters, standard naming, `final` classes without a visible constructor (or a hidden one for
-utility classes), required braces for multi-line statements, and Javadoc on every public type and
-method of library main sources. Tests, examples and benchmarks are exempt from the Javadoc rule,
+utility classes), required braces for multi-line statements, one annotation per line above a method
+or constructor, method bodies on their own lines rather than a single line, and Javadoc on every
+public type and method of library main sources. Tests, examples and benchmarks are exempt from the Javadoc rule,
 and the README examples from the utility-class rule, by filters inside the ruleset itself; there
 is no separate suppression file. Add style rules with the source cleanup needed to pass them.
 The Checkstyle dependencies have checksums in

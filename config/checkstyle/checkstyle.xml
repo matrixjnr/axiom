@@ -50,6 +50,21 @@
       <property name="query" value="//DOT[IDENT[matches(@text, '^[A-Z]')]][DOT[IDENT[matches(@text, '^[a-z]')]]][not(ancestor::IMPORT or ancestor::STATIC_IMPORT or ancestor::PACKAGE_DEF)]"/>
       <message key="matchxpath.match" value="Import the type and use its simple name instead of an inline fully qualified name."/>
     </module>
+    <!-- Annotations are metadata about a declaration, not part of its signature. Keep them on
+         their own line so methods scan uniformly and diffs stay small. -->
+    <module name="AnnotationLocation">
+      <property name="allowSamelineSingleParameterlessAnnotation" value="false"/>
+      <property name="allowSamelineParameterizedAnnotation" value="false"/>
+      <property name="allowSamelineMultipleAnnotations" value="false"/>
+      <property name="tokens" value="METHOD_DEF, CTOR_DEF"/>
+    </module>
+    <!-- A whole method on one line hides its control flow; require the body on its own lines. -->
+    <module name="RegexpSinglelineJava">
+      <property name="format" value="^\s*(public|protected|private|static|final|synchronized|default|native|strictfp|sealed|non-sealed)\b.*\)\s*\{\s*[^}]*\}\s*$"/>
+      <property name="message" value="Write method bodies on their own lines."/>
+      <property name="ignoreComments" value="true"/>
+    </module>
+
     <module name="OuterTypeFilename"/>
     <module name="OneTopLevelClass"/>
     <module name="AvoidStarImport"/>

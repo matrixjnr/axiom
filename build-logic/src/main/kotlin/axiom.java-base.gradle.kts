@@ -1,17 +1,24 @@
 plugins {
     java
     checkstyle
+    id("com.diffplug.spotless")
 }
 
-// Style gate: checkstyleMain and checkstyleTest are part of `check` and fail on any violation.
-// One shared ruleset (config/checkstyle/checkstyle.xml) covers every Java module.
+// Style gate: Google Java Style through google-java-format and the official Checkstyle ruleset,
+// plus Axiom's explicit no-single-line-methods rule. Both run as part of `check`.
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 checkstyle {
     toolVersion = libs.findVersion("checkstyle").get().requiredVersion
-    configDirectory.set(rootProject.layout.projectDirectory.dir("config/checkstyle"))
+    configFile = rootProject.layout.projectDirectory.file("config/checkstyle/google_checks.xml").asFile
     maxWarnings = 0
     maxErrors = 0
 }
+spotless {
+    java {
+        googleJavaFormat(libs.findVersion("google-java-format").get().requiredVersion)
+    }
+}
+tasks.named("check") { dependsOn(tasks.named("spotlessCheck")) }
 
 java {
     toolchain { languageVersion.set(JavaLanguageVersion.of(21)) }

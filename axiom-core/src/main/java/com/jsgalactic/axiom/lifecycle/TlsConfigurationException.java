@@ -12,11 +12,14 @@ import java.io.IOException;
  * password, and the exception carries no cause that could hold such content.
  */
 public final class TlsConfigurationException extends IOException {
-    private static final long serialVersionUID = 1L;
+  private static final long serialVersionUID = 1L;
 
-    /**
-     * Creates the exception.
-     * @param message what is wrong, without key material
-     */
-    public TlsConfigurationException(String message) { super(message); }
+  /**
+   * Creates the exception.
+   *
+   * @param message what is wrong, without key material
+   */
+  public TlsConfigurationException(String message) {
+    super(message);
+  }
 }

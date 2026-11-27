@@ -11,85 +11,130 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class ConnectionSlotsTest {
-    @Test void gaugesFollowBothPoolsAndAFailingMetricsImplementationNeverFailsAConnection() {
-        var probe = new Probe();
-        var slots = new ConnectionSlots(2, 1, probe);
-        var first = slots.acquire();
-        var second = slots.acquire();
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open")).isEqualTo(2);
-        first.linger();
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open")).isEqualTo(1);
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering")).isEqualTo(1);
-        first.release();
-        second.release();
-        second.release();
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open")).isZero();
-        assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering")).isZero();
-        assertThat(probe.tagValues()).containsExactlyInAnyOrder(ConnectionSlots.CONNECTIONS + ":listener=default",
-                ConnectionSlots.CONNECTIONS + ":state=open", ConnectionSlots.CONNECTIONS + ":state=lingering");
+  @Test
+  void gaugesFollowBothPoolsAndAFailingMetricsImplementationNeverFailsAConnection() {
+    var probe = new Probe();
+    var slots = new ConnectionSlots(2, 1, probe);
+    var first = slots.acquire();
+    var second = slots.acquire();
+    assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open"))
+        .isEqualTo(2);
+    first.linger();
+    assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open"))
+        .isEqualTo(1);
+    assertThat(
+            probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering"))
+        .isEqualTo(1);
+    first.release();
+    second.release();
+    second.release();
+    assertThat(probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "open"))
+        .isZero();
+    assertThat(
+            probe.value(ConnectionSlots.CONNECTIONS, "listener", "default", "state", "lingering"))
+        .isZero();
+    assertThat(probe.tagValues())
+        .containsExactlyInAnyOrder(
+            ConnectionSlots.CONNECTIONS + ":listener=default",
+            ConnectionSlots.CONNECTIONS + ":state=open",
+            ConnectionSlots.CONNECTIONS + ":state=lingering");
 
-        var failing = new Metrics() {
-            @Override public Counter counter(String name, String... tags) { throw new IllegalStateException(); }
-            @Override public Gauge gauge(String name, String... tags) { return delta -> { throw new IllegalStateException(); }; }
-            @Override public Timer timer(String name, String... tags) { throw new IllegalStateException(); }
+    var failing =
+        new Metrics() {
+          @Override
+          public Counter counter(String name, String... tags) {
+            throw new IllegalStateException();
+          }
+
+          @Override
+          public Gauge gauge(String name, String... tags) {
+            return delta -> {
+              throw new IllegalStateException();
+            };
+          }
+
+          @Override
+          public Timer timer(String name, String... tags) {
+            throw new IllegalStateException();
+          }
         };
-        var broken = new ConnectionSlots(1, 1, failing);
-        var slot = broken.acquire();
-        assertThat(slot.linger()).isTrue();
-        slot.release();
-        assertThat(broken.lingering()).isZero();
-    }
+    var broken = new ConnectionSlots(1, 1, failing);
+    var slot = broken.acquire();
+    assertThat(slot.linger()).isTrue();
+    slot.release();
+    assertThat(broken.lingering()).isZero();
+  }
 
-    @Test void releaseIsIdempotentAndAReleasedSlotCannotLinger() {
-        var slots = new ConnectionSlots(2, 1);
-        var first = slots.acquire();
-        var second = slots.acquire();
-        assertThat(slots.acquire()).isNull();
-        assertThat(first.linger()).isTrue();
-        assertThat(first.linger()).as("already lingering").isFalse();
-        assertThat(slots.open()).isEqualTo(1);
-        assertThat(slots.lingering()).isEqualTo(1);
-        assertThat(second.linger()).as("lingering pool full").isFalse();
-        first.release();
-        first.release();
-        assertThat(slots.lingering()).isZero();
-        assertThat(slots.open()).isEqualTo(1);
-        second.release();
-        assertThat(second.linger()).isFalse();
-        assertThat(slots.open()).isZero();
-        assertThat(slots.lingering()).isZero();
-    }
+  @Test
+  void releaseIsIdempotentAndAReleasedSlotCannotLinger() {
+    var slots = new ConnectionSlots(2, 1);
+    var first = slots.acquire();
+    var second = slots.acquire();
+    assertThat(slots.acquire()).isNull();
+    assertThat(first.linger()).isTrue();
+    assertThat(first.linger()).as("already lingering").isFalse();
+    assertThat(slots.open()).isEqualTo(1);
+    assertThat(slots.lingering()).isEqualTo(1);
+    assertThat(second.linger()).as("lingering pool full").isFalse();
+    first.release();
+    first.release();
+    assertThat(slots.lingering()).isZero();
+    assertThat(slots.open()).isEqualTo(1);
+    second.release();
+    assertThat(second.linger()).isFalse();
+    assertThat(slots.open()).isZero();
+    assertThat(slots.lingering()).isZero();
+  }
 
-    @Test void concurrentUseNeverExceedsEitherBoundAndReturnsEverySlot() throws Exception {
-        var slots = new ConnectionSlots(8, 3);
-        var start = new CountDownLatch(1);
-        var exceeded = new AtomicBoolean();
-        var open = new AtomicInteger();
-        var lingering = new AtomicInteger();
-        var threads = new ArrayList<Thread>();
-        for (int t = 0; t < 8; t++) {
-            threads.add(Thread.ofPlatform().start(() -> {
-                try { start.await(); } catch (InterruptedException stop) { return; }
-                for (int i = 0; i < 20_000; i++) {
-                    var slot = slots.acquire();
-                    if (slot == null) { continue; }
-                    // The pool's counters may overshoot for an instant while refusing, so the test
-                    // counts granted slots itself: up after a grant, down before a release.
-                    if (open.incrementAndGet() > 8) { exceeded.set(true); }
-                    open.decrementAndGet();
-                    if (i % 2 == 0 && slot.linger()) {
-                        if (lingering.incrementAndGet() > 3) { exceeded.set(true); }
-                        lingering.decrementAndGet();
+  @Test
+  void concurrentUseNeverExceedsEitherBoundAndReturnsEverySlot() throws Exception {
+    var slots = new ConnectionSlots(8, 3);
+    var start = new CountDownLatch(1);
+    var exceeded = new AtomicBoolean();
+    var open = new AtomicInteger();
+    var lingering = new AtomicInteger();
+    var threads = new ArrayList<Thread>();
+    for (int t = 0; t < 8; t++) {
+      threads.add(
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      start.await();
+                    } catch (InterruptedException stop) {
+                      return;
                     }
-                    slot.release();
-                    if (i % 3 == 0) { slot.release(); }
-                }
-            }));
-        }
-        start.countDown();
-        for (var thread : threads) { thread.join(TimeUnit.MINUTES.toMillis(2)); }
-        assertThat(exceeded).isFalse();
-        assertThat(slots.open()).isZero();
-        assertThat(slots.lingering()).isZero();
+                    for (int i = 0; i < 20_000; i++) {
+                      var slot = slots.acquire();
+                      if (slot == null) {
+                        continue;
+                      }
+                      // The pool's counters may overshoot for an instant while refusing, so the
+                      // test
+                      // counts granted slots itself: up after a grant, down before a release.
+                      if (open.incrementAndGet() > 8) {
+                        exceeded.set(true);
+                      }
+                      open.decrementAndGet();
+                      if (i % 2 == 0 && slot.linger()) {
+                        if (lingering.incrementAndGet() > 3) {
+                          exceeded.set(true);
+                        }
+                        lingering.decrementAndGet();
+                      }
+                      slot.release();
+                      if (i % 3 == 0) {
+                        slot.release();
+                      }
+                    }
+                  }));
     }
+    start.countDown();
+    for (var thread : threads) {
+      thread.join(TimeUnit.MINUTES.toMillis(2));
+    }
+    assertThat(exceeded).isFalse();
+    assertThat(slots.open()).isZero();
+    assertThat(slots.lingering()).isZero();
+  }
 }

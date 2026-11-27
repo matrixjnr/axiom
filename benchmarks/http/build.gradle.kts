@@ -12,6 +12,13 @@ dependencies {
     "jmhAnnotationProcessor"(libs.jmh.generator)
 }
 
+// The JMH source set is outside the default Java source sets, so format it explicitly.
+spotless {
+    java {
+        target("src/jmh/java/**/*.java")
+    }
+}
+
 // Compile the harness in normal checks; timing measurements remain an explicit local task.
 tasks.named("check") { dependsOn(jmh.classesTaskName) }
 

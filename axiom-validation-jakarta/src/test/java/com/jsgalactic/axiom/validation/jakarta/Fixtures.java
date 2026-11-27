@@ -30,104 +30,136 @@ import java.util.Map;
 
 /** Annotated records and custom constraints shared by the adapter tests. */
 final class Fixtures {
-    private Fixtures() {}
+  private Fixtures() {}
 
-    record Address(@NotBlank String street, @Pattern(regexp = "[0-9]{5}") String postcode) {}
+  record Address(@NotBlank String street, @Pattern(regexp = "[0-9]{5}") String postcode) {}
 
-    record Item(@NotBlank String sku, @Min(1) int quantity) {}
+  record Item(@NotBlank String sku, @Min(1) int quantity) {}
 
-    record Order(@NotBlank @Size(max = 10) String customer, @Email String email, @Valid @NotNull Address address,
-                 List<@Valid @NotNull Item> items, List<@NotBlank String> tags, Map<String, @NotBlank String> labels,
-                 @DecimalMin("0.5") BigDecimal discount, @AssertTrue boolean accepted) {}
+  record Order(
+      @NotBlank @Size(max = 10) String customer,
+      @Email String email,
+      @Valid @NotNull Address address,
+      List<@Valid @NotNull Item> items,
+      List<@NotBlank String> tags,
+      Map<String, @NotBlank String> labels,
+      @DecimalMin("0.5") BigDecimal discount,
+      @AssertTrue boolean accepted) {}
 
-    static Order validOrder() {
-        return new Order("ada", "ada@example.org", new Address("Main St 1", "12345"),
-                List.of(new Item("ABC-1", 2)), List.of("gift"), Map.of("channel", "web"), new BigDecimal("1.0"), true);
+  static Order validOrder() {
+    return new Order(
+        "ada",
+        "ada@example.org",
+        new Address("Main St 1", "12345"),
+        List.of(new Item("ABC-1", 2)),
+        List.of("gift"),
+        Map.of("channel", "web"),
+        new BigDecimal("1.0"),
+        true);
+  }
+
+  /** Group for checks that apply only before publishing. */
+  interface Publishing {}
+
+  record Draft(@NotBlank String title, @NotBlank(groups = Publishing.class) String body) {}
+
+  /** Cheap checks run first, expensive ones only when they pass. */
+  interface Basic {}
+
+  interface Costly {}
+
+  /** A group sequence: validation stops at the first group with violations. */
+  @GroupSequence({Basic.class, Costly.class})
+  interface BasicThenCostly {}
+
+  record Account(
+      @NotBlank(groups = Basic.class) String name,
+      @Size(min = 5, groups = Costly.class) String password) {}
+
+  /**
+   * Redefines the default group as a sequence: the class's own constraints, then {@link Costly}.
+   */
+  @GroupSequence({Sequenced.class, Costly.class})
+  record Sequenced(@NotBlank String name, @Size(min = 5, groups = Costly.class) String password) {}
+
+  /**
+   * Cascades with {@code @Valid} on the container itself, the form Hibernate Validator deprecates.
+   */
+  record Legacy(@Valid List<Item> items) {}
+
+  /** Fails every value and tries to make the provider evaluate expressions in its messages. */
+  @Constraint(validatedBy = Interpolating.Check.class)
+  @Target({FIELD, METHOD, PARAMETER, TYPE_USE, ANNOTATION_TYPE})
+  @Retention(RUNTIME)
+  @interface Interpolating {
+    String message() default
+        "${1+1} #{2*3} {jakarta.validation.constraints.NotNull.message} ${validatedValue}";
+
+    Class<?>[] groups() default {};
+
+    Class<? extends Payload>[] payload() default {};
+
+    final class Check implements ConstraintValidator<Interpolating, String> {
+      @Override
+      public boolean isValid(String value, ConstraintValidatorContext context) {
+        context.disableDefaultConstraintViolation();
+        context
+            .buildConstraintViolationWithTemplate("${" + value + "} " + value)
+            .addConstraintViolation();
+        return false;
+      }
     }
+  }
 
-    /** Group for checks that apply only before publishing. */
-    interface Publishing {}
+  record Comment(
+      @Interpolating String text, @Size(max = 1, message = "{max} ${1+1}") String note) {}
 
-    record Draft(@NotBlank String title, @NotBlank(groups = Publishing.class) String body) {}
+  /** A constraint whose implementation fails with an internal message. */
+  @Constraint(validatedBy = Explodes.Check.class)
+  @Target({FIELD, METHOD, PARAMETER, TYPE_USE, ANNOTATION_TYPE})
+  @Retention(RUNTIME)
+  @interface Explodes {
+    String message() default "boom";
 
-    /** Cheap checks run first, expensive ones only when they pass. */
-    interface Basic {}
+    Class<?>[] groups() default {};
 
-    interface Costly {}
+    Class<? extends Payload>[] payload() default {};
 
-    /** A group sequence: validation stops at the first group with violations. */
-    @GroupSequence({Basic.class, Costly.class})
-    interface BasicThenCostly {}
-
-    record Account(@NotBlank(groups = Basic.class) String name, @Size(min = 5, groups = Costly.class) String password) {}
-
-    /** Redefines the default group as a sequence: the class's own constraints, then {@link Costly}. */
-    @GroupSequence({Sequenced.class, Costly.class})
-    record Sequenced(@NotBlank String name, @Size(min = 5, groups = Costly.class) String password) {}
-
-    /** Cascades with {@code @Valid} on the container itself, the form Hibernate Validator deprecates. */
-    record Legacy(@Valid List<Item> items) {}
-
-    /** Fails every value and tries to make the provider evaluate expressions in its messages. */
-    @Constraint(validatedBy = Interpolating.Check.class)
-    @Target({FIELD, METHOD, PARAMETER, TYPE_USE, ANNOTATION_TYPE})
-    @Retention(RUNTIME)
-    @interface Interpolating {
-        String message() default "${1+1} #{2*3} {jakarta.validation.constraints.NotNull.message} ${validatedValue}";
-        Class<?>[] groups() default {};
-        Class<? extends Payload>[] payload() default {};
-
-        final class Check implements ConstraintValidator<Interpolating, String> {
-            @Override public boolean isValid(String value, ConstraintValidatorContext context) {
-                context.disableDefaultConstraintViolation();
-                context.buildConstraintViolationWithTemplate("${" + value + "} " + value).addConstraintViolation();
-                return false;
-            }
-        }
+    final class Check implements ConstraintValidator<Explodes, Object> {
+      @Override
+      public boolean isValid(Object value, ConstraintValidatorContext context) {
+        throw new IllegalStateException("SECRET internal detail for " + value);
+      }
     }
+  }
 
-    record Comment(@Interpolating String text, @Size(max = 1, message = "{max} ${1+1}") String note) {}
+  record Fragile(@Explodes String value) {}
 
-    /** A constraint whose implementation fails with an internal message. */
-    @Constraint(validatedBy = Explodes.Check.class)
-    @Target({FIELD, METHOD, PARAMETER, TYPE_USE, ANNOTATION_TYPE})
-    @Retention(RUNTIME)
-    @interface Explodes {
-        String message() default "boom";
-        Class<?>[] groups() default {};
-        Class<? extends Payload>[] payload() default {};
+  /** Class-level constraint: start must not be after end. */
+  @Constraint(validatedBy = OrderedRange.Check.class)
+  @Target({TYPE, ANNOTATION_TYPE})
+  @Retention(RUNTIME)
+  @interface OrderedRange {
+    String message() default "range";
 
-        final class Check implements ConstraintValidator<Explodes, Object> {
-            @Override public boolean isValid(Object value, ConstraintValidatorContext context) {
-                throw new IllegalStateException("SECRET internal detail for " + value);
-            }
-        }
+    Class<?>[] groups() default {};
+
+    Class<? extends Payload>[] payload() default {};
+
+    final class Check implements ConstraintValidator<OrderedRange, Period> {
+      @Override
+      public boolean isValid(Period value, ConstraintValidatorContext context) {
+        return value.start() <= value.end();
+      }
     }
+  }
 
-    record Fragile(@Explodes String value) {}
+  @OrderedRange
+  record Period(int start, int end) {}
 
-    /** Class-level constraint: start must not be after end. */
-    @Constraint(validatedBy = OrderedRange.Check.class)
-    @Target({TYPE, ANNOTATION_TYPE})
-    @Retention(RUNTIME)
-    @interface OrderedRange {
-        String message() default "range";
-        Class<?>[] groups() default {};
-        Class<? extends Payload>[] payload() default {};
+  record Booking(@NotNull @Valid Period period, List<@Valid Period> extra) {}
 
-        final class Check implements ConstraintValidator<OrderedRange, Period> {
-            @Override public boolean isValid(Period value, ConstraintValidatorContext context) {
-                return value.start() <= value.end();
-            }
-        }
-    }
-
-    @OrderedRange
-    record Period(int start, int end) {}
-
-    record Booking(@NotNull @Valid Period period, List<@Valid Period> extra) {}
-
-    /** Name with an acronym, for code derivation. */
-    @Retention(RUNTIME)
-    @interface URLSafeID {}
+  /** Name with an acronym, for code derivation. */
+  @Retention(RUNTIME)
+  @interface URLSafeID {}
 }

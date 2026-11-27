@@ -32,35 +32,43 @@ import org.openjdk.jmh.annotations.Warmup;
 @Measurement(iterations = 5, time = 1)
 @Fork(2)
 public class NegotiationBenchmark {
-    /** Response value. */
-    public record Item(String name, int quantity) { }
+  /** Response value. */
+  public record Item(String name, int quantity) {}
 
-    private static final Map<String, String> ACCEPT = Map.of(
-            "none", "",
-            "exact", "application/json",
-            "browser", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "ranked", "text/plain;q=0.2, application/*;q=0.5, application/json;charset=utf-8;q=0.9, */*;q=0.1",
-            "unacceptable", "text/html, application/xml, application/json;q=0");
+  private static final Map<String, String> ACCEPT =
+      Map.of(
+          "none", "",
+          "exact", "application/json",
+          "browser", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "ranked",
+              "text/plain;q=0.2, application/*;q=0.5, application/json;charset=utf-8;q=0.9, */*;q=0.1",
+          "unacceptable", "text/html, application/xml, application/json;q=0");
 
-    @Param({"none", "exact", "browser", "ranked", "unacceptable"})
-    public String accept;
+  @Param({"none", "exact", "browser", "ranked", "unacceptable"})
+  public String accept;
 
-    private Application app;
-    private Request request;
+  private Application app;
+  private Request request;
 
-    @Setup
-    public void setup() {
-        app = Axiom.create();
-        var item = new Item("pen", 2);
-        app.get("/item", ctx -> ctx.json(item));
-        app.start();
-        var value = ACCEPT.get(accept);
-        request = new Request("GET", "/item").withHeaders(value.isEmpty() ? Map.of() : Map.of("Accept", value));
-    }
+  @Setup
+  public void setup() {
+    app = Axiom.create();
+    var item = new Item("pen", 2);
+    app.get("/item", ctx -> ctx.json(item));
+    app.start();
+    var value = ACCEPT.get(accept);
+    request =
+        new Request("GET", "/item")
+            .withHeaders(value.isEmpty() ? Map.of() : Map.of("Accept", value));
+  }
 
-    @TearDown
-    public void teardown() { app.close(); }
+  @TearDown
+  public void teardown() {
+    app.close();
+  }
 
-    @Benchmark
-    public Response negotiate() throws Exception { return app.handle(request); }
+  @Benchmark
+  public Response negotiate() throws Exception {
+    return app.handle(request);
+  }
 }
