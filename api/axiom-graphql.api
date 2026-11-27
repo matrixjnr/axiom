@@ -1,0 +1,47 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.graphql.GraphQl {
+  public com.jsgalactic.axiom.context.Handler handler();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Handler;
+  public com.jsgalactic.axiom.graphql.GraphQlOptions options();
+    descriptor: ()Lcom/jsgalactic/axiom/graphql/GraphQlOptions;
+  public com.jsgalactic.axiom.routing.Route register(com.jsgalactic.axiom.application.Application, java.lang.String, com.jsgalactic.axiom.context.Middleware...);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;Ljava/lang/String;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+  public static com.jsgalactic.axiom.graphql.GraphQl$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/graphql/GraphQl$Builder;
+}
+
+public static final class com.jsgalactic.axiom.graphql.GraphQl$Builder {
+  public com.jsgalactic.axiom.graphql.GraphQl build();
+    descriptor: ()Lcom/jsgalactic/axiom/graphql/GraphQl;
+  public com.jsgalactic.axiom.graphql.GraphQl$Builder dataLoaders(java.util.function.Supplier<java.lang.Object>);
+    descriptor: (Ljava/util/function/Supplier;)Lcom/jsgalactic/axiom/graphql/GraphQl$Builder;
+  public com.jsgalactic.axiom.graphql.GraphQl$Builder graphQL(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Lcom/jsgalactic/axiom/graphql/GraphQl$Builder;
+  public com.jsgalactic.axiom.graphql.GraphQl$Builder options(com.jsgalactic.axiom.graphql.GraphQlOptions);
+    descriptor: (Lcom/jsgalactic/axiom/graphql/GraphQlOptions;)Lcom/jsgalactic/axiom/graphql/GraphQl$Builder;
+  public com.jsgalactic.axiom.graphql.GraphQl$Builder schema(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/graphql/GraphQl$Builder;
+}
+
+public final class com.jsgalactic.axiom.graphql.GraphQlOptions extends java.lang.Record {
+  public boolean getQueries();
+    descriptor: ()Z
+  public boolean introspection();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.graphql.GraphQlOptions(int, int, int, boolean, boolean);
+    descriptor: (IIIZZ)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public int maxBodyBytes();
+    descriptor: ()I
+  public int maxComplexity();
+    descriptor: ()I
+  public int maxDepth();
+    descriptor: ()I
+  public static final com.jsgalactic.axiom.graphql.GraphQlOptions DEFAULT;
+    descriptor: Lcom/jsgalactic/axiom/graphql/GraphQlOptions;
+}

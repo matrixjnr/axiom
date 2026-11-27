@@ -14,5 +14,6 @@ include("axiom-security", "axiom-security-jwt")
 include("axiom-metrics", "axiom-metrics-micrometer", "axiom-otel")
 include("axiom-openapi", "axiom-openapi-ui")
 include("axiom-grpc")
+include("axiom-graphql")
 include("examples:hello", "examples:readme", "examples:rest-api", "examples:browser-app", "examples:openapi",
     "benchmarks:http")

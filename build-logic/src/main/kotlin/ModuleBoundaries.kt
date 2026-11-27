@@ -28,7 +28,9 @@ object ModuleBoundaries {
         // Serves Swagger UI from the application; the UI files come from one WebJar, nothing else external.
         "axiom-openapi-ui" to setOf("axiom-core"),
         // Runs gRPC services on their own listener; grpc-java's transport stays inside this adapter.
-        "axiom-grpc" to setOf("axiom-core")
+        "axiom-grpc" to setOf("axiom-core"),
+        // Thin GraphQL HTTP adapter; graphql-java is confined to this module and core stays JDK-only.
+        "axiom-graphql" to setOf("axiom-core")
     )
 
     /** Modules that exist only to run tests and are never published. */

@@ -127,7 +127,7 @@ jacoco { toolVersion = libs.versions.jacoco.get() }
 val coverageModules = listOf("axiom-core", "axiom-server", "axiom-http", "axiom-json", "axiom-test",
     "axiom-starter", "axiom-validation", "axiom-validation-jakarta", "axiom-security", "axiom-security-jwt",
     "axiom-metrics", "axiom-metrics-micrometer", "axiom-otel", "axiom-openapi", "axiom-openapi-ui",
-    "axiom-grpc", "integration-tests")
+    "axiom-grpc", "axiom-graphql", "integration-tests")
 dependencies { coverageModules.forEach { jacocoAggregation(project(":$it")) } }
 reporting {
     reports {
