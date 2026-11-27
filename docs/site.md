@@ -14,7 +14,9 @@ follows. The theme gives the site a navigation tree, search (the index is built 
 served from the site), light and dark colour schemes that follow the reader's setting, callouts,
 copy buttons on code blocks and a layout for phones. All of the theme's scripts and styles are
 served from the site itself; the only third-party requests a page makes are the status badges at
-the top of the home page, which are images.
+the top of the home page, which are images. A small local stylesheet gives the theme Axiom's
+navy and teal palette, tighter typography, readable tables and code blocks, and a dark scheme that
+follows the reader's setting; it contains no images or remote rules.
 
 ## Preview locally
 
@@ -48,7 +50,7 @@ BUNDLE_GEMFILE=site/Gemfile bundle exec jekyll serve --source build/jekyll \
 
 | Part | What it does |
 | --- | --- |
-| `site/` | The Jekyll configuration (`_config.yml`), the three menu group pages, the footer and head includes, `Gemfile` and `Gemfile.lock`, `build.sh`. |
+| `site/` | The Jekyll configuration (`_config.yml`), the three menu group pages, the head and footer includes, the Axiom skin in `assets/css/axiom.css`, `Gemfile` and `Gemfile.lock`, `build.sh`. |
 | `jekyllSource` | Assembles `build/jekyll` from `site/`, `docs/*.md` and `README.md` (as `index.md`, with the home page's front matter). Rewrites links between documents for the flat page layout, links to other repository files (`../examples/rest-api`) to GitHub, and fails on a link, anchor or front matter problem. Writes `_config.generated.yml` with the version, the commit when `GITHUB_SHA` is set, and the logo, dark logo and favicon when `branding/` has them (the directory is copied to the site as `branding/`, which the README's logo needs). |
 | `aggregateJavadoc` | One Javadoc for the main sources of every published module, without the `internal` packages (`build/docs-api`). |
 | `site/build.sh` | Runs `jekyll build` on `build/jekyll` into `build/site` and copies the Javadoc to `build/site/api` afterwards, so Jekyll never scans it. The menu entry "API reference" links to it. |
@@ -100,7 +102,7 @@ the theme is the `just-the-docs` gem rather than a `remote_theme`:
 - `site/Gemfile.lock` pins every gem to an exact version and records the SHA-256 of each gem file
   from RubyGems (`CHECKSUMS`). `ruby/setup-ruby` installs with the lock frozen, so a gem whose
   content differs from the recorded hash fails the build. The theme is `just-the-docs` 0.12.0 at
-  an exact hash, and Ruby is `3.3.6`.
+  an exact hash, and Ruby is `3.3.13`, the patch available on current `ubuntu-latest` images.
 - `jekyll-build-pages` runs the fixed set of gems of the `github-pages` bundle, accepts only the
   themes that bundle allows, and loads any other theme with `jekyll-remote-theme`, which downloads
   it from GitHub while the site builds. Pinning that download to a commit leaves the content of

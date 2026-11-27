@@ -257,8 +257,8 @@ which also bounds collection sizes.
 ## Not covered yet
 
 - Service-loaded default validators. Instances are created explicitly.
-- OpenAPI or JSON Schema generation from rules or annotations.
-- Route type metadata: declaring request and response types on routes, which
-  would let tools and documentation read them.
-- Validation of path parameters, query parameters and headers, and
-  localized messages.
+- Validation of path parameters, query parameters and headers, and localized messages.
+
+Built-in rule constraints are exposed as data for the OpenAPI module to render as schema
+constraints ([OpenAPI](openapi.md)), and routes carry optional `RouteDoc` type metadata
+([routing](routing.md#documenting-routes)). Neither adds annotations or scanning.

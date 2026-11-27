@@ -15,22 +15,25 @@ and JVM descriptors against reviewed `api/*.api` baselines using the Java 21 too
 ## Toolchain and dependencies
 
 Axiom uses Gradle Kotlin DSL with Java 21 toolchains and `--release 21`, without
-preview features. The wrapper pins Gradle 9.5.1 and verifies its distribution
+preview features. The wrapper pins Gradle 9.8.2 and verifies its distribution
 checksum. Convention plugins share compilation, JUnit Platform, sources/Javadoc
 archives, and reproducible archive settings.
 
 The version catalog contains only dependencies in use. HTTP uses Netty 4.2 with
-its BOM to align implementation modules. JSON uses jackson-databind 2.22 with the
+its BOM to align implementation modules. JSON uses jackson-databind 2.23 with the
 Jackson BOM, plus the `jackson-datatype-jsr310` (java.time) and `jackson-datatype-jdk8`
 (`Optional`) modules aligned by the same BOM, as `implementation` dependencies of
 `axiom-json` only; no Jackson
 type appears in an Axiom API, and applications add `axiom-json` with `runtimeOnly`.
 The 2.x line was chosen because its package names and exceptions are stable across
 the ecosystem; moving to Jackson 3 would only change `axiom-json` internals.
-Telemetry dependencies will be selected when their implementations land.
-JPMS and stress suites are later work. The BOM constrains all eleven published libraries
-(core, server, http, json, test, the starter, validation, validation-jakarta, security,
-security-jwt and metrics).
+Telemetry adapters are opt-in modules: `axiom-otel` depends on the OpenTelemetry API
+and `axiom-metrics-micrometer` on Micrometer; neither pulls an SDK or exporter into
+the starter. JPMS is later work; stress and cross-OS suites are diagnostic CI jobs.
+The BOM constrains all 15 published libraries: axiom-core, axiom-server, axiom-http,
+axiom-json, axiom-test, axiom-validation, axiom-validation-jakarta, axiom-security,
+axiom-security-jwt, axiom-metrics, axiom-openapi, axiom-openapi-ui, axiom-otel,
+axiom-metrics-micrometer and the starter.
 
 Validation uses Hibernate Validator 9.1 (the Jakarta Validation 3.1 reference
 implementation, actively maintained, Java 17+, with container-element constraints and
@@ -142,28 +145,26 @@ The root project has two aggregates: `./gradlew unitTest` runs every module's `t
 `./gradlew integrationTest` runs every module's `integrationTest`. A single module runs as
 `./gradlew :axiom-http:test` or `./gradlew :axiom-http:integrationTest`.
 
-Test classes / tests per task (counted from the JUnit reports of `./gradlew clean check` after the
-mixed HTTP classes were split; the split moved 49 embedded cases from `integrationTest` to `test` and lost none: axiom-http
-ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 tests both times):
+Test classes / tests per task, counted from the JUnit reports of `./gradlew clean check`:
 
 | Module | `test` | `integrationTest` |
 | --- | --- | --- |
-| axiom-core | 15 / 224 | - |
-| axiom-server | 25 / 276 | - |
-| axiom-http | 5 / 80 | 12 / 144 |
-| axiom-json | 2 / 66 | - |
-| axiom-test | 12 / 46 | - |
+| axiom-core | 27 / 400 | - |
+| axiom-server | 39 / 399 | - |
+| axiom-http | 8 / 113 | 21 / 243 |
+| axiom-json | 2 / 74 | - |
+| axiom-test | 15 / 95 | - |
 | axiom-validation | 6 / 37 | - |
-| axiom-validation-jakarta | 3 / 16 | - |
-| axiom-security | 3 / 48 | - |
-| axiom-security-jwt | 2 / 27 | - |
-| axiom-metrics | 2 / 11 | - |
+| axiom-validation-jakarta | 3 / 19 | - |
+| axiom-security | 10 / 244 | - |
+| axiom-security-jwt | 6 / 70 | - |
+| axiom-metrics | 2 / 18 | - |
 | axiom-otel | 2 / 6 | - |
 | axiom-metrics-micrometer | 1 / 2 | - |
-| integration-tests | disabled | 5 / 66 |
-| examples/readme | 1 / 2 | 1 / 1 |
+| integration-tests | disabled | 13 / 89 |
+| examples/readme | 2 / 6 | 2 / 10 |
 | examples/rest-api | 1 / 3 | 1 / 1 |
-| total | 80 / 844 | 19 / 212 |
+| total | 124 / 1486 | 37 / 343 |
 
 `build-logic` has its own `test` task (2 / 20) that the root `check` runs through the included build.
 
@@ -192,7 +193,7 @@ same XML counters from the same execution data.
 - Aggregated: `./gradlew coverageReport` (root) runs the tests it needs, writes every
   per-module report, and writes `build/reports/jacoco/coverageReport/html/` and
   `build/reports/jacoco/coverageReport/coverageReport.xml`. The root applies Gradle's
-  `jacoco-report-aggregation` plugin over the ten library modules and `integration-tests`,
+  `jacoco-report-aggregation` plugin over all library modules and `integration-tests`,
   so a class is covered by any test of any of them (for example, codec classes exercised by
   `integration-tests`). The `axiom.integration-test` convention publishes the
   `integrationTest` execution data as a variant with the test suite name `integrationTest`;
@@ -201,7 +202,7 @@ same XML counters from the same execution data.
   examples and benchmarks are not library code and are not aggregated.
 - From supplied data: `./gradlew aggregateCoverage` (root) reads every
   `*/build/jacoco/*.exec` and writes `build/reports/jacoco/aggregateCoverage/html/` and
-  `build/reports/jacoco/aggregateCoverage/aggregateCoverage.xml` without running tests. CI
+  `build/reports/jacoco/aggregateCoverage/aggregateCoverage.xml` without running any tests. CI
   uses this task after downloading the execution data from its test jobs.
 
 Examples are deliberately not in the coverage report: they are usage samples, not shipped
@@ -310,18 +311,18 @@ enough to compile a Hello World or a JSON API and to run it. The jar itself is e
 apart from the manifest; sources and Javadoc jars are published empty as well.
 
 Facts from `./gradlew :axiom-starter:dependencies --configuration runtimeClasspath`
-at 0.1.0-SNAPSHOT (Netty 4.2.18.Final, Jackson 2.22.3):
+at 0.1.0-SNAPSHOT (Netty 4.2.20.Final, Jackson 2.23.0):
 
 - Compile classpath of a consumer: `axiom`, `axiom-core`.
 - Runtime classpath: 19 jars. 5 are Axiom (`axiom`, `axiom-core`, `axiom-http`,
   `axiom-server`, `axiom-json`), 9 are Netty (common, buffer, transport, resolver,
   codec-base, codec-compression, codec-http, handler, transport-native-unix-common)
   and 5 are Jackson (databind, core, annotations, datatype-jsr310, datatype-jdk8).
-- Axiom jar sizes in bytes: core 49,793; server 44,337; http 24,685; json 15,163;
-  starter 261 (total 134,239). Third-party jars total 6,135,959 bytes: Netty
-  3,574,454 and Jackson 2,561,505.
+  Exact jar bytes change with each dependency release and are recorded in the
+  checked-in verification metadata, not pinned in this guide.
 - No other libraries (logging, annotation, validation or test libraries) are on the
-  runtime classpath. The validation modules are deliberately not part of the starter.
+  runtime classpath. The validation, OpenAPI, security, metrics and telemetry modules
+  are deliberately not part of the starter.
 
 ## Publication
 

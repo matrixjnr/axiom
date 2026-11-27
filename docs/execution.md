@@ -50,8 +50,9 @@ entry, which unpredictability would not improve.
 
 The default budget is ten seconds. Configure `app.requestTimeout(Duration)` before
 startup; positive budgets up to one day are supported and configuration freezes
-with the routes. All listeners share this configuration. Route overrides are not
-implemented yet.
+with the routes. All listeners share this configuration. Per-route request-timeout
+overrides are not implemented yet; per-route admission and stream limits are
+([admission](admission.md)).
 
 For HTTP, the budget starts when validated request headers are adapted, before
 the body is received and before waiting behind earlier pipelined requests. It
@@ -79,13 +80,14 @@ reads, or the connection closes. See [HTTP listeners](http.md#resource-limits) f
 
 ## Capacity and cancellation
 
-Each listener defaults to 36 active tasks and no dispatcher waiting queue.
-Configure aggregate and route limits through `app.admissionPolicy(...)` before
-startup. Bounded queues create no execution threads and expire without invoking
-handlers. Excess capacity and queue-wait expiry produce 503; the execution
+An application defaults to 36 active tasks and no dispatcher waiting queue. The
+immutable `ExecutionBudget` is shared by every listener and test client through one
+dispatcher; configure it with `app.executionBudget(...)` or the `admissionPolicy(...)`
+view before startup. Bounded queues create no execution threads and expire without
+invoking handlers. Excess capacity and queue-wait expiry produce 503; the execution
 deadline continues while a request is queued and produces 504 if it expires first.
 See [admission and bounded queues](admission.md) for configuration, scheduling,
-listener scope and counters. Connection and pipeline bounds still apply.
+shared scope and counters. Connection and pipeline bounds still apply.
 Cancellation interrupts the owned virtual thread. **Capacity is released only
 when that thread exits the request action**, even if its outcome is already 504
 or cancelled. A handler that ignores interruption continues occupying capacity;
@@ -115,9 +117,9 @@ and [observability](observability.md).
 
 `app.handle(request)` still executes on the calling thread. It maps
 `AxiomException`s to problem responses (see [errors](errors.md)) and propagates
-other handler exceptions. `TestClient` instead runs each request through a private
-dispatcher (virtual thread, application admission policy and timeout), returns
-503/504 problem responses for admission and deadline failures, and still propagates
+other handler exceptions. `TestClient` instead runs each request through a session
+on the application's shared dispatcher (virtual thread, execution budget and timeout),
+returns 503/504 problem responses for admission and deadline failures, and still propagates
 other handler exceptions. Each direct invocation gets fresh metadata using
 the configured budget. The adapter overload `handle(request, execution)` accepts
 explicit metadata and rejects an already expired context with `TimeoutException`.
