@@ -209,6 +209,62 @@ not sent. The 30-second inactivity timeout does not interrupt the running handle
 but still closes the connection if a response write stalls, and each response must
 be written within the response bound (see [resource limits](#resource-limits)).
 
+## Conditional and range requests
+
+Conditional and range evaluation is opt-in and lives in `axiom-core`: the
+framework never invents validators, so the application attaches `ETag` and
+`Last-Modified` to the response it wants to be conditional. Register the
+middleware globally or on a route with `app.use(...)`:
+
+```java
+app.use(HttpPreconditions.conditional());
+app.use(HttpPreconditions.preconditionRequired()); // optional: answer 428 for unsafe methods
+app.get("/report", ctx -> ctx.encode("application/json", report)
+        .withHeader("ETag", "\"report-v3\"")
+        .withHeader("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT"));
+```
+
+`HttpPreconditions.conditional()` calls the rest of the chain and evaluates the
+request against the response. Precedence follows RFC 9110 section 13.2.2, and
+the first failing condition determines the answer:
+
+| Field | Rule | Answer |
+| --- | --- | --- |
+| `If-Match` | strong comparison; `*` matches any current representation | 412 |
+| `If-Unmodified-Since` | evaluated only when `If-Match` is absent; ignored when its date is invalid or the response has no `Last-Modified` | 412 when modified since the date |
+| `If-None-Match` | weak comparison, including `*`; for GET and HEAD | 304 on a match; 412 for other methods |
+| `If-Modified-Since` | GET or HEAD only, ignored whenever `If-None-Match` is present or its date is unusable | 304 when not modified since the date |
+| `If-Range` | strong ETag or exact `Last-Modified`; only with `Range` on GET | ignores `Range` when the validator does not match |
+
+A `Range: bytes=...` field is parsed strictly: only the `bytes` unit, ASCII
+digits, optional whitespace around commas, at most eight specifications, and
+both prefix (`2-5`, `7-`) and suffix (`-4`) forms, whose end is clamped to the
+representation. Numbers too large for a `long` become unsatisfiable instead of
+overflowing. A single satisfiable range produces **206** with
+`Content-Range: bytes first-last/length`; several produce a
+`multipart/byteranges` body with the fixed boundary
+`HttpPreconditions.BOUNDARY` and a `Content-Range` on each part. A malformed,
+over-large or unsatisfiable range produces **416** with
+`Content-Range: bytes */length`. Both 206 and 416 carry `Accept-Ranges: bytes`.
+The 304, 412 and 416 responses are bodiless and keep only the original cache
+validators (`Content-Location`, `ETag`, `Expires`, `Vary`, `Cache-Control`,
+`Last-Modified`).
+
+Evaluation applies to buffered responses after encoding: byte arrays, and
+strings read as UTF-8 bytes. **Streamed responses are deliberately left
+unchanged.** A stream has no total length, so neither a byte range nor a 416
+with `bytes */length` can be defined for it; an application that needs ranges
+over a large body must slice the data itself before streaming it. A multipart
+body also counts toward the [1 MiB buffered response limit](#resource-limits),
+so a request for many overlapping ranges can exceed it; cap the ranges or slice
+the data in the application for large bodies.
+
+`HttpPreconditions.preconditionRequired()` answers **428** with code
+`precondition_required` when an unsafe method (anything other than GET, HEAD,
+OPTIONS or TRACE) carries none of `If-Match`, `If-None-Match` or
+`If-Unmodified-Since`. Registering either middleware has no effect on requests
+that carry no conditional fields, and both are immutable and thread-safe.
+
 ## Resource limits
 
 Each listener owns one acceptor thread, one I/O thread per available processor
