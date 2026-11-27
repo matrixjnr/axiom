@@ -19,8 +19,8 @@ asm = "9.11.1"
 # Adapter dependencies are opt-in: only axiom-otel and axiom-metrics-micrometer resolve them.
 opentelemetry = "1.68.0"
 micrometer = "1.18.0"
-# gRPC adapter artifacts are opt-in: only axiom-grpc resolves them. Netty is shaded into grpc-netty-shaded,
-# so it cannot clash with the unshaded Netty of axiom-http.
+# gRPC adapter artifacts are opt-in: only axiom-grpc resolves them. Netty is shaded into
+# grpc-netty-shaded, so it cannot clash with the unshaded Netty of axiom-http.
 grpc = "1.86.0"
 # Aligned with grpc-protobuf 1.86.0.
 protobuf = "3.25.9"
