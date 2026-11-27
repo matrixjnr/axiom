@@ -26,6 +26,7 @@ class ListenerOptionsTest {
         assertThat(defaults.maxRequestLine()).isEqualTo(4096);
         assertThat(defaults.maxHeaderBytes()).isEqualTo(8192);
         assertThat(defaults.ioThreads()).isEqualTo(Math.max(2, Runtime.getRuntime().availableProcessors()));
+        assertThat(defaults.http2Enabled()).isFalse();
         assertThat(ListenerOptions.builder().build().toString()).isEqualTo(defaults.toString());
     }
 
@@ -35,7 +36,8 @@ class ListenerOptionsTest {
                 .responseTimeout(Duration.ofSeconds(4)).lingerTimeout(Duration.ofSeconds(5))
                 .lingerQuietTimeout(Duration.ofSeconds(6)).shutdownLingerTimeout(Duration.ofSeconds(7))
                 .maxDiscardedInput(8).maxConnections(9).maxLingeringConnections(10).maxPipelinedRequests(11)
-                .maxInFlightBodyBytes(12).maxRequestLine(512).maxHeaderBytes(1024).ioThreads(3).transport(TransportKind.EPOLL).build();
+                .maxInFlightBodyBytes(12).maxRequestLine(512).maxHeaderBytes(1024).ioThreads(3)
+                .transport(TransportKind.EPOLL).http2(true).build();
         assertThat(options.shutdownGrace()).isEqualTo(Duration.ofSeconds(1));
         assertThat(options.idleTimeout()).isEqualTo(Duration.ofSeconds(2));
         assertThat(options.headTimeout()).isEqualTo(Duration.ofSeconds(3));
@@ -52,6 +54,7 @@ class ListenerOptionsTest {
         assertThat(options.maxHeaderBytes()).isEqualTo(1024);
         assertThat(options.ioThreads()).isEqualTo(3);
         assertThat(options.transport()).isEqualTo(TransportKind.EPOLL);
+        assertThat(options.http2Enabled()).isTrue();
         assertThat(options.toBuilder().build().toString()).isEqualTo(options.toString());
         assertThat(options.toBuilder().maxConnections(1).build().maxConnections()).isEqualTo(1);
         assertThat(options.maxConnections()).isEqualTo(9);

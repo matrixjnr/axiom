@@ -6,6 +6,7 @@ plugins {
 dependencies {
     implementation(platform(libs.netty.bom))
     implementation(libs.netty.http)
+    implementation(libs.netty.http2)
     implementation(libs.netty.handler)
     // Optional native transports (ListenerOptions.transport): only their classes are needed to
     // compile. Applications opt in by adding netty-transport-native-epoll or -kqueue (with the

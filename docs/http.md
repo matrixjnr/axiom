@@ -348,10 +348,48 @@ The default execution deadline is ten seconds, configurable before startup throu
 that is predictable within one process and must not be used as a secret or credential.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
-A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2 and WebSocket are not
-implemented; [conditional and range requests](#conditional-and-range-requests), streaming request
-bodies and [multipart parsing](bodies.md#streaming-request-bodies) are available. Observability
-adapters ship as opt-in modules ([observability](observability.md)).
+A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2 is
+[opt-in](#http2); WebSocket is not implemented. [Conditional and range requests](#conditional-and-range-requests),
+streaming request bodies and [multipart parsing](bodies.md#streaming-request-bodies) are available.
+Observability adapters ship as opt-in modules ([observability](observability.md)).
+
+## HTTP/2
+
+`ListenerOptions.builder().http2(true)` opts one listener into HTTP/2. The default is `false`, so
+a listener without it is byte-for-byte the HTTP/1.x listener described above. This is a transport
+choice only: no application or core API changes, and no third-party dependency enters
+`axiom-core`. Both wire protocols call the same dispatcher, handlers, error mapping, codecs and
+response serialization, with the same timeouts, admission, body budgets and shutdown.
+
+With [TLS](tls.md), ALPN offers `h2` followed by `http/1.1`. A client that negotiates `h2` gets
+HTTP/2; a client that negotiates `http/1.1` or offers no ALPN gets HTTP/1.1 on the same port. TLS
+1.2 remains the minimum (HTTP/2 requires at least 1.2), and cipher policy, the handshake timeout
+and certificate reload are unchanged. On a cleartext listener the first bytes choose the protocol:
+the HTTP/2 client preface selects h2c prior knowledge, and anything else selects HTTP/1.x. An
+HTTP/1.1 `Upgrade: h2c` request is **not** supported and is answered 501 as before.
+
+```java
+var options = ListenerOptions.builder().http2(true).build();
+var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
+```
+
+HTTP/2 pseudo-headers become ordinary request headers; `Request` still has no protocol version.
+Request trailers on a buffered body are merged into `ctx.request().headers()` before the handler
+runs; a streaming handler starts before the trailers arrive and does not see them. A response may
+send trailers by naming them in a `Trailer` header and setting each as an ordinary header: the
+listener moves the named fields into the HTTP/2 trailing HEADERS frame and omits them from the
+initial headers. Hop-by-hop and `Connection`-nominated headers are removed as on HTTP/1.1, and
+every response still carries `X-Request-ID` and `Date`.
+
+`maxPipelinedRequests` is advertised as `SETTINGS_MAX_CONCURRENT_STREAMS` and `maxHeaderBytes` as
+`SETTINGS_MAX_HEADER_LIST_SIZE`, so concurrent streams and header sections obey the same per-listener
+limits. A streamed response writes DATA frames in bounded pieces and pauses while the stream's
+flow-control window is closed; buffered bytes still count against `maxInFlightBodyBytes`. Cancellation,
+deadlines and the stream admission lane behave as on HTTP/1.1. Closing a listener sends GOAWAY, lets
+running streams finish, and closes the connection when the last one ends, within `shutdownGrace`.
+
+`TestClient` stays in memory and HTTP/1-shaped; it does not simulate h2c or ALPN. Use a real
+listener for wire-level HTTP/2 tests.
 
 ## Listener options
 
@@ -383,6 +421,7 @@ var server = app.listen(new InetSocketAddress("0.0.0.0", 8080), options);
 | `shutdownLingerTimeout` | 500 ms | 1 ms to 1 day | Total linger once the listener is closing (the smaller of this and `lingerTimeout` applies) |
 | `handshakeTimeout` | 10 s | 1 ms to 1 day | Time a new connection may take to finish its TLS handshake; applies only with `tls` |
 | `tls` | none (plain HTTP) | a `TlsOptions` | Serves HTTPS with the given certificate, protocols and client-authentication settings; validated at startup, see [TLS](tls.md) |
+| `http2` | `false` | `true` or `false` | Accepts HTTP/2 in addition to HTTP/1.x: `h2` through ALPN with TLS, h2c prior knowledge in cleartext; see [HTTP/2](#http2) |
 | `maxDiscardedInput` | 16 MiB | 0 to 1 GiB | Bytes discarded unread after an error or last response before the connection closes |
 | `maxConnections` | 128 | 1 to 1,000,000 | Open connections per listener |
 | `maxLingeringConnections` | 32 | 0 to 1,000,000 | Lingering connections that stop counting against `maxConnections`; zero keeps them on their regular slots |

@@ -12,6 +12,8 @@ import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.MultiThreadIoEventLoopGroup;
@@ -20,12 +22,20 @@ import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpResponseEncoder;
+import io.netty.handler.codec.http2.Http2FrameCodecBuilder;
+import io.netty.handler.codec.http2.Http2MultiplexHandler;
+import io.netty.handler.codec.http2.Http2Settings;
+import io.netty.handler.codec.http2.Http2StreamFrameToHttpObjectCodec;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 import io.netty.handler.timeout.IdleStateHandler;
+import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ScheduledFuture;
@@ -168,7 +178,7 @@ final class NettyServer implements Server {
         var material = tls;
         if (material != null) {
             try {
-                var ssl = new SslHandler(material.newEngine());
+                var ssl = new SslHandler(material.newEngine(settings.options().http2Enabled()));
                 ssl.setHandshakeTimeoutMillis(settings.options().handshakeTimeout().toMillis());
                 channel.pipeline().addLast(ssl, new TlsHandshakeHandler(tlsMetrics));
             } catch (RuntimeException failure) {
@@ -177,11 +187,89 @@ final class NettyServer implements Server {
                 return;
             }
         }
-        channel.pipeline().addLast(
-                new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS),
-                new RequestDecoder(decoderConfig), new HttpResponseEncoder(),
+        channel.pipeline().addLast(new IdleStateHandler(0, 0, settings.idleTimeout().toNanos(), TimeUnit.NANOSECONDS));
+        if (material != null && settings.options().http2Enabled()) {
+            channel.pipeline().addLast(new Http2AlpnHandler(application, slot));
+        } else if (material == null && settings.options().http2Enabled()) {
+            channel.pipeline().addLast(new Http2PrefaceDetector(
+                    () -> configureHttp1(channel, application, slot), () -> configureHttp2(channel, application, slot)));
+        } else {
+            configureHttp1(channel, application, slot);
+        }
+    }
+
+    /** Installs the HTTP/1.x codec and the same connection handler both protocols use. */
+    private void configureHttp1(Channel channel, Application application, ConnectionSlots.Slot slot) {
+        channel.pipeline().addLast(new RequestDecoder(decoderConfig), new HttpResponseEncoder(),
                 new HttpConnection(application, handlers, session, settings, slot, closing::get, bodyBudget,
                         streamMetrics, listenerMetrics));
+    }
+
+    /**
+     * Installs the HTTP/2 connection codec, one child channel per stream, and a handler that
+     * converts frames to the same HTTP objects the HTTP/1 connection handler consumes. Each stream
+     * shares the listener's slot, body budget, metrics, session and dispatcher with its siblings.
+     */
+    private void configureHttp2(Channel channel, Application application, ConnectionSlots.Slot slot) {
+        var options = settings.options();
+        var streams = new Http2Streams(channel);
+        var initial = new Http2Settings().maxConcurrentStreams(options.maxPipelinedRequests())
+                .maxHeaderListSize(options.maxHeaderBytes());
+        channel.pipeline().addLast(Http2FrameCodecBuilder.forServer().initialSettings(initial).build(),
+                new Http2MultiplexHandler(new ChannelInitializer<Channel>() {
+                    @Override protected void initChannel(Channel stream) {
+                        stream.config().setWriteBufferWaterMark(WATER_MARK);
+                        channels.add(stream);
+                        streams.opened(stream);
+                        stream.pipeline().addLast(new Http2StreamFrameToHttpObjectCodec(true), new Http2StreamBridge(),
+                                new HttpConnection(application, handlers, session, settings, slot, closing::get,
+                                        bodyBudget, streamMetrics, listenerMetrics, true));
+                    }
+                }), new Http2GracefulCloseHandler(streams));
+    }
+
+    /**
+     * Chooses the wire protocol a TLS client selected with ALPN, defaulting to HTTP/1.1. Application
+     * data is held until the handshake completes, so neither codec sees bytes before its pipeline
+     * is in place. The negotiated name comes from the JDK engine, which Netty's {@code SslHandler}
+     * does not expose through its own ALPN accessor when given a raw engine.
+     */
+    private final class Http2AlpnHandler extends ChannelInboundHandlerAdapter {
+        private final Application application;
+        private final ConnectionSlots.Slot slot;
+        private final List<Object> buffered = new ArrayList<>();
+        private boolean configured;
+
+        Http2AlpnHandler(Application application, ConnectionSlots.Slot slot) {
+            this.application = application;
+            this.slot = slot;
+        }
+
+        @Override public void channelRead(ChannelHandlerContext ctx, Object message) {
+            if (configured) { ctx.fireChannelRead(message); }
+            else { buffered.add(message); }
+        }
+
+        @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
+            if (event instanceof SslHandshakeCompletionEvent handshake && handshake.isSuccess() && !configured) {
+                configured = true;
+                var ssl = ctx.pipeline().get(SslHandler.class);
+                var protocol = ssl == null ? null : ssl.engine().getApplicationProtocol();
+                if (TlsMaterial.ALPN_HTTP2.equals(protocol)) { configureHttp2(ctx.channel(), application, slot); }
+                else { configureHttp1(ctx.channel(), application, slot); }
+                ctx.pipeline().remove(this);
+                for (var message : buffered) { ctx.fireChannelRead(message); }
+                buffered.clear();
+                ctx.fireChannelReadComplete();
+            }
+            super.userEventTriggered(ctx, event);
+        }
+
+        @Override public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+            buffered.forEach(ReferenceCountUtil::release);
+            buffered.clear();
+            super.channelInactive(ctx);
+        }
     }
 
     /** Request line and header bounds (414 and 431 beyond them) and strict framing rules. */
@@ -276,7 +364,10 @@ final class NettyServer implements Server {
         for (var channel : channels) {
             channel.eventLoop().execute(() -> {
                 var connection = channel.pipeline().get(HttpConnection.class);
-                if (connection == null) { channel.close(); } else { connection.drain(); }
+                var h2 = channel.pipeline().get(Http2GracefulCloseHandler.class);
+                if (h2 != null) { h2.goAway(); }
+                else if (connection == null) { channel.close(); }
+                else { connection.drain(); }
             });
         }
         listener.close().addListener(ignored -> {
