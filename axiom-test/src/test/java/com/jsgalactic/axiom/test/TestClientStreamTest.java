@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jsgalactic.axiom.Axiom;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.ServerSentEvent;
@@ -27,8 +28,9 @@ import org.junit.jupiter.api.Test;
 
 /** Reading streamed responses through the test client: ordering, backpressure and failure, without sleeping. */
 class TestClientStreamTest {
-    /** Tells a test, without polling, that a request gave its admission slot back. */
+    /** Tells a test, without polling, that a stream gave its slot back. */
     private static final class Releases implements Metrics {
+        private static final String STREAM_ACTIVE = "axiom.http.streams.active";
         final Semaphore released = new Semaphore(0);
         @Override public Counter counter(String name, String... tags) {
             return new Counter() {
@@ -37,11 +39,11 @@ class TestClientStreamTest {
             };
         }
         @Override public Gauge gauge(String name, String... tags) {
-            return delta -> { if (name.equals("axiom.admission.active") && delta < 0) { released.release(); } };
+            return delta -> { if (name.equals(STREAM_ACTIVE) && delta < 0) { released.release(); } };
         }
         @Override public Timer timer(String name, String... tags) { return nanos -> { }; }
         void awaitRelease() throws InterruptedException {
-            assertThat(released.tryAcquire(30, TimeUnit.SECONDS)).as("admission slot released").isTrue();
+            assertThat(released.tryAcquire(30, TimeUnit.SECONDS)).as("stream slot released").isTrue();
         }
     }
 
@@ -109,10 +111,11 @@ class TestClientStreamTest {
         }
     }
 
-    @Test void closingTheResponsePlaysADisconnectAndFreesTheSlot() throws Exception {
+    @Test void closingTheResponsePlaysADisconnectAndFreesTheStreamSlot() throws Exception {
         var reason = new CompletableFuture<Reason>();
         var releases = new Releases();
-        var app = Axiom.create().metrics(releases).admissionPolicy(AdmissionPolicy.reject(1));
+        var app = Axiom.create().metrics(releases).admissionPolicy(AdmissionPolicy.reject(1))
+                .streamPolicy(StreamPolicy.reject(1));
         app.get("/endless", ctx -> Response.stream(200, "text/plain", out -> {
             try { for (;;) { out.write("tick"); } }
             catch (StreamAbortedException aborted) { reason.complete(aborted.reason()); throw aborted; }
@@ -121,12 +124,17 @@ class TestClientStreamTest {
         try (var client = TestClient.start(app)) {
             var stream = client.stream(get("/endless"));
             assertThat(stream.nextText()).contains("tick");
-            // The stream holds the only slot while it is open.
-            assertThat(client.get("/other").status()).isEqualTo(503);
+            // The stream holds the only stream slot, not the only request slot.
+            assertThat(client.get("/other").body()).isEqualTo("other");
+            try (var refused = client.stream(get("/endless"))) {
+                assertThat(refused.status()).isEqualTo(503);
+            }
             stream.close();
             assertThat(reason.get(30, TimeUnit.SECONDS)).isEqualTo(Reason.CLIENT_DISCONNECTED);
             releases.awaitRelease();
-            assertThat(client.get("/other").body()).isEqualTo("other");
+            try (var admitted = client.stream(get("/endless"))) {
+                assertThat(admitted.nextText()).contains("tick");
+            }
             assertThat(stream.next()).isEmpty();
             stream.close(); // Idempotent.
         }
@@ -301,6 +309,86 @@ class TestClientStreamTest {
             }
             release.countDown();
             assertThat(first.get(30, TimeUnit.SECONDS).status()).isEqualTo(200);
+        }
+    }
+
+    @Test void aFullStreamLaneIsAnOrdinary503BeforeTheBodyRuns() throws Exception {
+        var bodies = new AtomicInteger();
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var app = Axiom.create().streamPolicy(StreamPolicy.reject(1));
+        app.get("/held", ctx -> Response.stream(200, "text/plain", out -> {
+            bodies.incrementAndGet();
+            out.write("first");
+            entered.countDown();
+            release.await();
+            out.write("last");
+        }));
+        try (var client = TestClient.start(app)) {
+            var stream = client.stream(get("/held"));
+            assertThat(stream.nextText()).contains("first");
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+            try (var refused = client.stream(get("/held"))) {
+                assertThat(refused.status()).isEqualTo(503);
+                assertThat(refused.readAllText()).contains("service_unavailable");
+            }
+            assertThat(bodies).hasValue(1);
+            release.countDown();
+            assertThat(stream.nextText()).contains("last");
+            stream.completion().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void aRouteStreamBoundDoesNotHoldUpAnotherRoute() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var app = Axiom.create();
+        var events = app.get("/events", ctx -> Response.stream(200, "text/plain", out -> {
+            out.write("first");
+            entered.countDown();
+            release.await();
+            out.write("last");
+        }));
+        app.streamPolicy(events, StreamPolicy.reject(1));
+        app.get("/other", ctx -> Response.stream(200, "text/plain", out -> out.write("other")));
+        try (var client = TestClient.start(app)) {
+            var stream = client.stream(get("/events"));
+            assertThat(stream.nextText()).contains("first");
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+            try (var refused = client.stream(get("/events"))) {
+                assertThat(refused.status()).isEqualTo(503);
+            }
+            try (var other = client.stream(get("/other"))) {
+                assertThat(other.readAllText()).isEqualTo("other");
+                other.completion().get(30, TimeUnit.SECONDS);
+            }
+            release.countDown();
+            assertThat(stream.nextText()).contains("last");
+            stream.completion().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void beginningShutdownReleasesTheStreamSlot() throws Exception {
+        var releases = new Releases();
+        var app = Axiom.create().metrics(releases).streamPolicy(StreamPolicy.reject(1));
+        app.get("/events", ctx -> Response.sse(events -> {
+            var closing = new CountDownLatch(1);
+            events.onShutdown(closing::countDown);
+            events.send("first");
+            closing.await();
+            events.send("bye");
+        }));
+        try (var client = TestClient.start(app)) {
+            var stream = client.stream(get("/events"));
+            assertThat(stream.nextText()).contains("data: first\n\n");
+            stream.beginShutdown();
+            assertThat(stream.nextText()).contains("data: bye\n\n");
+            assertThat(stream.next()).isEmpty();
+            stream.completion().get(30, TimeUnit.SECONDS);
+            releases.awaitRelease();
+            try (var admitted = client.stream(get("/events"))) {
+                assertThat(admitted.nextText()).contains("data: first\n\n");
+            }
         }
     }
 

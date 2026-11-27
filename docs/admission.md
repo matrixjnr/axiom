@@ -7,20 +7,26 @@ nav_order: 1
 # Admission and bounded queues
 
 Admission reserves execution capacity before creating a virtual thread. Each
-listener has aggregate active and waiting limits. Requests to a registered route
-also share limits by method and template: `/users/a` and `/users/b` both count
-against `GET /users/:id`. Parameter values cannot create new admission buckets.
+listener has aggregate active and waiting limits for requests, and a separate
+aggregate limit for streams. Requests to a registered route also share limits
+by method and template: `/users/a` and `/users/b` both count against
+`GET /users/:id`. Parameter values cannot create new admission buckets.
 
 ## Configuration
 
 ```java
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.execution.StreamPolicy;
+import com.jsgalactic.axiom.http.Response;
 import java.time.Duration;
 
 var app = Axiom.create();
 app.admissionPolicy(new AdmissionPolicy(32, 64, Duration.ofMillis(200)));
 var report = app.get("/reports/:id", ctx -> buildReport(ctx.path("id")));
 app.admissionPolicy(report, new AdmissionPolicy(2, 8, Duration.ofMillis(100)));
+var events = app.get("/events", ctx -> Response.sse(sink -> sink.send("ready")));
+app.streamPolicy(StreamPolicy.reject(8));
+app.streamPolicy(events, StreamPolicy.reject(2));
 app.listen(8080);
 ```
 
@@ -46,6 +52,26 @@ requests the application answers automatically (see [methods](routing.md#methods
 Those requests run no handler, but they share one default bucket under the
 application's default policy and still consume aggregate capacity when dispatched,
 so a saturated listener answers them 503 like any other request.
+
+## Stream capacity
+
+Streams have their own lane. `StreamPolicy(maxActive)` and `StreamPolicy.reject(n)`
+set one positive bound on streams running at the same time, configured before
+startup like the request policy. The default is `reject(36)`, also the default for
+each route; a route override replaces that route's bound while the aggregate bound
+still applies. There is no stream queue: when either bound is full, the response is
+an ordinary **503** with no stream head at all. Middleware and error handling have
+finished before the transfer, so the refusal cannot be mistaken for a stream that
+failed partway through.
+
+When a response becomes a stream, the request's active slot is transferred into a
+stream slot under the dispatcher's lock. The request slot is immediately available
+to another request, so idle subscribers cannot starve ordinary traffic. The stream
+keeps the request's deadline and cancellation: its slot is returned when the body
+ends, is cancelled, or is cut by shutdown. A body that ignores interruption keeps
+its slot until it exits, as an ordinary handler does. Each stream still has one
+virtual thread; see [many subscribers](streaming.md#many-subscribers) for keeping
+the number of long-lived bodies small.
 
 ## Queue behavior
 
@@ -98,9 +124,10 @@ requests have one terminal outcome; late handler results are discarded.
 
 Closing a listener stops admission at once: new requests are rejected and waiting
 requests are answered 503 and their connections closed; the handler is never
-invoked. Shutdown never promotes waiting work. Active requests get the listener's
-drain grace period (see [HTTP listeners](http.md)), after which they are cancelled.
-Listener termination still waits for active code to exit. See
+invoked. Shutdown never promotes waiting work. Active requests, including streams,
+get the listener's drain grace period (see [HTTP listeners](http.md)), after which
+they are cancelled. Listener termination still waits for active code to exit, and
+the stream slot is returned when the body does. See
 [execution and deadlines](execution.md) for interruption.
 
 ## Observation
@@ -112,10 +139,13 @@ Listener termination still waits for active code to exit. See
 | `active` | Reserved or running tasks, including cancelled code still executing |
 | `queued` | Requests waiting for execution capacity |
 | `accepted` | Total successful submissions, including requests initially queued |
-| `rejected` | Total immediate rejections due to capacity, dispatcher closure, or executor/scheduler refusal at submission. A conflicting endpoint policy is a caller error and is not counted |
+| `rejected` | Total immediate rejections due to request capacity, dispatcher closure, executor/scheduler refusal at submission, or a full stream lane. A conflicting endpoint policy is a caller error and is not counted |
 | `queueTimeouts` | Queue-wait expirations, excluding execution deadline expiry |
 
-Counters are scoped to one listener and remain readable after shutdown. Snapshots
+The metrics reason tag `stream_capacity` identifies a stream refused because its
+aggregate or route bound was full. That refusal is counted as a 503 request, while
+`rejected` counts it separately from refusals at submission. Counters are scoped to
+one listener and remain readable after shutdown. Snapshots
 are a polling surface for diagnostics and future metrics adapters. No observer
 callbacks run under admission locks or on transport threads. Per-route metrics,
 adaptive limits, CPU execution classes and distributed budgets remain future work.

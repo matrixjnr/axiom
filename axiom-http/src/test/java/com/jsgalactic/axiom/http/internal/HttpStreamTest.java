@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jsgalactic.axiom.context.Context;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
+import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.ServerSentEvent;
 import com.jsgalactic.axiom.http.StreamAbortedException;
@@ -353,11 +354,14 @@ class HttpStreamTest {
         }
     }
 
-    @Test void aStreamHoldsItsAdmissionSlotUntilItEnds() throws Exception {
+    @Test void anOpenStreamLeavesRequestCapacityFreeAndReturnsItsStreamSlot() throws Exception {
         var started = new CountDownLatch(1);
         var release = new CountDownLatch(1);
+        var probe = new Probe();
         try (var fixture = new Fixture()) {
+            fixture.app.metrics(probe);
             fixture.app.admissionPolicy(AdmissionPolicy.reject(1));
+            fixture.app.streamPolicy(StreamPolicy.reject(1));
             fixture.app.get("/held", ctx -> Response.stream(200, "text/plain", out -> {
                 out.write("first");
                 started.countDown();
@@ -370,13 +374,82 @@ class HttpStreamTest {
                 held.write("GET /held HTTP/1.1\r\nHost: a\r\n\r\n");
                 held.head();
                 assertThat(text(held.chunk())).isEqualTo("first");
-                started.await();
+                assertThat(started.await(30, TimeUnit.SECONDS)).isTrue();
+                probe.await(v -> v == 1, STREAM_ACTIVE, "method", "GET", "route", "/held");
+                assertThat(probe.value(ACTIVE)).isZero();
+                // The only request slot is free while the stream holds the only stream slot.
                 try (var other = new Wire(server)) {
-                    assertThat(other.get("/other").status()).isEqualTo(503);
+                    assertThat(other.get("/other").text()).isEqualTo("other");
                 }
                 release.countDown();
                 assertThat(text(held.chunkedBody())).isEqualTo("last");
-                assertThat(held.get("/other").text()).isEqualTo("other");
+                probe.await(v -> v == 0, STREAM_ACTIVE, "method", "GET", "route", "/held");
+            }
+        }
+    }
+
+    @Test void aFullStreamLaneAnswers503BeforeWritingAnyStreamHead() throws Exception {
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            fixture.app.streamPolicy(StreamPolicy.reject(1));
+            fixture.app.get("/held", ctx -> Response.stream(200, "text/plain", out -> {
+                out.write("first");
+                started.countDown();
+                release.await();
+                out.write("last");
+            }));
+            var server = fixture.listen();
+            try (var held = new Wire(server)) {
+                held.write("GET /held HTTP/1.1\r\nHost: a\r\n\r\n");
+                held.head();
+                assertThat(text(held.chunk())).isEqualTo("first");
+                assertThat(started.await(30, TimeUnit.SECONDS)).isTrue();
+                try (var refused = new Wire(server)) {
+                    var answer = refused.get("/held");
+                    assertThat(answer.status()).isEqualTo(503);
+                    assertThat(answer.headers()).doesNotContainKey("Transfer-Encoding");
+                    assertThat(answer.text()).contains("service_unavailable");
+                }
+                release.countDown();
+                assertThat(text(held.chunkedBody())).isEqualTo("last");
+                try (var next = new Wire(server)) {
+                    next.write("GET /held HTTP/1.1\r\nHost: a\r\n\r\n");
+                    next.head();
+                    assertThat(text(next.chunkedBody())).isEqualTo("firstlast");
+                }
+            }
+        }
+    }
+
+    @Test void aRouteStreamBoundDoesNotHoldUpAnotherRoute() throws Exception {
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var fixture = new Fixture()) {
+            var events = fixture.app.get("/events", ctx -> Response.stream(200, "text/plain", out -> {
+                out.write("first");
+                started.countDown();
+                release.await();
+                out.write("last");
+            }));
+            fixture.app.streamPolicy(events, StreamPolicy.reject(1));
+            fixture.app.get("/other", ctx -> Response.stream(200, "text/plain", out -> out.write("other")));
+            var server = fixture.listen();
+            try (var held = new Wire(server)) {
+                held.write("GET /events HTTP/1.1\r\nHost: a\r\n\r\n");
+                held.head();
+                assertThat(text(held.chunk())).isEqualTo("first");
+                assertThat(started.await(30, TimeUnit.SECONDS)).isTrue();
+                try (var refused = new Wire(server)) {
+                    assertThat(refused.get("/events").status()).isEqualTo(503);
+                }
+                try (var other = new Wire(server)) {
+                    other.write("GET /other HTTP/1.1\r\nHost: a\r\n\r\n");
+                    other.head();
+                    assertThat(text(other.chunkedBody())).isEqualTo("other");
+                }
+                release.countDown();
+                assertThat(text(held.chunkedBody())).isEqualTo("last");
             }
         }
     }

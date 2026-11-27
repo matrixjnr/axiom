@@ -30,7 +30,8 @@ final class DispatchMetrics {
 
     /** Why a request was refused or expired by admission. */
     enum Reason {
-        CAPACITY("capacity"), SHUTDOWN("shutdown"), EXECUTOR("executor"), QUEUE_TIMEOUT("queue_timeout");
+        CAPACITY("capacity"), SHUTDOWN("shutdown"), EXECUTOR("executor"), QUEUE_TIMEOUT("queue_timeout"),
+        STREAM_CAPACITY("stream_capacity");
         private final String tag;
         Reason(String tag) { this.tag = tag; }
     }
