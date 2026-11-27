@@ -6,6 +6,7 @@ import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
+import com.jsgalactic.axiom.server.internal.ExecutionAccess;
 import com.jsgalactic.axiom.server.internal.Problems;
 import com.jsgalactic.axiom.server.internal.ResponseSerialization;
 import com.jsgalactic.axiom.server.internal.StreamRun;
@@ -44,13 +45,15 @@ import java.util.concurrent.RejectedExecutionException;
  * the test's runtime classpath provides. Request targets may carry a query and are split and
  * validated by {@link Request#fromTarget(String, String)}, as the listener does; a target the
  * listener would answer with 400 throws {@link IllegalArgumentException} instead. Transport rules such as 414, 431, Expect handling,
- * pipelining and keep-alive are not modeled. Limits apply per client, as they do per listener.
+ * pipelining and keep-alive are not modeled. Admission draws from the application's budget, which
+ * is shared with every listener and other test client of that application.
  */
 public final class TestClient implements AutoCloseable {
     private static final Object UNMATCHED = new Object();
     private final Application application;
     private static final System.Logger LOG = System.getLogger(TestClient.class.getName());
     private final RequestDispatcher dispatcher;
+    private final RequestDispatcher.Session session;
     private final boolean mapFailures;
     private final StreamMetrics streamMetrics;
     private final StreamBuffering buffering;
@@ -59,8 +62,8 @@ public final class TestClient implements AutoCloseable {
         this.mapFailures = mapFailures;
         this.buffering = Objects.requireNonNull(buffering, "buffering");
         this.application = Objects.requireNonNull(application, "application").start();
-        this.dispatcher = new RequestDispatcher(application.admissionPolicy(), application.streamPolicy(),
-                application.metrics());
+        this.dispatcher = ExecutionAccess.of(application).execution();
+        this.session = dispatcher.openSession();
         this.streamMetrics = new StreamMetrics(application.metrics());
     }
 
@@ -238,7 +241,7 @@ public final class TestClient implements AutoCloseable {
         var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
         RequestDispatcher.Task<Response> task;
         try {
-            task = dispatcher.submit(key, policy, context, () -> {
+            task = dispatcher.submit(session, key, policy, context, () -> {
                 var response = application.handle(request, context);
                 checkSerializable(response);
                 if (!response.isStreaming()) { return response; }
@@ -287,7 +290,7 @@ public final class TestClient implements AutoCloseable {
         var head = new CompletableFuture<StreamedResponse>();
         RequestDispatcher.Task<Response> task;
         try {
-            task = dispatcher.submit(key, policy, context, () -> {
+            task = dispatcher.submit(session, key, policy, context, () -> {
                 var response = application.handle(request, context);
                 checkSerializable(response);
                 if (!response.isStreaming()) {
@@ -417,10 +420,10 @@ public final class TestClient implements AutoCloseable {
         if (rejection != null) { throw new IllegalStateException(rejection + "; the listener would return 500"); }
     }
 
-    /** Cancels outstanding requests and closes the application. */
+    /** Cancels this client's requests and closes the application. */
     @Override
     public void close() {
-        dispatcher.close();
+        session.close();
         application.close();
     }
 }

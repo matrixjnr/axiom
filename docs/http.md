@@ -267,10 +267,13 @@ that carry no conditional fields, and both are immutable and thread-safe.
 
 ## Resource limits
 
-Each listener owns one acceptor thread, one I/O thread per available processor
-(at least two), a deadline scheduler and a dispatcher that defaults to 36 active
-virtual-thread tasks with no waiting queue. Aggregate and route limits are
-configurable through `app.admissionPolicy(...)`; see
+Each listener owns one acceptor thread and one I/O thread per available processor
+(at least two). Execution belongs to the application:
+all listeners and test clients share one dispatcher and its deadline scheduler,
+which defaults to 36 active virtual-thread tasks with no waiting queue across
+the whole application.
+Aggregate and route limits are configurable through `app.executionBudget(...)`
+(or the `app.admissionPolicy(...)` views of the same budget); see
 [admission and bounded queues](admission.md). User handlers never execute on I/O
 threads. Full execution capacity with no free queue slot, or an expired queue
 wait, produces 503 and closes that connection. So does any other failure to start
@@ -354,7 +357,8 @@ passed to `app.listen(address, options)`. `app.listen(address)` and `app.listen(
 builder method validates its value when called and throws `IllegalArgumentException` naming
 the setting and its range; `build()` cannot fail. The options apply to that listener only, so
 listeners of one application may differ. Application-level limits (request body size,
-execution deadline, admission) stay on the application.
+execution deadline, the shared admission budget and the stream bound) stay on the
+application.
 
 ```java
 var options = ListenerOptions.builder()
@@ -402,10 +406,11 @@ Choosing values:
   uploaders, and raise it together with `maxRequestBody` when large bodies must upload concurrently.
 - The connection cap and admission are independent limits. A connection over the cap is closed
   at once without a response, so the client sees a closed connection, never a 503; admission 503s
-  are only produced for requests on accepted connections. A cap below the application's admission
-  capacity (active plus queued requests) leaves part of that capacity unreachable, because clients
-  are turned away before admission could queue or answer them. Set `maxConnections` at or above
-  that capacity plus headroom for idle keep-alive connections; see
+  are only produced for requests on accepted connections. A cap below the application's aggregate
+  admission capacity (active plus queued requests across all of its listeners and test clients)
+  leaves part of that capacity unreachable, because clients are turned away before admission could
+  queue or answer them. Set `maxConnections` at or above the capacity one listener should be able
+  to reach, plus headroom for idle keep-alive connections; see
   [admission and bounded queues](admission.md).
 - A short `shutdownGrace` interrupts handlers sooner; a long one delays `termination()` for as long
   as a handler keeps running. Handlers must still cooperate with interruption.

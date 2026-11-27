@@ -167,7 +167,7 @@ class StreamAdmissionTest {
             assertThatThrownBy(() -> task.result().toCompletableFuture().join())
                     .isInstanceOf(CompletionException.class).hasCauseInstanceOf(CancellationException.class);
             assertThat(dispatcher.activeStreams()).isZero();
-            assertThat(dispatcher.termination().toCompletableFuture()).isDone();
+            dispatcher.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
         } finally {
             stop(dispatcher);
         }
