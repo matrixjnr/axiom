@@ -1,0 +1,194 @@
+/* Axiom documentation skin. Loaded after the theme (and its dark variant) so brand colours and
+   spacing apply in both schemes. Nothing is fetched from a third party. */
+:root {
+  --axiom-navy: #102a43;
+  --axiom-teal: #32d6bc;
+  --axiom-pale: #f0f7fa;
+  --axiom-ink: #1b2f45;
+  --axiom-muted: #52657a;
+  --axiom-line: #d8e4ec;
+  --axiom-accent: #0f8f7e;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+
+.site-header {
+  border-top: 4px solid var(--axiom-teal);
+}
+
+.site-title,
+.site-logo {
+  text-decoration: none;
+}
+
+.main-content {
+  max-width: 52rem;
+  padding-left: 2.5rem;
+  padding-right: 2.5rem;
+}
+
+.main-content > h1:first-child {
+  border-bottom: 2px solid var(--axiom-line);
+  padding-bottom: 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+h2,
+h3,
+h4 {
+  letter-spacing: -0.01em;
+  margin-top: 2rem;
+}
+
+a {
+  color: var(--axiom-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+a:hover {
+  color: var(--axiom-navy);
+}
+
+.sidebar {
+  border-right: 1px solid var(--axiom-line);
+}
+
+.nav-list > li > a:hover,
+.nav-list > li > .nav-list-item > a:hover {
+  color: var(--axiom-accent);
+}
+
+.nav-list .active > a {
+  border-left-color: var(--axiom-teal);
+  font-weight: 600;
+}
+
+.search-input {
+  border-color: var(--axiom-line);
+  border-radius: 0.4rem;
+}
+
+.search-input:focus {
+  border-color: var(--axiom-accent);
+  outline: 1px solid var(--axiom-accent);
+}
+
+code {
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+}
+
+pre,
+.highlight,
+div.highlighter-rouge {
+  border: 1px solid var(--axiom-navy);
+  border-radius: 0.4rem;
+  background: var(--axiom-navy);
+  color: var(--axiom-pale);
+}
+
+pre code,
+.highlight pre {
+  padding: 0.9rem 1rem;
+  font-size: 0.88em;
+}
+
+table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 1.25rem 0;
+}
+
+thead {
+  background: var(--axiom-pale);
+  color: var(--axiom-navy);
+}
+
+th,
+td {
+  border: 1px solid var(--axiom-line);
+  padding: 0.5rem 0.7rem;
+  vertical-align: top;
+}
+
+tbody tr:nth-child(even) {
+  background: rgba(50, 214, 188, 0.06);
+}
+
+blockquote {
+  border-left: 4px solid var(--axiom-teal);
+  color: var(--axiom-muted);
+  padding-left: 1rem;
+}
+
+.footer {
+  border-top: 1px solid var(--axiom-line);
+  color: var(--axiom-muted);
+  padding-top: 1rem;
+}
+
+@media (max-width: 48rem) {
+  .main-content {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+
+  table {
+    font-size: 0.9em;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --axiom-line: #2b4358;
+    --axiom-pale: #16283a;
+    --axiom-accent: var(--axiom-teal);
+    --axiom-muted: #a8bfd0;
+  }
+
+  a:hover {
+    color: var(--axiom-teal);
+  }
+
+  thead {
+    background: var(--axiom-pale);
+    color: var(--axiom-teal);
+  }
+
+  tbody tr:nth-child(even) {
+    background: rgba(50, 214, 188, 0.04);
+  }
+
+  .sidebar {
+    border-right-color: var(--axiom-line);
+  }
+}
+
+@media print {
+  .site-header,
+  .sidebar,
+  .footer,
+  .search-wrapper {
+    display: none;
+  }
+
+  .main-content {
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

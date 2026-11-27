@@ -105,8 +105,10 @@ app.get("/search", ctx -> {
 Names and values are percent-decoded once as strict UTF-8 with `+` as a space.
 The raw query is `ctx.request().query()`. Malformed or oversized queries are
 rejected before routing, so lookups never fail; values are still untrusted input.
-There are no typed conversions, matching the path capture accessors. See
-[routing rules](routing.md) for edge cases and limits.
+Typed accessors (`queryInt`, `queryLong`, `queryUuid` and the matching `path*`
+methods) parse strictly and answer 400 with `invalid_query_parameter` or
+`invalid_path_parameter` when a value does not convert. See
+[routing rules](routing.md#typed-parameters) for edge cases and limits.
 
 ## Lifecycle and concurrency
 
@@ -118,9 +120,11 @@ There are no typed conversions, matching the path capture accessors. See
   repeatedly or before startup.
 
 Registration, startup, and shutdown are serialized by a lifecycle lock. Startup
-publishes one immutable snapshot of the router, frozen routes, admission
-policies, codecs and the body limit; request acceptance, `resolve`, and `admissionPolicy(route)` read it
-without taking the lock. `listen` discovers the transport and binds outside the
+publishes one immutable snapshot of the router, frozen routes, the execution
+budget, stream policy, codecs and the body limit; request acceptance, `resolve`,
+`admissionPolicy(route)` and `streamPolicy(route)` read it without taking the lock.
+Listeners and test clients obtain sessions on the application's one dispatcher
+([admission](admission.md)). `listen` discovers the transport and binds outside the
 lock; if the application closes meanwhile, the new listener is closed and `listen`
 throws `IllegalStateException`.
 Handlers and middleware can run concurrently and each invocation receives a fresh
@@ -193,8 +197,9 @@ try (var client = TestClient.start(app)) {
 ```
 
 `TestClient` owns the supplied application's lifecycle: creating it starts the
-application, and closing it closes the application. Requests go through a private
-dispatcher using the application's admission policies and request timeout, so
+application, and closing it closes the application. Requests go through a session
+on the application's shared dispatcher, using its execution budget, stream policy
+and request timeout, so
 overload (503) and deadline expiry (504) are testable; `submit(request)` returns a
 future for holding capacity from tests. `post`, `put` and `patch` take a content
 type and a `String` or `byte[]` body, so tests send raw JSON without a codec

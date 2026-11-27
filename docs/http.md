@@ -348,9 +348,10 @@ The default execution deadline is ten seconds, configurable before startup throu
 that is predictable within one process and must not be used as a secret or credential.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
-A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2, WebSocket and further
-observability integrations remain future work; streaming request bodies and multipart parsing are
-available as described in [request bodies](bodies.md#streaming-request-bodies).
+A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2 and WebSocket are not
+implemented; [conditional and range requests](#conditional-and-range-requests), streaming request
+bodies and [multipart parsing](bodies.md#streaming-request-bodies) are available. Observability
+adapters ship as opt-in modules ([observability](observability.md)).
 
 ## Listener options
 

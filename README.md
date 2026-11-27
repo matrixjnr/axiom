@@ -117,14 +117,18 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
   public API ([HTTP listeners](docs/http.md)).
 - **Virtual-thread execution** with a per-request deadline (504) and cancellation
   ([execution](docs/execution.md)).
-- **Bounded admission**: aggregate and per-route active limits with bounded waiting
-  queues (503) and observable counters ([admission](docs/admission.md)).
+- **Bounded admission**: an application-owned budget shared by all listeners and test clients,
+  with aggregate and per-route active limits, bounded waiting queues (503), a separate stream
+  lane and observable counters ([admission](docs/admission.md)).
 - **Compiled routing** on an immutable segment trie: named parameters, terminal
   wildcards, deterministic precedence, ambiguous templates rejected at registration,
   HEAD fallback to GET, automatic OPTIONS, 405 with `Allow` ([routing](docs/routing.md)).
 - **Query parameters** decoded as strict UTF-8 with bounds ([routing](docs/routing.md#query-parameters)).
-- **Bounded request bodies** (Content-Length, chunked, `Expect: 100-continue`) and a
-  strict Jackson JSON codec ([bodies](docs/bodies.md)).
+- **Bounded request bodies** (Content-Length, chunked, `Expect: 100-continue`), optional
+  incremental streaming reads with backpressure and bounded multipart parsing, and a strict
+  Jackson JSON codec ([bodies](docs/bodies.md)).
+- **Conditional and range requests**: RFC 9110 preconditions, strict bounded byte ranges,
+  206/304/412/416/428 answers ([HTTP listeners](docs/http.md#conditional-and-range-requests)).
 - **Streaming responses and server-sent events**: `Response.stream` and `Response.sse` write
   the body from the handler's virtual thread with chunked encoding, backpressure from slow
   clients, a byte cap and the request deadline; a disconnect, cap or shutdown aborts the writer
@@ -145,8 +149,9 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
   restart, ALPN `http/1.1`, and `Request.isSecure()` ([TLS](docs/tls.md)).
 - **Security modules (opt-in)**: a request-scoped `SecurityIdentity`, an `Authenticator`
   SPI, `authenticated()`/`hasRole`/`hasPermission` policies (401 vs 403 problem responses),
-  a strict JDK-only JWT authenticator, trusted-proxy client addresses, header redaction and
-  secure default headers ([security](docs/security.md)).
+  a strict JDK-only JWT authenticator with JWKS rotation, trusted-proxy client addresses,
+  header redaction, secure default headers, strict CORS, rate limiting, server-side sessions
+  with cookie authentication and CSRF protection ([security](docs/security.md)).
 - **Observability (opt-in registry)**: a dependency-free `Metrics` SPI instrumenting requests
   by route template and status class, latency, admission rejections and queue depth and wait;
   an in-memory registry with Prometheus text output; liveness and readiness routes that turn
@@ -158,15 +163,13 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 
 ## Not yet
 
-- HTTP/2
-- WebSocket
-- Streaming request bodies (request bodies are buffered in memory)
-- Sessions, cookie authentication, CSRF, CORS and OAuth flows; JWKS key fetching
-- Native transports (epoll, io_uring)
+- HTTP/2 and WebSocket
+- OAuth flows (bearer JWT authentication and JWKS rotation are available)
+- io_uring (epoll and kqueue are available as optional native transports)
 - Publication to Maven Central
 
-Known limitations are tracked in [#13](https://github.com/matrixjnr/axiom/issues/13) and
-remaining milestones in the [roadmap, #18](https://github.com/matrixjnr/axiom/issues/18).
+Known limitations are all resolved; the index in [#13](https://github.com/matrixjnr/axiom/issues/13)
+is a record of what shipped. Remaining milestones are in the [roadmap, #18](https://github.com/matrixjnr/axiom/issues/18).
 
 ## Modules
 
@@ -190,7 +193,7 @@ remaining milestones in the [roadmap, #18](https://github.com/matrixjnr/axiom/is
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
-| `examples/hello`, `examples/rest-api` | not published | Runnable examples |
+| `examples/hello`, `examples/rest-api`, `examples/openapi`, `examples/browser-app` | not published | Runnable examples for the core API, JSON, OpenAPI and browser security |
 
 All artifacts use the group `com.jsgalactic.axiom`. Netty and Jackson never appear in
 an Axiom API; core depends only on the JDK ([build decisions](docs/build.md)).

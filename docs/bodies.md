@@ -222,8 +222,9 @@ success, failure or early cancellation.
 
 ```java
 app.post("/form", (StreamingHandler) ctx -> {
-    try (var parser = new MultipartParser(ctx.bodyReader(), ctx.header("Content-Type").orElse(null),
-            MultipartParser.Limits.DEFAULT, part -> save(part.name(), part.bytes()))) {
+    try (var reader = ctx.bodyReader();
+         var parser = new MultipartParser(reader, ctx.header("Content-Type").orElse(null),
+                 MultipartParser.Limits.DEFAULT, part -> save(part.name(), part.bytes()))) {
         parser.parse();
     }
     return ctx.noContent();
