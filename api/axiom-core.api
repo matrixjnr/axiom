@@ -37,6 +37,8 @@ public interface com.jsgalactic.axiom.application.Application extends com.jsgala
     descriptor: (Lcom/jsgalactic/axiom/context/Handler;)Lcom/jsgalactic/axiom/application/Application;
   public abstract com.jsgalactic.axiom.application.Application notImplemented(com.jsgalactic.axiom.context.Handler);
     descriptor: (Lcom/jsgalactic/axiom/context/Handler;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application onClose(java.lang.Runnable);
+    descriptor: (Ljava/lang/Runnable;)Lcom/jsgalactic/axiom/application/Application;
   public abstract com.jsgalactic.axiom.application.Application onDrain(java.lang.Runnable);
     descriptor: (Ljava/lang/Runnable;)Lcom/jsgalactic/axiom/application/Application;
   public abstract com.jsgalactic.axiom.application.Application recognizeMethods(java.lang.String...);

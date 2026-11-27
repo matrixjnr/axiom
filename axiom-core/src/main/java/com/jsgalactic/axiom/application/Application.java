@@ -645,13 +645,27 @@ public interface Application extends RouteGroup, AutoCloseable {
    */
   Application onDrain(Runnable action);
 
-  /**
-   * Permanently rejects new requests. Already accepted requests may finish. Idempotent and
-   * nonblocking. Each owned listener starts the graceful drain described by {@link Server#close()}:
-   * queued requests are answered 503, running network handlers get a grace period before they are
-   * interrupted. In-memory handlers are not interrupted. Await each listener's termination to join
-   * shutdown.
-   */
-  @Override
-  void close();
+    /**
+     * Registers an action that runs once when this application closes, after its state is
+     * {@link State#CLOSED}. It is for owned resources that need to begin draining when the
+     * application goes away, such as a server on another listener. Actions run in registration
+     * order, before {@link #close()} returns, on the thread that closes the application. They must
+     * be quick and nonblocking; an exception they throw is logged and does not stop the other
+     * actions. A closed application cannot accept new registrations.
+     *
+     * @param action what to run on close
+     * @return this application
+     * @throws IllegalStateException if the application is closed
+     */
+    Application onClose(Runnable action);
+
+    /**
+     * Permanently rejects new requests. Already accepted requests may finish.
+     * Idempotent and nonblocking. Each owned listener starts the graceful drain described by
+     * {@link Server#close()}: queued requests are answered 503, running network handlers get a
+     * grace period before they are interrupted. In-memory handlers are not interrupted.
+     * Await each listener's termination to join shutdown.
+     */
+    @Override
+    void close();
 }

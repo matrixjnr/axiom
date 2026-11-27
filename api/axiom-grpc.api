@@ -1,0 +1,49 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.grpc.Grpc implements java.lang.AutoCloseable {
+  public boolean awaitTermination(java.time.Duration) throws java.lang.InterruptedException;
+    descriptor: (Ljava/time/Duration;)Z
+  public boolean isReady();
+    descriptor: ()Z
+  public boolean isRunning();
+    descriptor: ()Z
+  public int port();
+    descriptor: ()I
+  public static com.jsgalactic.axiom.grpc.Grpc$Builder builder(com.jsgalactic.axiom.application.Application);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;)Lcom/jsgalactic/axiom/grpc/Grpc$Builder;
+  public synchronized void start() throws java.io.IOException;
+    descriptor: ()V
+  public void close();
+    descriptor: ()V
+  public void stop();
+    descriptor: ()V
+}
+
+public static final class com.jsgalactic.axiom.grpc.Grpc$Builder {
+  public com.jsgalactic.axiom.grpc.Grpc build();
+    descriptor: ()Lcom/jsgalactic/axiom/grpc/Grpc;
+  public com.jsgalactic.axiom.grpc.Grpc$Builder address(java.lang.String, int);
+    descriptor: (Ljava/lang/String;I)Lcom/jsgalactic/axiom/grpc/Grpc$Builder;
+  public com.jsgalactic.axiom.grpc.Grpc$Builder drainGrace(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/grpc/Grpc$Builder;
+  public com.jsgalactic.axiom.grpc.Grpc$Builder mapError(java.lang.Class<? extends java.lang.Exception>, io.grpc.Status);
+    descriptor: (Ljava/lang/Class;Lio/grpc/Status;)Lcom/jsgalactic/axiom/grpc/Grpc$Builder;
+  public com.jsgalactic.axiom.grpc.Grpc$Builder readiness(com.jsgalactic.axiom.observability.Health$Builder);
+    descriptor: (Lcom/jsgalactic/axiom/observability/Health$Builder;)Lcom/jsgalactic/axiom/grpc/Grpc$Builder;
+  public com.jsgalactic.axiom.grpc.Grpc$Builder service(io.grpc.BindableService);
+    descriptor: (Lio/grpc/BindableService;)Lcom/jsgalactic/axiom/grpc/Grpc$Builder;
+  public com.jsgalactic.axiom.grpc.Grpc$Builder tls(com.jsgalactic.axiom.lifecycle.TlsOptions);
+    descriptor: (Lcom/jsgalactic/axiom/lifecycle/TlsOptions;)Lcom/jsgalactic/axiom/grpc/Grpc$Builder;
+}
+
+public final class com.jsgalactic.axiom.grpc.GrpcCall {
+  public boolean cancelled();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.execution.ExecutionContext execution();
+    descriptor: ()Lcom/jsgalactic/axiom/execution/ExecutionContext;
+  public java.time.Duration remainingTime();
+    descriptor: ()Ljava/time/Duration;
+  public static com.jsgalactic.axiom.grpc.GrpcCall current();
+    descriptor: ()Lcom/jsgalactic/axiom/grpc/GrpcCall;
+  public void onCancel(java.lang.Runnable);
+    descriptor: (Ljava/lang/Runnable;)V
+}

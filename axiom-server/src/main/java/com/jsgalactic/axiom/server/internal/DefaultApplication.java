@@ -102,8 +102,10 @@ final class DefaultApplication implements Application, ExecutionAccess {
   private Handler methodNotAllowedHandler;
   private Handler notImplementedHandler;
 
-  /** Group callbacks currently running; startup is refused while any is open. */
-  private int openGroups;
+    private final List<Runnable> drainActions = new ArrayList<>();
+    private final List<Runnable> closeActions = new ArrayList<>();
+    private Duration drainDelay = Duration.ZERO;
+    private DrainPause drainPause = delay -> Thread.sleep(delay);
 
   private final List<Server> listeners = new ArrayList<>();
   private volatile ExecutionBudget executionBudget = ExecutionBudget.defaults();
@@ -441,8 +443,68 @@ final class DefaultApplication implements Application, ExecutionAccess {
     }
 
     @Override
-    public Route route(String method, String path, Handler handler, Middleware... routeMiddleware) {
-      return register(this, method, path, handler, routeMiddleware);
+    public Application onClose(Runnable action) {
+        Objects.requireNonNull(action, "action");
+        synchronized (this) {
+            if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+            closeActions.add(action);
+        }
+        return this;
+    }
+
+    @Override
+    public Application closeOnJvmShutdown(Duration drainDelay) {
+        Objects.requireNonNull(drainDelay, "drainDelay");
+        if (drainDelay.isNegative() || drainDelay.compareTo(Duration.ofHours(1)) > 0) {
+            throw new IllegalArgumentException("drainDelay must be from zero to one hour");
+        }
+        synchronized (this) {
+            if (state == State.CLOSED) { throw new IllegalStateException("Application is closed"); }
+            if (shutdownHook != null) { return this; }
+            this.drainDelay = drainDelay;
+            var hook = new Thread(this::shutdownFromJvm, "axiom-shutdown");
+            hooks.add(hook); // IllegalStateException when the JVM is already shutting down
+            shutdownHook = hook;
+        }
+        return this;
+    }
+
+    /** The shutdown hook: closes the application, then waits for its listeners, within a bound. */
+    private void shutdownFromJvm() {
+        List<Runnable> drains;
+        Duration pause;
+        synchronized (this) {
+            drains = List.copyOf(drainActions);
+            pause = drainDelay;
+        }
+        for (var drain : drains) {
+            try { drain.run(); }
+            catch (RuntimeException failure) { LOG.log(System.Logger.Level.WARNING, "A drain action failed", failure); }
+        }
+        if (!pause.isZero()) {
+            try { drainPause.pause(pause); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
+        List<Server> owned;
+        Duration wait;
+        synchronized (this) {
+            owned = List.copyOf(listeners);
+            wait = longestGrace.plus(hookMargin);
+        }
+        close();
+        long deadline = System.nanoTime() + wait.toNanos();
+        for (var server : owned) {
+            try {
+                server.termination().toCompletableFuture()
+                        .get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+            } catch (TimeoutException | ExecutionException unfinished) {
+                LOG.log(System.Logger.Level.WARNING,
+                        "A listener had not terminated " + wait + " after JVM shutdown began", unfinished);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     @Override
@@ -886,45 +948,48 @@ final class DefaultApplication implements Application, ExecutionAccess {
     return this;
   }
 
-  @Override
-  public Metrics metrics() {
-    return metrics;
-  }
-
-  @Override
-  public synchronized Application developmentErrors() {
-    requireState(State.CONFIGURING);
-    developmentErrors = true;
-    return this;
-  }
-
-  @Override
-  public synchronized Application failureLog(System.Logger logger, System.Logger.Level level) {
-    requireState(State.CONFIGURING);
-    failureLog = new FailureLog(logger, level);
-    return this;
-  }
-
-  @Override
-  public Optional<Route> resolve(Request request) {
-    Objects.requireNonNull(request, "request");
-    var match = acceptingRouter().match(request);
-    return match == null || !match.methodAllowed() ? Optional.empty() : Optional.of(match.route());
-  }
-
-  private static IllegalArgumentException notRegistered(Route route) {
-    return new IllegalArgumentException("Route is not registered: " + route);
-  }
-
-  /** Admission check for the request path: reads the published snapshot without locking. */
-  private CompiledRouter acceptingRouter() {
-    return acceptingRuntime().router();
-  }
-
-  private Runtime acceptingRuntime() {
-    var published = runtime;
-    if (published == null || published.router() == null) {
-      throw new IllegalStateException("Expected application state RUNNING but was " + state);
+    @Override
+    public void close() {
+        List<Server> owned;
+        List<Runnable> closing;
+        Thread hook;
+        RequestDispatcher execution;
+        synchronized (this) {
+            hook = shutdownHook;
+            shutdownHook = null;
+            closing = List.copyOf(closeActions);
+            closeActions.clear();
+            var published = runtime;
+            runtime = published == null ? snapshot(null, null, Codecs.of(List.of())) : published.withoutRouter();
+            execution = published == null ? null : published.execution();
+            state = State.CLOSED;
+            drainActions.clear();
+            registrations.clear();
+            root.middleware.clear();
+            root.errors.clear();
+            recognizedMethods.clear();
+            notFoundHandler = null;
+            methodNotAllowedHandler = null;
+            notImplementedHandler = null;
+            shapes.clear();
+            streamPolicies.clear();
+            streamingRoutes.clear();
+            owned = List.copyOf(listeners);
+            listeners.clear();
+        }
+        // Stopping admission is global; each listener still drains its own running work before
+        // its session closes and the shared dispatcher shuts its executors down.
+        if (execution != null) { execution.retire(); }
+        for (var action : closing) {
+            try { action.run(); }
+            catch (RuntimeException failure) { LOG.log(System.Logger.Level.WARNING, "A close action failed", failure); }
+        }
+        owned.forEach(Server::close);
+        // An explicit close makes the hook unnecessary; the hook itself, or a JVM already shutting
+        // down, must not unregister.
+        if (hook != null && Thread.currentThread() != hook) {
+            try { hooks.remove(hook); } catch (IllegalStateException shuttingDown) { /* The hook is running or due. */ }
+        }
     }
     return published;
   }

@@ -228,19 +228,32 @@ class ShutdownHookTest {
         .withMessageContaining("closed");
   }
 
-  @Test
-  void drainActionsDoNotRunOnAnExplicitCloseAndHealthKeepsServingUntilTheHookRuns() {
-    var hooks = new Hooks();
-    var app = new DefaultApplication(hooks);
-    app.start();
-    var drained = new AtomicInteger();
-    app.onDrain(drained::incrementAndGet);
-    var health = Health.builder(app).build();
-    app.closeOnJvmShutdown(Duration.ofSeconds(1));
-    assertThat(health.readiness().status()).isEqualTo(Health.Status.UP);
-    app.close();
-    assertThat(drained).hasValue(0);
-    assertThat(health.isDraining()).isFalse();
-    assertThat(health.readiness().status()).isEqualTo(Health.Status.DOWN);
-  }
+    @Test void drainActionsDoNotRunOnAnExplicitCloseAndHealthKeepsServingUntilTheHookRuns() {
+        var hooks = new Hooks();
+        var app = new DefaultApplication(hooks);
+        app.start();
+        var drained = new AtomicInteger();
+        app.onDrain(drained::incrementAndGet);
+        var health = Health.builder(app).build();
+        app.closeOnJvmShutdown(Duration.ofSeconds(1));
+        assertThat(health.readiness().status()).isEqualTo(Health.Status.UP);
+        app.close();
+        assertThat(drained).hasValue(0);
+        assertThat(health.isDraining()).isFalse();
+        assertThat(health.readiness().status()).isEqualTo(Health.Status.DOWN);
+    }
+
+    @Test void closeActionsRunOnceWhenTheApplicationCloses() {
+        var app = new DefaultApplication(new Hooks());
+        app.start();
+        var order = new ArrayList<String>();
+        app.onClose(() -> order.add("first:" + app.state()));
+        app.onClose(() -> { throw new IllegalStateException("a broken action must not stop the others"); });
+        app.onClose(() -> order.add("last:" + app.state()));
+        app.close();
+        assertThat(order).containsExactly("first:CLOSED", "last:CLOSED");
+        app.close();
+        assertThat(order).hasSize(2);
+        assertThatIllegalStateException().isThrownBy(() -> app.onClose(() -> { })).withMessageContaining("closed");
+    }
 }
