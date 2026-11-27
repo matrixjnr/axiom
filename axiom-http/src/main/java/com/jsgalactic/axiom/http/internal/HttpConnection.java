@@ -30,6 +30,7 @@ import io.netty.channel.socket.DuplexChannel;
 import io.netty.handler.codec.DateFormatter;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.DefaultHttpResponse;
+import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaderValues;
@@ -41,6 +42,7 @@ import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.codec.http.TooLongHttpHeaderException;
 import io.netty.handler.codec.http.TooLongHttpLineException;
+import io.netty.handler.codec.http2.Http2StreamChannel;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCounted;
@@ -131,6 +133,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private final ConnectionSlots.Slot slot;
     /** The listener's budget of request body bytes held at once, across all its connections. */
     private final BodyBudget budget;
+    /** True for a channel of an HTTP/2 stream; framing and trailers then follow HTTP/2 rules. */
+    private final boolean http2;
     private final ArrayDeque<Exchange> pending = new ArrayDeque<>();
     private Exchange receiving;
     private boolean busy;
@@ -171,6 +175,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      */
     private ChannelBodyWriter stream;
     private boolean streamKeepAlive;
+    /** Headers of a streamed response nominated by its {@code Trailer} header, sent at stream end. */
+    private Map<String, String> streamTrailers = Map.of();
     private final StreamMetrics streamMetrics;
     private final ListenerMetrics listenerMetrics;
     private ScheduledFuture<?> headTimer;
@@ -227,7 +233,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     HttpConnection(Application application, RequestDispatcher executor, RequestDispatcher.Session session,
             TransportSettings settings, ConnectionSlots.Slot slot, BooleanSupplier listenerClosing,
             BodyBudget budget, StreamMetrics streamMetrics, ListenerMetrics listenerMetrics) {
+        this(application, executor, session, settings, slot, listenerClosing, budget, streamMetrics, listenerMetrics,
+                false);
+    }
+
+    /** As above, for a channel of an HTTP/2 stream. */
+    HttpConnection(Application application, RequestDispatcher executor, RequestDispatcher.Session session,
+            TransportSettings settings, ConnectionSlots.Slot slot, BooleanSupplier listenerClosing,
+            BodyBudget budget, StreamMetrics streamMetrics, ListenerMetrics listenerMetrics, boolean http2) {
         this.budget = budget;
+        this.http2 = http2;
         this.listenerMetrics = listenerMetrics;
         this.slot = slot;
         this.listenerClosing = listenerClosing;
@@ -250,10 +265,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
      * bytes came in the same read as the end of the previous request.
      */
     private void inputDecoded(ChannelHandlerContext ctx) {
+        var decoder = ctx.pipeline().get(RequestDecoder.class);
+        if (decoder == null || decoder.headStarted()) { startHeadTimer(ctx); }
+    }
+
+    /** Starts the head deadline of an HTTP/2 stream, whose pipeline has no HTTP/1 request decoder. */
+    void headStarted(ChannelHandlerContext ctx) { startHeadTimer(ctx); }
+
+    private void startHeadTimer(ChannelHandlerContext ctx) {
         // Body bytes are bounded by the request deadline, not the head timeout.
         if (closing || deferredStatus != 0 || headTimer != null || receiving != null) { return; }
-        var decoder = ctx.pipeline().get(RequestDecoder.class);
-        if (decoder == null || !decoder.headStarted()) { return; }
         headTimer = ctx.executor().schedule(() -> {
             headTimer = null;
             if (!closing) { fail(ctx, 408); }
@@ -313,7 +334,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (message instanceof HttpContent content) {
             if (receiving == null) { fail(ctx, 400); return; }
             if (content.content().isReadable() && !receiveBody(ctx, content.content())) { return; }
-            if (message instanceof LastHttpContent) { completeRequest(ctx); }
+            if (message instanceof LastHttpContent last) {
+                if (http2 && !last.trailingHeaders().isEmpty()) { mergeTrailers(last); }
+                completeRequest(ctx);
+            }
         }
     }
 
@@ -370,7 +394,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             // An absolute-form target is reduced to its path and query first; Host must agree with it.
             var target = RequestTargets.originForm(request.uri(), headers.get(HttpHeaderNames.HOST));
             receiving = new Exchange(Request.fromTarget(request.method().name(), target).withHeaders(fields)
-                    .withRemoteAddress(peer).withTls(ctx.pipeline().get(SslHandler.class) != null),
+                    .withRemoteAddress(peer).withTls(secure(ctx)),
                     HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
         } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
         var streams = application.resolve(receiving.request()).map(application::streamsBody).orElse(false);
@@ -456,6 +480,18 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         return true;
     }
 
+    /**
+     * Makes HTTP/2 request trailers ordinary headers of a buffered request. A streaming handler
+     * already holds its request when the trailers arrive, so they are not visible to it.
+     */
+    private void mergeTrailers(LastHttpContent last) {
+        var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        fields.putAll(receiving.request().headers());
+        last.trailingHeaders().forEach(header ->
+                fields.merge(header.getKey().toString(), header.getValue().toString(), (first, next) -> first + ", " + next));
+        receiving = receiving.withRequest(receiving.request().withHeaders(fields));
+    }
+
     private void completeRequest(ChannelHandlerContext ctx) {
         var exchange = receiving;
         if (exchange.reader() != null) {
@@ -521,6 +557,13 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             if (continueTimer != null) { continueTimer.cancel(false); continueTimer = null; }
             if (!future.isSuccess()) { abort(ctx); }
         });
+    }
+
+    /** The TLS state of the connection carrying this exchange, including an HTTP/2 stream's parent. */
+    private static boolean secure(ChannelHandlerContext ctx) {
+        var channel = ctx.channel();
+        if (channel instanceof Http2StreamChannel stream) { channel = stream.parent(); }
+        return channel.pipeline().get(SslHandler.class) != null;
     }
 
     /** HTTP/1.1 requires exactly one Host; HTTP/1.0 may omit it but must not send an invalid one. */
@@ -669,7 +712,10 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var message = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
                     HttpResponseStatus.valueOf(response.status()), content);
             owned = message;
+            var trailers = http2 ? trailers(response.headers()) : Map.<String, String>of();
+            trailers.forEach((name, value) -> message.trailingHeaders().set(name, value));
             var omitted = new HashSet<>(HOP_HEADERS);
+            trailers.keySet().forEach(name -> omitted.add(name.toLowerCase(Locale.ROOT)));
             for (var token : response.headers().getOrDefault("Connection", "").split(",")) {
                 omitted.add(token.trim().toLowerCase(Locale.ROOT));
             }
@@ -724,6 +770,22 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private static boolean closeRequested(Map<String, String> headers) {
         return Arrays.stream(headers.getOrDefault("Connection", "").split(","))
                 .anyMatch(token -> token.trim().equalsIgnoreCase("close"));
+    }
+
+    /**
+     * The fields an HTTP/2 response sends as trailers: those named by its {@code Trailer} header.
+     * The header itself is hop-by-hop and never reaches the ordinary response headers.
+     */
+    private static Map<String, String> trailers(Map<String, String> headers) {
+        var names = headers.get("Trailer");
+        if (names == null || names.isBlank()) { return Map.of(); }
+        var selected = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        for (var name : names.split(",")) {
+            String key = name.trim();
+            var value = headers.get(key);
+            if (!key.isEmpty() && value != null) { selected.put(key, value); }
+        }
+        return selected;
     }
 
     /** The request ID for a log line, with the caller's trace id when it sent a valid traceparent. */
@@ -793,7 +855,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             return false;
         }
         var message = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(response.status()));
+        streamTrailers = http2 ? trailers(response.headers()) : Map.of();
         var omitted = new HashSet<>(HOP_HEADERS);
+        streamTrailers.keySet().forEach(name -> omitted.add(name.toLowerCase(Locale.ROOT)));
         for (var token : response.headers().getOrDefault("Connection", "").split(",")) {
             omitted.add(token.trim().toLowerCase(Locale.ROOT));
         }
@@ -822,7 +886,14 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         if (failure != null || finished.aborted() != null) { abort(ctx); return; }
         boolean keepAlive = streamKeepAlive && !draining && !listenerClosing.getAsBoolean();
         if (!keepAlive) { closing = true; dropPending(); releaseBody(); }
-        finishWrite(ctx, ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT), keepAlive);
+        var last = LastHttpContent.EMPTY_LAST_CONTENT;
+        if (!streamTrailers.isEmpty()) {
+            var withTrailers = new DefaultLastHttpContent(Unpooled.EMPTY_BUFFER);
+            streamTrailers.forEach((name, value) -> withTrailers.trailingHeaders().set(name, value));
+            last = withTrailers;
+        }
+        streamTrailers = Map.of();
+        finishWrite(ctx, ctx.writeAndFlush(last), keepAlive);
     }
 
     /**
@@ -1013,6 +1084,9 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         }
         Exchange withReservation(BodyBudget.Reservation held) {
             return new Exchange(request, keepAlive, http10, execution, held, reader, bodyBytes);
+        }
+        Exchange withRequest(Request updated) {
+            return new Exchange(updated, keepAlive, http10, execution, reservation, reader, bodyBytes);
         }
         Exchange withStream(BodyReader stream) {
             return new Exchange(request, keepAlive, http10, execution, reservation, stream, bodyBytes);

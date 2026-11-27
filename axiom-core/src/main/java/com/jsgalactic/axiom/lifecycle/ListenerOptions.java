@@ -42,6 +42,7 @@ public final class ListenerOptions {
     private final Duration shutdownLingerTimeout;
     private final Duration handshakeTimeout;
     private final TlsOptions tls;
+    private final boolean http2;
     private final int maxDiscardedInput;
     private final int maxConnections;
     private final int maxLingeringConnections;
@@ -65,6 +66,7 @@ public final class ListenerOptions {
         shutdownLingerTimeout = b.shutdownLingerTimeout;
         handshakeTimeout = b.handshakeTimeout;
         tls = b.tls;
+        http2 = b.http2;
         maxDiscardedInput = b.maxDiscardedInput;
         maxConnections = b.maxConnections;
         maxLingeringConnections = b.maxLingeringConnections;
@@ -104,6 +106,7 @@ public final class ListenerOptions {
         b.shutdownLingerTimeout = shutdownLingerTimeout;
         b.handshakeTimeout = handshakeTimeout;
         b.tls = tls;
+        b.http2 = http2;
         b.maxDiscardedInput = maxDiscardedInput;
         b.maxConnections = maxConnections;
         b.maxLingeringConnections = maxLingeringConnections;
@@ -135,6 +138,11 @@ public final class ListenerOptions {
     public Duration handshakeTimeout() { return handshakeTimeout; }
     /** @return the TLS settings; empty when the listener serves plain HTTP */
     public Optional<TlsOptions> tls() { return Optional.ofNullable(tls); }
+    /**
+     * @return whether the listener accepts HTTP/2: negotiated with ALPN when TLS is configured,
+     *         otherwise by HTTP/2 prior knowledge on a cleartext connection
+     */
+    public boolean http2Enabled() { return http2; }
     /** @return bytes discarded unread after an error or last response before the connection is closed */
     public int maxDiscardedInput() { return maxDiscardedInput; }
     /** @return open connections per listener */
@@ -166,7 +174,7 @@ public final class ListenerOptions {
                 + ", headTimeout=" + headTimeout + ", responseTimeout=" + responseTimeout
                 + ", lingerTimeout=" + lingerTimeout + ", lingerQuietTimeout=" + lingerQuietTimeout
                 + ", shutdownLingerTimeout=" + shutdownLingerTimeout + ", handshakeTimeout=" + handshakeTimeout
-                + ", tls=" + tls + ", maxDiscardedInput=" + maxDiscardedInput
+                + ", tls=" + tls + ", http2=" + http2 + ", maxDiscardedInput=" + maxDiscardedInput
                 + ", maxConnections=" + maxConnections + ", maxLingeringConnections=" + maxLingeringConnections
                 + ", maxPipelinedRequests=" + maxPipelinedRequests + ", maxInFlightBodyBytes=" + maxInFlightBodyBytes
                 + ", maxRequestLine=" + maxRequestLine
@@ -190,6 +198,7 @@ public final class ListenerOptions {
         private Duration shutdownLingerTimeout = Duration.ofMillis(500);
         private Duration handshakeTimeout = Duration.ofSeconds(10);
         private TlsOptions tls;
+        private boolean http2;
         private int maxDiscardedInput = 16 * 1024 * 1024;
         private int maxConnections = 128;
         private int maxLingeringConnections = 32;
@@ -332,6 +341,28 @@ public final class ListenerOptions {
          */
         public Builder tls(TlsOptions options) {
             tls = options;
+            return this;
+        }
+
+        /**
+         * Accepts HTTP/2 on this listener in addition to HTTP/1.1. Off by default, so a listener
+         * without this setting behaves exactly as before. With {@linkplain #tls(TlsOptions) TLS},
+         * ALPN offers {@code h2} followed by {@code http/1.1}: a client that negotiates {@code h2}
+         * speaks HTTP/2 and one that negotiates or falls back to {@code http/1.1} speaks HTTP/1.1.
+         * On a cleartext listener, a connection starting with the HTTP/2 client preface speaks
+         * HTTP/2; all other connections speak HTTP/1.1. An HTTP/1.1 {@code Upgrade} to h2c is not
+         * supported.
+         *
+         * <p>This is a transport choice only. Both protocols use the same routes, handlers, codecs,
+         * execution limits, body budgets, deadlines, error mapping and shutdown behavior. Requests
+         * keep the same shape, which has no HTTP version; HTTP/2 pseudo-headers become ordinary
+         * request headers. A {@code TestClient} stays in-memory
+         * and HTTP/1-shaped regardless of this setting.
+         * @param enabled true to accept HTTP/2; false to accept HTTP/1.x only
+         * @return this builder
+         */
+        public Builder http2(boolean enabled) {
+            http2 = enabled;
             return this;
         }
 

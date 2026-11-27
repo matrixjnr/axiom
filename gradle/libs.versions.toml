@@ -24,6 +24,8 @@ asm-tree = { module = "org.ow2.asm:asm-tree", version.ref = "asm" }
 swagger-ui = { module = "org.webjars:swagger-ui", version.ref = "swagger-ui" }
 netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
 netty-http = { module = "io.netty:netty-codec-http" }
+# HTTP/2 is opt-in through ListenerOptions.http2; axiom-core has no transport dependency.
+netty-http2 = { module = "io.netty:netty-codec-http2" }
 netty-handler = { module = "io.netty:netty-handler" }
 # Compile-time only: the optional native transports (the native libraries are not dependencies of axiom-http).
 netty-classes-epoll = { module = "io.netty:netty-transport-classes-epoll" }

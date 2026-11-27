@@ -41,7 +41,8 @@ import javax.net.ssl.TrustManagerFactory;
  * problem. Nothing read from a key file, and no exception from parsing one, reaches a message.
  */
 final class TlsMaterial {
-    /** The only application protocol the listener offers; HTTP/2 is not served. */
+    /** The application protocols a listener can offer through ALPN, in preference order. */
+    static final String ALPN_HTTP2 = "h2";
     static final String ALPN = "http/1.1";
     private static final long MAX_PEM_BYTES = 1 << 20;
     private static final Pattern PEM = Pattern.compile(
@@ -115,14 +116,18 @@ final class TlsMaterial {
     /** Digest of the bytes the material was built from; empty for a supplied SSL context. */
     String fingerprint() { return fingerprint; }
 
-    /** Returns a server-mode engine with this material's settings, ALPN {@code http/1.1} only. */
-    SSLEngine newEngine() {
+    /**
+     * Returns a server-mode engine with this material's settings. When {@code http2} is set, ALPN
+     * offers {@code h2} before {@code http/1.1}; otherwise it offers {@code http/1.1} alone. A
+     * client that offers no ALPN protocol still gets a connection and is served HTTP/1.1.
+     */
+    SSLEngine newEngine(boolean http2) {
         var engine = context.createSSLEngine();
         engine.setUseClientMode(false);
         var parameters = engine.getSSLParameters();
         parameters.setProtocols(protocols);
         parameters.setCipherSuites(cipherSuites);
-        parameters.setApplicationProtocols(new String[] {ALPN});
+        parameters.setApplicationProtocols(http2 ? new String[] {ALPN_HTTP2, ALPN} : new String[] {ALPN});
         parameters.setUseCipherSuitesOrder(true);
         // Either call replaces the other, so only one is made: without mutual TLS no certificate is requested.
         if (clientAuth) { parameters.setNeedClientAuth(true); } else { parameters.setWantClientAuth(false); }

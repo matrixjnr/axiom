@@ -1141,6 +1141,8 @@ public interface com.jsgalactic.axiom.http.spi.HttpTransportProvider {
 }
 
 public final class com.jsgalactic.axiom.lifecycle.ListenerOptions {
+  public boolean http2Enabled();
+    descriptor: ()Z
   public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder toBuilder();
     descriptor: ()Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
   public com.jsgalactic.axiom.lifecycle.TransportKind transport();
@@ -1202,6 +1204,8 @@ public static final class com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder
     descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
   public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder headTimeout(java.time.Duration);
     descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
+  public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder http2(boolean);
+    descriptor: (Z)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
   public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder idleTimeout(java.time.Duration);
     descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/lifecycle/ListenerOptions$Builder;
   public com.jsgalactic.axiom.lifecycle.ListenerOptions$Builder ioThreads(int);

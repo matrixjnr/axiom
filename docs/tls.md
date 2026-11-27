@@ -58,10 +58,14 @@ class name only.
 | `minimumProtocol` | TLS 1.2 | TLS 1.3 is used whenever the client supports it. SSLv3, TLS 1.0 and 1.1 cannot be enabled. Set `TLS_1_3` to refuse TLS 1.2 clients |
 | `cipherSuites` | `TlsOptions.DEFAULT_CIPHER_SUITES` | TLS 1.3 suites plus ECDHE with AES-GCM or ChaCha20-Poly1305 for TLS 1.2; no CBC, RC4, 3DES, static RSA or DHE. The server's order wins. Suites the JVM lacks are skipped; at least one must remain |
 
-The listener advertises ALPN `http/1.1` and nothing else. A client that offers ALPN protocols without
-`http/1.1` (for example only `h2`) is refused with a `no_application_protocol` alert; a client that
-offers none is served HTTP/1.1. The JVM-wide `jdk.tls.disabledAlgorithms` security property still
-applies on top of these settings.
+By default the listener advertises ALPN `http/1.1` and nothing else. A client that offers ALPN
+protocols without `http/1.1` (for example only `h2`) is refused with a `no_application_protocol`
+alert; a client that offers none is served HTTP/1.1. With `ListenerOptions.http2(true)`, the
+listener advertises `h2` followed by `http/1.1`: a client offering `h2` speaks HTTP/2 over this
+TLS connection, one offering only `http/1.1` speaks HTTP/1.1, and one offering no ALPN still gets
+HTTP/1.1. Both protocols use the same certificate, TLS 1.2 minimum, cipher policy, handshake
+timeout and certificate reload ([HTTP/2](http.md#http2)). The JVM-wide
+`jdk.tls.disabledAlgorithms` security property still applies on top of these settings.
 
 ## Client certificates (mutual TLS)
 
@@ -126,7 +130,7 @@ subject, address) becomes a tag.
 
 These are outside what this module does, not planned work:
 
-- HTTP/2 and ALPN `h2`; the listener is HTTP/1.1 only.
+- HTTP/1.1 `Upgrade` to h2c on a cleartext listener ([HTTP/2](http.md#http2) supports h2c prior knowledge only).
 - OCSP stapling, certificate revocation checking and certificate transparency.
 - Encrypted private keys and traditional-format PEM keys; convert to unencrypted PKCS#8 or use an
   `sslContext` supplier.

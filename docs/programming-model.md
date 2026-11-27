@@ -213,7 +213,8 @@ listener would answer 500. Unsupported object bodies fail earlier with
 `IllegalArgumentException` at response construction; the
 client and the listener read these rules from one shared definition.
 Sockets, HTTP parsing and connection behavior (414, 431, Expect, pipelining)
-are not simulated.
+are not simulated. Requests stay in memory and HTTP/1-shaped: a listener's
+[HTTP/2](http.md#http2) mode (ALPN or h2c) is not simulated either.
 
 ### What needs a live listener
 
