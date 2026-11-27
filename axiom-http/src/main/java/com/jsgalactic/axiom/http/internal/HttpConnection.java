@@ -4,6 +4,7 @@ import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Body;
+import com.jsgalactic.axiom.http.BodyReader;
 import com.jsgalactic.axiom.http.HttpStatus;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
@@ -162,6 +163,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private ScheduledFuture<?> continueTimer;
     private ChannelHandlerContext context;
     private RequestDispatcher.Task<WireResponse> active;
+    /** The exchange whose handler is running, needed to cancel a streaming body reader. */
+    private Exchange activeExchange;
     /**
      * The streamed response whose head was sent and whose body the handler is still writing; null
      * otherwise. Set when the head is written and cleared when the exchange ends.
@@ -176,6 +179,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     // bodies, at the limit, so a stalled sender holds little memory. Dropped on every exit path
     // (see releaseBody).
     private Body.Builder bodyBuilder;
+    private StreamingBodyReader streaming;
+    /** Set when a streaming handler stopped before its body ended: the remaining input is discarded. */
+    private boolean forceClose;
+    /** The running exchange whose streaming body was rejected by a listener error; read off-thread. */
+    private volatile Exchange rejected;
     private boolean bodyChunked;
     private long declaredLength;
     private int bodyLength;
@@ -259,6 +267,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     /** Releases a partially received body and its deadline timer; idempotent. */
     private void releaseBody() {
         bodyBuilder = null;
+        if (streaming != null) { streaming.close(); streaming = null; }
         if (bodyTimer != null) { bodyTimer.cancel(false); bodyTimer = null; }
         bodyLength = 0;
         continuePending = false;
@@ -364,6 +373,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                     .withRemoteAddress(peer).withTls(ctx.pipeline().get(SslHandler.class) != null),
                     HttpUtil.isKeepAlive(request), http10, ExecutionContext.create(application.requestTimeout()));
         } catch (IllegalArgumentException invalid) { fail(ctx, 400); return false; }
+        var streams = application.resolve(receiving.request()).map(application::streamsBody).orElse(false);
         if (chunked || length > 0) {
             bodyChunked = chunked;
             declaredLength = length;
@@ -372,7 +382,13 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             // The listener's budget covers this body from now until its response is final; a
             // declared length is taken in full, a chunked body grows its share as bytes arrive.
             receivingReservation = budget.reservation();
-            if (!chunked && !receivingReservation.grow(length)) { fail(ctx, 503); return false; }
+            // A streamed body reserves only the bytes it holds; a buffered declared body takes its
+            // whole announced share at once, including bytes a slow client has not sent yet.
+            if (!chunked && !streams && !receivingReservation.grow(length)) { fail(ctx, 503); return false; }
+            if (streams) {
+                streaming = new StreamingBodyReader(ctx, receivingReservation);
+                receiving = receiving.withStream(streaming);
+            }
             var exchange = receiving;
             // A slow body counts against the request deadline that started with the head.
             bodyTimer = ctx.executor().schedule(() -> {
@@ -380,7 +396,24 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 if (!closing && receiving == exchange) { fail(ctx, 408); }
             }, exchange.execution().remainingTime().toNanos(), TimeUnit.NANOSECONDS);
             continuePending = !expect.isEmpty() && !http10; // HTTP/1.0 clients do not expect 100.
+            if (streams) {
+                // A streaming handler starts before the body is complete: it reads from the reader
+                // while the event loop delivers chunks, and the water marks stop a slow reader from
+                // making the connection buffer more than its bounded share.
+                pending.addLast(exchange);
+                dispatch(ctx);
+            }
             sendContinue(ctx);
+        } else if (streams) {
+            // A streaming route with no body still gets a reader that ends at once, so the handler
+            // sees the same contract as one with bytes.
+            receivingReservation = budget.reservation();
+            streaming = new StreamingBodyReader(ctx, receivingReservation);
+            receiving = receiving.withStream(streaming).withReservation(receivingReservation);
+            streaming.end();
+            streaming = null;
+            pending.addLast(receiving);
+            dispatch(ctx);
         }
         return true;
     }
@@ -394,10 +427,18 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         int readable = content.readableBytes();
         long total = (long) bodyLength + readable;
         if (total > bodyLimit) { fail(ctx, 413); return false; }
-        if (queuedBodyBytes + total > 2L * bodyLimit) { fail(ctx, 503); return false; }
+        // A streaming body's bytes are held in its reader rather than in a body array; it shares the
+        // per-connection bound with the buffered bodies waiting behind it.
+        long held = streaming == null ? 0 : streaming.bytesReceived();
+        if (queuedBodyBytes + held + readable > 2L * bodyLimit) { fail(ctx, 503); return false; }
         // Growth is capped at the declared length, so a complete declared body fills its array exactly.
         long cap = bodyChunked ? bodyLimit : declaredLength;
         if (total > cap) { fail(ctx, 400); return false; } // More than declared; the decoder prevents this.
+        if (streaming != null) {
+            if (!streaming.accept(content)) { fail(ctx, 503); return false; }
+            bodyLength = (int) total;
+            return true;
+        }
         if (bodyBuilder == null) {
             int capacity = (int) Math.min(cap, Math.max(INITIAL_BODY_CAPACITY, total));
             if (bodyChunked && !receivingReservation.grow(capacity)) { fail(ctx, 503); return false; }
@@ -417,6 +458,23 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     private void completeRequest(ChannelHandlerContext ctx) {
         var exchange = receiving;
+        if (exchange.reader() != null) {
+            if (streaming != null) { streaming.end(); }
+            exchange = exchange.withBodyBytes(streaming == null ? 0 : (int) streaming.bytesReceived());
+            var reservation = receivingReservation;
+            if (reservation != null) {
+                reservation.shrinkTo(streaming == null ? 0 : streaming.queuedBytes());
+                exchange = exchange.withReservation(reservation);
+                receivingReservation = null;
+            }
+            // The exchange owns the reader now; releaseBody must not cancel it.
+            streaming = null;
+            releaseBody();
+            receiving = null;
+            receivingHead = false;
+            dispatch(ctx);
+            return;
+        }
         if (bodyBuilder != null) {
             if (bodyLength != declaredLength && !bodyChunked) { fail(ctx, 400); return; }
             try {
@@ -425,7 +483,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                 bodyBuilder = null;
                 var body = builder.build();
                 exchange = new Exchange(exchange.request().withBody(body), exchange.keepAlive(),
-                        exchange.http10(), exchange.execution(), null);
+                        exchange.http10(), exchange.execution(), null, null, bodyLength);
             } catch (IllegalArgumentException invalid) { fail(ctx, 400); return; }
             queuedBodyBytes += bodyLength;
         }
@@ -484,8 +542,15 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         // pipeline bound checked in accept keeps buffered requests finite.
         busy = true;
         var exchange = pending.removeFirst();
-        queuedBodyBytes -= exchange.request().body().length();
-        if (exchange.execution().isExpired()) { exchange.release(); send(ctx, exchange, error(504, exchange)); return; }
+        queuedBodyBytes -= exchange.bodyBytes();
+        activeExchange = exchange;
+        if (exchange.execution().isExpired()) {
+            abandonReader(exchange);
+            exchange.release();
+            activeExchange = null;
+            send(ctx, exchange, error(504, exchange));
+            return;
+        }
         try {
             // A closed application or dispatcher cannot run the request; answer instead of
             // leaving the connection busy. This also runs from a write listener, where an
@@ -498,24 +563,43 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             var tag = executor.endpointTag(key);
             active = executor.submit(session, key, policy, exchange.execution(), () -> {
                 try {
-                    var response = application.handle(exchange.request(), exchange.execution());
+                    var response = application.handle(exchange.request(), exchange.execution(), exchange.reader());
                     return response.isStreaming() ? stream(ctx, exchange, response, tag, key, streamPolicy)
                             : prepare(response, exchange);
                 } catch (Exception | Error failure) {
-                    logFailure(exchange, failure);
+                    if (exchange != rejected) { logFailure(exchange, failure); }
                     throw failure;
                 }
             }, WireResponse::status);
             active.result().whenComplete((response, thrown) -> {
+                // A handler that did not read its body to the end cannot leave its bytes to be
+                // parsed as another request: the response closes this connection and input is
+                // discarded after it, as for any request whose framing is no longer usable.
+                if (exchange.reader() instanceof StreamingBodyReader reader && !reader.finished()) {
+                    forceClose = true;
+                    dropPending();
+                    var decoder = ctx.pipeline().get(RequestDecoder.class);
+                    if (decoder != null) { decoder.discard(maxDiscardedInput); }
+                }
+                boolean refused = exchange == rejected;
+                abandonReader(exchange);
                 // The outcome is final: the request body no longer counts against the listener.
                 exchange.release();
                 var failure = unwrap(thrown);
                 try {
                     ctx.executor().execute(() -> {
                         active = null; // The outcome is final; only the response write remains.
+                        activeExchange = null;
                         // The head of a stream is out, so there is no response left to choose: it ends
                         // with a final chunk when the body completed, and by closing the connection otherwise.
                         if (stream != null) { endStream(ctx, failure); return; }
+                        if (refused) {
+                            // The listener's error is the only response for this request.
+                            rejected = null;
+                            busy = false;
+                            dispatch(ctx);
+                            return;
+                        }
                         if (closing || !ctx.channel().isActive()) { return; }
                         if (failure instanceof Error) {
                             abort(ctx);
@@ -534,9 +618,16 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                         "HTTP request " + correlation(exchange) + " could not be dispatched", unavailable);
             }
             if (active != null) { active.cancel(); active = null; }
+            activeExchange = null;
+            abandonReader(exchange);
             exchange.release();
             send(ctx, exchange, error(503, exchange));
         }
+    }
+
+    /** Closes a streaming reader once; a buffered exchange has none. */
+    private static void abandonReader(Exchange exchange) {
+        if (exchange.reader() != null) { exchange.reader().close(); }
     }
 
     private static Throwable unwrap(Throwable failure) {
@@ -594,7 +685,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             }
             message.headers().set("X-Request-ID", exchange.execution().requestId());
             message.headers().set(HttpHeaderNames.DATE, httpDate());
-            boolean ending = draining || listenerClosing.getAsBoolean();
+            boolean ending = draining || listenerClosing.getAsBoolean() || forceClose;
             boolean keepAlive = exchange.keepAlive() && !response.close() && !ending;
             HttpUtil.setKeepAlive(message, keepAlive);
             // HTTP/1.0 clients assume close unless persistence is acknowledged explicitly.
@@ -778,6 +869,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
         boolean head = receivingHead;
         receivingHead = false;
         headComplete();
+        // A streaming handler is already running: its reader is cancelled so a blocked read ends.
+        // Its own failure must not produce a second response after the listener's error.
+        if (activeExchange != null && receiving == activeExchange && activeExchange.reader() != null) {
+            rejected = activeExchange;
+        }
         releaseBody();
         receiving = null;
         var decoder = ctx.pipeline().get(RequestDecoder.class);
@@ -855,12 +951,20 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /** Forgets requests that were received but not started, returning their share of the body budget. */
     private void dropPending() {
-        for (var queued : pending) { queued.release(); }
+        for (var queued : pending) {
+            abandonReader(queued);
+            queued.release();
+        }
         pending.clear();
         queuedBodyBytes = 0;
     }
 
-    private void abort(ChannelHandlerContext ctx) { closing = true; releaseBody(); ctx.close(); }
+    private void abort(ChannelHandlerContext ctx) {
+        closing = true;
+        releaseBody();
+        if (activeExchange != null) { abandonReader(activeExchange); activeExchange = null; }
+        ctx.close();
+    }
 
     @Override public void channelInactive(ChannelHandlerContext ctx) {
         closing = true;
@@ -878,6 +982,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             stream = null;
         }
         if (active != null) { active.cancel(); active = null; }
+        if (activeExchange != null) { abandonReader(activeExchange); activeExchange = null; }
     }
 
     @Override public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
@@ -902,12 +1007,18 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     private record CachedDate(long second, String value) { }
     private static volatile CachedDate date = new CachedDate(Long.MIN_VALUE, "");
     private record Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution,
-            BodyBudget.Reservation reservation) {
+            BodyBudget.Reservation reservation, BodyReader reader, int bodyBytes) {
         Exchange(Request request, boolean keepAlive, boolean http10, ExecutionContext execution) {
-            this(request, keepAlive, http10, execution, null);
+            this(request, keepAlive, http10, execution, null, null, 0);
         }
         Exchange withReservation(BodyBudget.Reservation held) {
-            return new Exchange(request, keepAlive, http10, execution, held);
+            return new Exchange(request, keepAlive, http10, execution, held, reader, bodyBytes);
+        }
+        Exchange withStream(BodyReader stream) {
+            return new Exchange(request, keepAlive, http10, execution, reservation, stream, bodyBytes);
+        }
+        Exchange withBodyBytes(int bytes) {
+            return new Exchange(request, keepAlive, http10, execution, reservation, reader, bytes);
         }
         /** Returns the request body's share of the listener's budget; idempotent. */
         void release() { if (reservation != null) { reservation.release(); } }

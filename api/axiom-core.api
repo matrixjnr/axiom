@@ -87,6 +87,10 @@ public interface com.jsgalactic.axiom.application.Application extends com.jsgala
     descriptor: (Lcom/jsgalactic/axiom/routing/Route;)Ljava/util/Optional;
   public abstract void close();
     descriptor: ()V
+  public default boolean streamsBody(com.jsgalactic.axiom.routing.Route);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;)Z
+  public default com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.http.Request, com.jsgalactic.axiom.execution.ExecutionContext, com.jsgalactic.axiom.http.BodyReader) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;Lcom/jsgalactic/axiom/execution/ExecutionContext;Lcom/jsgalactic/axiom/http/BodyReader;)Lcom/jsgalactic/axiom/http/Response;
   public default com.jsgalactic.axiom.lifecycle.Server listen(int) throws java.io.IOException;
     descriptor: (I)Lcom/jsgalactic/axiom/lifecycle/Server;
   public default com.jsgalactic.axiom.lifecycle.Server listen(java.net.InetSocketAddress) throws java.io.IOException;
@@ -156,6 +160,8 @@ public interface com.jsgalactic.axiom.context.Context {
     descriptor: (Ljava/lang/Class;Lcom/jsgalactic/axiom/context/BodyValidator;)Ljava/lang/Object;
   public default com.jsgalactic.axiom.context.Context identity(com.jsgalactic.axiom.context.SecurityIdentity);
     descriptor: (Lcom/jsgalactic/axiom/context/SecurityIdentity;)Lcom/jsgalactic/axiom/context/Context;
+  public default com.jsgalactic.axiom.http.BodyReader bodyReader();
+    descriptor: ()Lcom/jsgalactic/axiom/http/BodyReader;
   public default com.jsgalactic.axiom.http.Response automaticOptions();
     descriptor: ()Lcom/jsgalactic/axiom/http/Response;
   public default com.jsgalactic.axiom.http.Response encode(java.lang.String, java.lang.Object);
@@ -255,6 +261,9 @@ public final class com.jsgalactic.axiom.context.SecurityIdentity extends java.la
     descriptor: ()Ljava/util/Set;
   public static com.jsgalactic.axiom.context.SecurityIdentity of(java.lang.String);
     descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/context/SecurityIdentity;
+}
+
+public interface com.jsgalactic.axiom.context.StreamingHandler extends com.jsgalactic.axiom.context.Handler {
 }
 
 public abstract class com.jsgalactic.axiom.error.AxiomException extends java.lang.RuntimeException {
@@ -611,6 +620,45 @@ public static final class com.jsgalactic.axiom.http.Body$Builder {
     descriptor: ()I
 }
 
+public final class com.jsgalactic.axiom.http.BodyReadException extends java.io.IOException {
+  public com.jsgalactic.axiom.http.BodyReadException$Reason reason();
+    descriptor: ()Lcom/jsgalactic/axiom/http/BodyReadException$Reason;
+  public com.jsgalactic.axiom.http.BodyReadException(com.jsgalactic.axiom.http.BodyReadException$Reason);
+    descriptor: (Lcom/jsgalactic/axiom/http/BodyReadException$Reason;)V
+}
+
+public static final class com.jsgalactic.axiom.http.BodyReadException$Reason extends java.lang.Enum<com.jsgalactic.axiom.http.BodyReadException$Reason> {
+  public static com.jsgalactic.axiom.http.BodyReadException$Reason valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/BodyReadException$Reason;
+  public static com.jsgalactic.axiom.http.BodyReadException$Reason[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/http/BodyReadException$Reason;
+  public static final com.jsgalactic.axiom.http.BodyReadException$Reason CANCELLED;
+    descriptor: Lcom/jsgalactic/axiom/http/BodyReadException$Reason;
+  public static final com.jsgalactic.axiom.http.BodyReadException$Reason INTERRUPTED;
+    descriptor: Lcom/jsgalactic/axiom/http/BodyReadException$Reason;
+  public static final com.jsgalactic.axiom.http.BodyReadException$Reason LIMIT_EXCEEDED;
+    descriptor: Lcom/jsgalactic/axiom/http/BodyReadException$Reason;
+}
+
+public interface com.jsgalactic.axiom.http.BodyReader extends java.lang.AutoCloseable {
+  public abstract boolean paused();
+    descriptor: ()Z
+  public abstract int read(byte[], int, int) throws java.io.IOException;
+    descriptor: ([BII)I
+  public abstract long bytesRead();
+    descriptor: ()J
+  public abstract void close();
+    descriptor: ()V
+  public abstract void pause();
+    descriptor: ()V
+  public abstract void resume();
+    descriptor: ()V
+  public default int read(byte[]) throws java.io.IOException;
+    descriptor: ([B)I
+  public static com.jsgalactic.axiom.http.BodyReader of(byte[]);
+    descriptor: ([B)Lcom/jsgalactic/axiom/http/BodyReader;
+}
+
 public interface com.jsgalactic.axiom.http.BodyWriter {
   public abstract long bytesWritten();
     descriptor: ()J
@@ -804,6 +852,81 @@ public final class com.jsgalactic.axiom.http.HttpStatus {
 public final class com.jsgalactic.axiom.http.InvalidRequestPathException extends java.lang.IllegalArgumentException {
   public com.jsgalactic.axiom.http.InvalidRequestPathException(java.lang.String);
     descriptor: (Ljava/lang/String;)V
+}
+
+public final class com.jsgalactic.axiom.http.MultipartException extends com.jsgalactic.axiom.error.BadRequestException {
+  public com.jsgalactic.axiom.http.MultipartException(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
+  public static final java.lang.String LIMIT_EXCEEDED = "multipart_limit_exceeded";
+    descriptor: Ljava/lang/String;
+  public static final java.lang.String MALFORMED = "malformed_multipart";
+    descriptor: Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.http.MultipartParser implements java.lang.AutoCloseable {
+  public com.jsgalactic.axiom.http.MultipartParser(com.jsgalactic.axiom.http.BodyReader, java.lang.String, com.jsgalactic.axiom.http.MultipartParser$Limits, com.jsgalactic.axiom.http.MultipartParser$Listener);
+    descriptor: (Lcom/jsgalactic/axiom/http/BodyReader;Ljava/lang/String;Lcom/jsgalactic/axiom/http/MultipartParser$Limits;Lcom/jsgalactic/axiom/http/MultipartParser$Listener;)V
+  public com.jsgalactic.axiom.http.MultipartParser(com.jsgalactic.axiom.http.BodyReader, java.lang.String, com.jsgalactic.axiom.http.MultipartParser$Limits, com.jsgalactic.axiom.http.MultipartParser$Listener, java.nio.file.Path);
+    descriptor: (Lcom/jsgalactic/axiom/http/BodyReader;Ljava/lang/String;Lcom/jsgalactic/axiom/http/MultipartParser$Limits;Lcom/jsgalactic/axiom/http/MultipartParser$Listener;Ljava/nio/file/Path;)V
+  public void close();
+    descriptor: ()V
+  public void parse() throws java.io.IOException;
+    descriptor: ()V
+}
+
+public static final class com.jsgalactic.axiom.http.MultipartParser$Limits extends java.lang.Record {
+  public com.jsgalactic.axiom.http.MultipartParser$Limits(int, int, int, long);
+    descriptor: (IIIJ)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public int maxHeaderBytes();
+    descriptor: ()I
+  public int maxPartBytes();
+    descriptor: ()I
+  public int maxParts();
+    descriptor: ()I
+  public long maxTotalBytes();
+    descriptor: ()J
+  public static final com.jsgalactic.axiom.http.MultipartParser$Limits DEFAULT;
+    descriptor: Lcom/jsgalactic/axiom/http/MultipartParser$Limits;
+}
+
+public static interface com.jsgalactic.axiom.http.MultipartParser$Listener {
+  public abstract void part(com.jsgalactic.axiom.http.MultipartParser$Part) throws java.io.IOException;
+    descriptor: (Lcom/jsgalactic/axiom/http/MultipartParser$Part;)V
+  public default void complete() throws java.io.IOException;
+    descriptor: ()V
+}
+
+public static final class com.jsgalactic.axiom.http.MultipartParser$Part extends java.lang.Record {
+  public byte[] bytes();
+    descriptor: ()[B
+  public com.jsgalactic.axiom.http.MultipartParser$Part(java.util.Map<java.lang.String, java.lang.String>, java.lang.String, java.lang.String, java.lang.String, long, byte[]);
+    descriptor: (Ljava/util/Map;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;J[B)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String contentType();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String filename();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String name();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String text();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String text(java.nio.charset.Charset);
+    descriptor: (Ljava/nio/charset/Charset;)Ljava/lang/String;
+  public java.util.Map<java.lang.String, java.lang.String> headers();
+    descriptor: ()Ljava/util/Map;
+  public long size();
+    descriptor: ()J
 }
 
 public final class com.jsgalactic.axiom.http.Request {

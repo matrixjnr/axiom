@@ -6,12 +6,14 @@ import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.context.ErrorHandler;
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
+import com.jsgalactic.axiom.context.StreamingHandler;
 import com.jsgalactic.axiom.error.AxiomException;
 import com.jsgalactic.axiom.error.PayloadTooLargeException;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.ExecutionBudget;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.execution.StreamPolicy;
+import com.jsgalactic.axiom.http.BodyReader;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.spi.HttpTransportProvider;
@@ -28,6 +30,7 @@ import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,11 +54,11 @@ final class DefaultApplication implements Application, ExecutionAccess {
     private record Runtime(CompiledRouter router, Handler unmatched, List<Route> routes, Set<Route> routeSet,
                            ExecutionBudget budget, RequestDispatcher execution,
                            Map<Route, StreamPolicy> streamPolicies, StreamPolicy defaultStreamPolicy,
-                           Codecs codecs, int maxRequestBody) {
+                           Codecs codecs, int maxRequestBody, Set<Route> streamingRoutes) {
         /** Drops every reference to application handlers, middleware and error handlers. */
         Runtime withoutRouter() {
             return new Runtime(null, null, routes, routeSet, budget, execution,
-                    streamPolicies, defaultStreamPolicy, codecs, maxRequestBody);
+                    streamPolicies, defaultStreamPolicy, codecs, maxRequestBody, streamingRoutes);
         }
     }
 
@@ -73,6 +76,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
     private final Scope root = new Scope(null, "");
     private final Map<Route, StreamPolicy> streamPolicies = new LinkedHashMap<>();
     private final Map<Route, RouteDoc> routeDocs = new LinkedHashMap<>();
+    private final Set<Route> streamingRoutes = new HashSet<>();
     private final Map<String, Route> shapes = new HashMap<>();
     private final Set<String> recognizedMethods = new TreeSet<>();
     private Handler notFoundHandler;
@@ -281,6 +285,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
                     + previous.path() + " and " + path);
         }
         registrations.put(route, new Registration(handler, scope, routeMiddleware));
+        if (handler instanceof StreamingHandler) { streamingRoutes.add(route); }
         return route;
     }
 
@@ -452,6 +457,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
             shapes.remove(route.method() + " " + shape(route.path()), route);
             executionBudget = executionBudget.withoutRoute(route);
             streamPolicies.remove(route);
+            streamingRoutes.remove(route);
             routeDocs.remove(route);
             removed.remove();
         }
@@ -543,7 +549,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
         // One dispatcher owns the counters, queue and workers for the whole application.
         var execution = router == null ? null : new RequestDispatcher(budget, streamPolicy, metrics);
         return new Runtime(router, unmatched, routes, Set.copyOf(routes), budget, execution,
-                Map.copyOf(streamPolicies), streamPolicy, codecs, maxRequestBody);
+                Map.copyOf(streamPolicies), streamPolicy, codecs, maxRequestBody, Set.copyOf(streamingRoutes));
     }
 
     @Override
@@ -663,6 +669,15 @@ final class DefaultApplication implements Application, ExecutionAccess {
         return published.streamPolicies().getOrDefault(route, published.defaultStreamPolicy());
     }
 
+    @Override public boolean streamsBody(Route route) {
+        Objects.requireNonNull(route, "route");
+        var published = runtime;
+        if (published != null) { return published.streamingRoutes().contains(route); }
+        synchronized (this) {
+            return runtime != null ? runtime.streamingRoutes().contains(route) : streamingRoutes.contains(route);
+        }
+    }
+
     @Override public synchronized Application describe(Route route, RouteDoc doc) {
         requireState(State.CONFIGURING);
         Objects.requireNonNull(route, "route");
@@ -726,6 +741,11 @@ final class DefaultApplication implements Application, ExecutionAccess {
 
     @Override
     public Response handle(Request request, ExecutionContext execution) throws Exception {
+        return handle(request, execution, null);
+    }
+
+    @Override
+    public Response handle(Request request, ExecutionContext execution, BodyReader reader) throws Exception {
         Objects.requireNonNull(execution, "execution");
         Objects.requireNonNull(request, "request");
         // Admission ends here. User code never runs under the lifecycle lock.
@@ -733,7 +753,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
         if (execution.isExpired()) { throw new TimeoutException("Request deadline exceeded"); }
         Response response;
         try {
-            response = dispatch(published, request, execution);
+            response = dispatch(published, request, execution, reader);
         } catch (AxiomException failure) {
             // Failures before routing (413) and exceptions of afterError, which the chain did not map.
             if (failure.status() >= 500) {
@@ -762,19 +782,26 @@ final class DefaultApplication implements Application, ExecutionAccess {
         return response.withoutBody().withHeader("Content-Length", Integer.toString(bytes.length));
     }
 
-    private static Response dispatch(Runtime published, Request request, ExecutionContext execution) throws Exception {
+    private static Response dispatch(Runtime published, Request request, ExecutionContext execution,
+                                     BodyReader reader) throws Exception {
         if (request.body().length() > published.maxRequestBody()) { throw new PayloadTooLargeException(); }
         // CONNECT requests a tunnel, which is not supported for any target (RFC 9110 15.6.2).
         if (request.method().equals("CONNECT")) { return Problems.response(501, execution.requestId()); }
         var match = published.router().match(request);
+        var streams = match != null && match.methodAllowed() && published.streamingRoutes().contains(match.route());
+        // Direct in-memory calls and the test client can execute a streaming route over a buffered
+        // request; the same hand-off gives the handler a reader in both embedded and live tests.
+        var supplied = reader != null ? reader
+                : streams ? BodyReader.of(request.body().bytes()) : null;
         DefaultContext context;
         Handler chain;
         if (match != null && match.methodAllowed()) {
-            context = new DefaultContext(request, match, execution, published.codecs(), null, published.router());
+            context = new DefaultContext(request, match, execution, published.codecs(), null, published.router(),
+                    supplied);
             chain = match.handler();
         } else {
             context = new DefaultContext(request, null, execution, published.codecs(),
-                    frameworkAnswer(published.router(), request, match, execution), published.router());
+                    frameworkAnswer(published.router(), request, match, execution), published.router(), supplied);
             chain = published.unmatched();
         }
         // The chain's outermost step encodes the response and maps exceptions; see ErrorBoundary.
@@ -818,6 +845,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
             notImplementedHandler = null;
             shapes.clear();
             streamPolicies.clear();
+            streamingRoutes.clear();
             owned = List.copyOf(listeners);
             listeners.clear();
         }
