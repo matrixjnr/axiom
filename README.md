@@ -215,6 +215,7 @@ is a record of what shipped. Remaining milestones are in the [roadmap, #18](http
 | `axiom-metrics-micrometer` | `axiom-metrics-micrometer` | Micrometer adapter that records the `Metrics` SPI in a `MeterRegistry` (opt-in) |
 | `axiom-openapi` | `axiom-openapi` | OpenAPI 3.1 and Swagger 2.0 documents from route descriptions (opt-in) |
 | `axiom-openapi-ui` | `axiom-openapi-ui` | Swagger UI served from the application, files packaged statically, no CDN (opt-in) |
+| `axiom-grpc` | `axiom-grpc` | Generated gRPC services on their own listener, with Axiom lifecycle and health hooks (opt-in) |
 | `axiom-graphql` | `axiom-graphql` | GraphQL query/mutation HTTP adapter over graphql-java, opt-in per route (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
