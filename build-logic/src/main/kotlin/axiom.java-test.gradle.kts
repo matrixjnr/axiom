@@ -4,13 +4,14 @@ plugins {
 }
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
-// The JaCoCo agent is attached to every Test task (test and integrationTest, which then write
-// build/jacoco/<task>.exec) only when the requested build contains a JaCoCo report task, for
-// example coverageReport or :axiom-http:jacocoTestReport. Plain test and check runs carry no
-// agent, so timing- and allocation-sensitive tests run uninstrumented. No class is excluded.
+// The JaCoCo agent writes build/jacoco/<task>.exec for each Test task when a report is requested,
+// or when -Daxiom.collectCoverage=true is passed. CI uses the flag in its test jobs to upload the
+// execution data; the quality job then builds reports from those files without running tests again.
+// Plain test and check runs carry no agent, so timing-sensitive tests stay uninstrumented.
 jacoco { toolVersion = libs.findVersion("jacoco").get().requiredVersion }
+val collectCoverage = providers.systemProperty("axiom.collectCoverage").getOrElse("false").toBoolean()
 tasks.withType<Test>().configureEach {
-    extensions.getByType<JacocoTaskExtension>().isEnabled = false
+    extensions.getByType<JacocoTaskExtension>().isEnabled = collectCoverage
 }
 gradle.taskGraph.whenReady {
     if (allTasks.any { it is JacocoReport }) {
