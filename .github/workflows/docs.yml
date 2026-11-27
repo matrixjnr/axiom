@@ -55,9 +55,10 @@ jobs:
       # Fails on a broken link or anchor in the Markdown, then writes build/jekyll and build/docs-api.
       - run: ./gradlew checkDocsLinks jekyllSource aggregateJavadoc
       # Gems come from site/Gemfile.lock only, installed with the lock frozen (hashes verified).
+      # Ruby 3.3.13 is the latest 3.3 patch available on current ubuntu-latest images.
       - uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
         with:
-          ruby-version: '3.3.6'
+          ruby-version: '3.3.13'
           bundler-cache: true
           working-directory: site
       # The address GitHub Pages serves the site at: the project address (base path /axiom) or a custom
