@@ -19,11 +19,8 @@ asm = "9.11.1"
 # Adapter dependencies are opt-in: only axiom-otel and axiom-metrics-micrometer resolve them.
 opentelemetry = "1.68.0"
 micrometer = "1.18.0"
-# gRPC adapter artifacts are opt-in: only axiom-grpc resolves them. Netty is shaded into
-# grpc-netty-shaded, so it cannot clash with the unshaded Netty of axiom-http.
-grpc = "1.86.0"
-# Aligned with grpc-protobuf 1.86.0.
-protobuf = "3.25.9"
+# Adapter dependency: graphql-java and its own transitive libraries stay inside axiom-graphql.
+graphql-java = "26.2"
 
 [libraries]
 japicmp = { module = "com.github.siom79.japicmp:japicmp", version.ref = "japicmp" }
@@ -54,9 +51,4 @@ opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api", version.ref
 # Test only: in-memory exporters and readers, never on an adapter's published classpath.
 opentelemetry-sdk-testing = { module = "io.opentelemetry:opentelemetry-sdk-testing", version.ref = "opentelemetry" }
 micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
-grpc-netty-shaded = { module = "io.grpc:grpc-netty-shaded", version.ref = "grpc" }
-grpc-protobuf = { module = "io.grpc:grpc-protobuf", version.ref = "grpc" }
-grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }
-# Test only: in-process server and channel; no socket is opened by the gRPC tests.
-grpc-inprocess = { module = "io.grpc:grpc-inprocess", version.ref = "grpc" }
-protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
+graphql-java = { module = "com.graphql-java:graphql-java", version.ref = "graphql-java" }

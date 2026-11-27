@@ -182,6 +182,9 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
   ([observability](docs/observability.md)).
 - **Secure path handling**: raw paths with dot or empty segments, backslashes or encoded
   separators are rejected with 400, never normalized ([routing](docs/routing.md#raw-paths-and-ownership)).
+- **GraphQL (opt-in)**: `axiom-graphql` adapts an application-owned graphql-java runtime to a
+  route, with bounded requests, depth and complexity limits, per-request DataLoaders and opaque
+  problem responses ([GraphQL](docs/graphql.md)).
 
 ## Not yet
 
@@ -212,7 +215,7 @@ is a record of what shipped. Remaining milestones are in the [roadmap, #18](http
 | `axiom-metrics-micrometer` | `axiom-metrics-micrometer` | Micrometer adapter that records the `Metrics` SPI in a `MeterRegistry` (opt-in) |
 | `axiom-openapi` | `axiom-openapi` | OpenAPI 3.1 and Swagger 2.0 documents from route descriptions (opt-in) |
 | `axiom-openapi-ui` | `axiom-openapi-ui` | Swagger UI served from the application, files packaged statically, no CDN (opt-in) |
-| `axiom-grpc` | `axiom-grpc` | Generated gRPC services on their own listener, with Axiom lifecycle and health hooks (opt-in) |
+| `axiom-graphql` | `axiom-graphql` | GraphQL query/mutation HTTP adapter over graphql-java, opt-in per route (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
