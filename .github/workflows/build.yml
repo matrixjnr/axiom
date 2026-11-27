@@ -62,12 +62,19 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
       # Temurin 21 can measure per-thread allocation; fail instead of skipping if that changes.
-      - run: ./gradlew ${{ matrix.path }}:test -Daxiom.requireAllocationTests=true
+      - run: ./gradlew ${{ matrix.path }}:test -Daxiom.requireAllocationTests=true -Daxiom.collectCoverage=true
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unit-test-reports-${{ matrix.module }}
           path: ${{ matrix.dir }}/build/reports/tests/test/
+      # The quality job aggregates these files instead of running the tests a second time.
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jacoco-unit-${{ matrix.module }}
+          path: ${{ matrix.dir }}/build/jacoco/test.exec
+          if-no-files-found: error
   # Tests tagged integration (real sockets, live listeners) and the integration-tests module.
   # One job, so the root task picks up every module's integrationTest and keeps their order.
   integration:
@@ -80,13 +87,20 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-      - run: ./gradlew integrationTest -Daxiom.requireAllocationTests=true
+      - run: ./gradlew integrationTest -Daxiom.requireAllocationTests=true -Daxiom.collectCoverage=true
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-test-reports
           path: '**/build/reports/tests/integrationTest/'
-  # Coverage report (runs both test tasks with the JaCoCo agent) and the hello smoke run.
+      # One archive keeps every module's integration execution data for the quality job.
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jacoco-integration
+          path: '*/build/jacoco/integrationTest.exec'
+          if-no-files-found: error
+  # Coverage report from the execution data uploaded by the test jobs, and the hello smoke run.
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -97,13 +111,19 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-      - run: ./gradlew coverageReport -Daxiom.requireAllocationTests=true
+      # Artifact paths keep their module directories, so the files land where the task expects them.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: jacoco-*
+          path: .
+          merge-multiple: true
+      - run: ./gradlew aggregateCoverage
       - if: success() || failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report
-          path: build/reports/jacoco/coverageReport/
-          if-no-files-found: ignore
+          path: build/reports/jacoco/aggregateCoverage/
+          if-no-files-found: error
       - run: ./gradlew :examples:hello:run --args="--smoke"
   # Branch protection requires a status check named `check`; this job keeps that name and passes
   # only when every job above succeeded.

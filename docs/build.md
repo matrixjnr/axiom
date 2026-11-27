@@ -164,14 +164,20 @@ ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 te
 
 The `axiom.java-test` convention applies the Gradle `jacoco` plugin with the JaCoCo version
 pinned in the version catalog (`jacoco`). The agent is attached to a test task (`test` and
-`integrationTest`) only when the requested build contains a JaCoCo report task
-(`coverageReport`, a module's `jacocoTestReport`, `testCodeCoverageReport` and so on); such a
-task then writes `build/jacoco/<task>.exec` in its module. Plain `check`, `test`,
-`unitTest` and `integrationTest` runs (local, the CI test jobs and the per-commit job) run
-without the agent, so timing- and allocation-sensitive tests are not instrumented. Decision:
-the agent is a coverage-only concern; the `quality` job is where it runs. Test tasks are
-cached separately with and without the agent, so a coverage run executes the tests once under
-the agent even when the same tests passed without it.
+`integrationTest`) when the requested build contains a JaCoCo report task (`coverageReport`,
+a module's `jacocoTestReport`, `testCodeCoverageReport` and so on) or when
+`-Daxiom.collectCoverage=true` is passed; either way the task writes
+`build/jacoco/<task>.exec` in its module. Plain `check`, `test`, `unitTest` and
+`integrationTest` runs (local and the per-commit job) carry no agent, so timing- and
+allocation-sensitive tests are not instrumented. Decision: the agent is a coverage-only
+concern. Test tasks are cached separately with and without the agent, so a coverage run
+executes the tests once under the agent even when the same tests passed without it.
+
+CI passes `-Daxiom.collectCoverage=true` in the `unit` and `integration` jobs and uploads each
+module's `.exec` file. The `quality` job downloads those artifacts into their module
+directories and runs `aggregateCoverage`, which builds the report from the files without
+running any test. Local `coverageReport` still runs the tests itself; both tasks write the
+same XML counters from the same execution data.
 
 - Per module: `./gradlew :axiom-http:jacocoTestReport` runs the module's test tasks and writes
   `build/reports/jacoco/test/html/` and `build/reports/jacoco/test/jacocoTestReport.xml` from
@@ -186,6 +192,10 @@ the agent even when the same tests passed without it.
   the root merges the `test` and `integrationTest` aggregates (also available on their own
   as `testCodeCoverageReport` and `integrationTestCodeCoverageReport`). The BOM has no code;
   examples and benchmarks are not library code and are not aggregated.
+- From supplied data: `./gradlew aggregateCoverage` (root) reads every
+  `*/build/jacoco/*.exec` and writes `build/reports/jacoco/aggregateCoverage/html/` and
+  `build/reports/jacoco/aggregateCoverage/aggregateCoverage.xml` without running tests. CI
+  uses this task after downloading the execution data from its test jobs.
 
 Examples are deliberately not in the coverage report: they are usage samples, not shipped
 code, and including them would dilute the numbers of the libraries without testing more of
@@ -422,9 +432,9 @@ the Gradle cache of `gradle/actions/setup-gradle`:
 | --- | --- | --- |
 | `build` | `./gradlew assemble testClasses javadoc check -x test -x integrationTest`: compilation (main, test and benchmark sources), jars, Javadoc, `architectureTest`, `checkstyleMain` and `checkstyleTest` of every module, `checkPublicationCoverage`, `checkIntegrationTags`, the benchmark harness compile and dependency verification of everything it resolves | 20 min |
 | `matrix` | `./gradlew -q unitTestMatrix`: prints the modules that have unit tests as the `unit` job's matrix | 10 min |
-| `unit` | `./gradlew <module>:test -Daxiom.requireAllocationTests=true`, one job per module listed by `matrix`; uploads the module's test report on failure | 20 min |
-| `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure | 30 min |
-| `quality` | `./gradlew coverageReport`, uploads `build/reports/jacoco/coverageReport/` (XML and HTML) as the `coverage-report` artifact, then the hello smoke run `./gradlew :examples:hello:run --args=--smoke` | 30 min |
+| `unit` | `./gradlew <module>:test -Daxiom.requireAllocationTests=true -Daxiom.collectCoverage=true`, one job per module listed by `matrix`; uploads the module's test report on failure and its `test.exec` as `jacoco-unit-<module>` | 20 min |
+| `integration` | `./gradlew integrationTest -Daxiom.requireAllocationTests=true -Daxiom.collectCoverage=true` (axiom-http, integration-tests, examples/rest-api); uploads the test reports on failure and all `integrationTest.exec` files as `jacoco-integration` | 30 min |
+| `quality` | downloads the `jacoco-*` artifacts, runs `./gradlew aggregateCoverage`, uploads `build/reports/jacoco/aggregateCoverage/` (XML and HTML) as `coverage-report`, then the hello smoke run `./gradlew :examples:hello:run --args="--smoke"` | 30 min |
 | `check` | needs `build`, `matrix`, `unit`, `integration` and `quality` and fails unless each succeeded (it runs even when one failed or was cancelled) | 5 min |
 | `commits` | pull requests only: `./gradlew clean check` on each commit (below) | 90 min |
 

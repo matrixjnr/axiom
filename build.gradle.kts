@@ -150,6 +150,21 @@ tasks.register<JacocoReport>("coverageReport") {
     dependsOn(coverageModules.filter { it != "integration-tests" }.map { ":$it:jacocoTestReport" })
 }
 
+// CI collects build/jacoco/test.exec and build/jacoco/integrationTest.exec in its test jobs and
+// downloads them into the workspace. This task writes the combined report from those files into
+// build/reports/jacoco/aggregateCoverage; it has no test dependencies, so nothing runs twice.
+tasks.register<JacocoReport>("aggregateCoverage") {
+    group = "verification"
+    description = "Writes the combined JaCoCo report from supplied execution data without running tests."
+    executionData.setFrom(fileTree(rootDir) { include("*/build/jacoco/*.exec") })
+    classDirectories.setFrom(files(coverageModules.map { file("$it/build/classes/java/main") }))
+    sourceDirectories.setFrom(files(coverageModules.map { file("$it/src/main/java") }))
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
 // Consumer compatibility: publish every module into build/compat-repo and build small
 // Gradle (Kotlin and Groovy DSL) and Maven projects against it. Slow, so not part of check.
 val compatRepo = layout.buildDirectory.dir("compat-repo")

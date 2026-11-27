@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Record checksums for the Netty 4.2.20 native transport artifacts. The API artifact workflow resolves them on Linux; a Windows-only metadata regeneration could not observe them.
+- Reuse unit and integration JaCoCo execution data in CI: test jobs upload their `.exec` files and the quality job aggregates them without running tests again. Local `coverageReport` is unchanged.
 - Add a Java 21 downstream HTTP recipe with a shared client, a complete-body wait budget, a 64 KiB response cap and real-socket cancellation tests. Document application ownership and asynchronous network cleanup.
 
 - Record synchronous middleware continuations as the supported contract, with a compiled parallel lookup example covering deadline propagation, sibling cancellation and child cleanup. Correct middleware response encoding documentation.
