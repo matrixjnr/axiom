@@ -6,6 +6,7 @@ import com.jsgalactic.axiom.error.AxiomException;
 import com.jsgalactic.axiom.error.DecodeException;
 import com.jsgalactic.axiom.error.UnsupportedMediaTypeException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.http.BodyReader;
 import com.jsgalactic.axiom.http.HttpStatus;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
@@ -21,6 +22,7 @@ import java.util.Optional;
  */
 final class DefaultContext implements Context {
     private final Request request;
+    private final BodyReader reader;
     private final ExecutionContext execution;
     private final CompiledRouter.Match match;
     private final Response frameworkAnswer;
@@ -36,9 +38,10 @@ final class DefaultContext implements Context {
     private Throwable seen;
 
     DefaultContext(Request request, CompiledRouter.Match match, ExecutionContext execution, Codecs codecs,
-                   Response frameworkAnswer, CompiledRouter router) {
+                   Response frameworkAnswer, CompiledRouter router, BodyReader reader) {
         this.router = router;
         this.request = request;
+        this.reader = reader;
         this.codecs = codecs;
         this.execution = execution;
         this.match = match;
@@ -119,6 +122,12 @@ final class DefaultContext implements Context {
         }
         this.identity = identity;
         return this;
+    }
+
+    @Override
+    public BodyReader bodyReader() {
+        if (reader == null) { throw new UnsupportedOperationException("This request has no streaming body reader"); }
+        return reader;
     }
 
     @Override

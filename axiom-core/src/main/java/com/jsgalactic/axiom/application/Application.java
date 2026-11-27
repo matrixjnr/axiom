@@ -3,10 +3,12 @@ package com.jsgalactic.axiom.application;
 import com.jsgalactic.axiom.context.ErrorHandler;
 import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
+import com.jsgalactic.axiom.context.StreamingHandler;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.ExecutionBudget;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.execution.StreamPolicy;
+import com.jsgalactic.axiom.http.BodyReader;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
@@ -532,6 +534,33 @@ public interface Application extends RouteGroup, AutoCloseable {
      * @throws Exception if the handler fails or the context is already expired
      */
     Response handle(Request request, ExecutionContext execution) throws Exception;
+
+    /**
+     * Executes with an incremental body reader supplied by the caller. Adapters that receive a
+     * request body while the handler runs pass a reader here; {@link com.jsgalactic.axiom.context.Context#bodyReader()}
+     * then returns it. A reader is valid until the handler returns and is closed by the caller
+     * when the exchange ends. Implementations that do not stream bodies delegate to
+     * {@link #handle(Request, ExecutionContext)}.
+     *
+     * @param request request to execute
+     * @param execution execution metadata owned by the caller
+     * @param reader incremental body reader, or null for the buffered path
+     * @return mapped response
+     * @throws Exception if the handler fails or the context is already expired
+     */
+    default Response handle(Request request, ExecutionContext execution, BodyReader reader) throws Exception {
+        return handle(request, execution);
+    }
+
+    /**
+     * Reports whether a route's handler was registered as a {@link StreamingHandler}, so that a
+     * transport can hand it body bytes as they arrive instead of buffering them first. Safe to
+     * call before and after startup; an unknown or unmatched route returns false.
+     *
+     * @param route registered route identity
+     * @return true when the route reads its body incrementally
+     */
+    default boolean streamsBody(Route route) { return false; }
 
     /**
      * Returns the current lifecycle state.

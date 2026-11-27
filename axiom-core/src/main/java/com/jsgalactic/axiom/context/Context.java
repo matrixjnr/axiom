@@ -1,10 +1,12 @@
 package com.jsgalactic.axiom.context;
 
+import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.error.AxiomException;
 import com.jsgalactic.axiom.error.BadRequestException;
 import com.jsgalactic.axiom.error.ValidationException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Body;
+import com.jsgalactic.axiom.http.BodyReader;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.internal.PercentDecoding;
@@ -268,6 +270,23 @@ public interface Context {
             if (hyphen ? c != '-' : Character.digit(c, 16) < 0 || c > 'f') { throw new BadRequestException(code); }
         }
         return UUID.fromString(value);
+    }
+
+    /**
+     * Returns the incremental reader for this request's body, when the runtime supplied one.
+     * A reader is supplied to handlers registered as {@link StreamingHandler} and to every
+     * request executed through the test client or
+     * {@link Application#handle(Request, ExecutionContext, BodyReader)}. It is valid only on this
+     * thread until the handler returns; the runtime closes it when the exchange ends. Reading it
+     * to the end is how a streaming handler consumes the body, and {@link Request#body()} is empty
+     * for those requests.
+     *
+     * @return the body reader, never null when supplied
+     * @throws UnsupportedOperationException if this context has no reader, for example an
+     *         application test double or a buffered route outside the test client
+     */
+    default BodyReader bodyReader() {
+        throw new UnsupportedOperationException("This context has no streaming body reader");
     }
 
     /**

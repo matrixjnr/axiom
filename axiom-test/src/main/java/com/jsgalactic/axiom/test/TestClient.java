@@ -3,6 +3,8 @@ package com.jsgalactic.axiom.test;
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.http.Body;
+import com.jsgalactic.axiom.http.BodyReadException;
+import com.jsgalactic.axiom.http.BodyReader;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.StreamAbortedException;
@@ -12,6 +14,7 @@ import com.jsgalactic.axiom.server.internal.ResponseSerialization;
 import com.jsgalactic.axiom.server.internal.StreamRun;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
@@ -212,8 +215,22 @@ public final class TestClient implements AutoCloseable {
      *         (a 500 response when this client maps failures)
      */
     public Response execute(Request request) throws Exception {
+        return execute(request, null);
+    }
+
+    /**
+     * Executes a request whose body is handed to the handler incrementally through the supplied
+     * reader, with the same aggregate cap as a listener: a read past {@code maxRequestBody} fails
+     * the request with 413. The client closes the reader when the exchange ends.
+     *
+     * @param request request to execute; its buffered body is not used when a reader is supplied
+     * @param reader source of body bytes, or null for the buffered hand-off of {@link #execute(Request)}
+     * @return response
+     * @throws Exception if the handler fails
+     */
+    public Response execute(Request request, BodyReader reader) throws Exception {
         try {
-            return submit(request).join();
+            return submit(request, reader).join();
         } catch (CompletionException failure) {
             var cause = failure.getCause();
             if (cause instanceof Exception exception) { throw exception; }
@@ -233,7 +250,21 @@ public final class TestClient implements AutoCloseable {
      * @return the request outcome
      */
     public CompletableFuture<Response> submit(Request request) {
+        return submit(request, null);
+    }
+
+    /**
+     * Starts a request with an incremental body reader for the handler, mirroring the listener's
+     * hand-off: buffering is replaced by reads from the reader, and its bytes are bounded by the
+     * application's body limit. The reader is closed when the exchange completes.
+     *
+     * @param request request to execute
+     * @param reader source of body bytes, or null for the buffered hand-off
+     * @return the request outcome
+     */
+    public CompletableFuture<Response> submit(Request request, BodyReader reader) {
         Objects.requireNonNull(request, "request");
+        var body = handoff(request, reader);
         var context = ExecutionContext.create(application.requestTimeout());
         var route = application.resolve(request);
         var key = route.<Object>map(value -> value).orElse(UNMATCHED);
@@ -242,7 +273,7 @@ public final class TestClient implements AutoCloseable {
         RequestDispatcher.Task<Response> task;
         try {
             task = dispatcher.submit(session, key, policy, context, () -> {
-                var response = application.handle(request, context);
+                var response = application.handle(request, context, body);
                 checkSerializable(response);
                 if (!response.isStreaming()) { return response; }
                 if (!dispatcher.admitStream(key, streamPolicy)) {
@@ -251,15 +282,45 @@ public final class TestClient implements AutoCloseable {
                 return collect(response, context, streamScope(route));
             }, Response::status);
         } catch (RejectedExecutionException overloaded) {
+            body.close();
             return CompletableFuture.completedFuture(Problems.response(503, context.requestId()));
         }
         return task.result().handle((response, thrown) -> {
+            body.close();
             var failure = unwrap(thrown);
             if (failure == null) { return response; }
             var problem = problem(failure, context);
             if (problem != null) { return problem; }
             throw new CompletionException(failure);
         }).toCompletableFuture();
+    }
+
+    /** Wraps the buffered body, or the caller's reader, with the listener's aggregate body cap. */
+    private BodyReader handoff(Request request, BodyReader supplied) {
+        var source = supplied != null ? supplied : BodyReader.of(request.body().bytes());
+        int limit = application.maxRequestBody();
+        return new BodyReader() {
+            private long count;
+
+            @Override public int read(byte[] bytes, int offset, int length) throws IOException {
+                int read = source.read(bytes, offset, length);
+                if (read > 0) {
+                    count += read;
+                    if (count > limit) { throw new BodyReadException(BodyReadException.Reason.LIMIT_EXCEEDED); }
+                }
+                return read;
+            }
+
+            @Override public void pause() { source.pause(); }
+
+            @Override public void resume() { source.resume(); }
+
+            @Override public boolean paused() { return source.paused(); }
+
+            @Override public long bytesRead() { return source.bytesRead(); }
+
+            @Override public void close() { source.close(); }
+        };
     }
 
     /**
@@ -281,7 +342,21 @@ public final class TestClient implements AutoCloseable {
      * @throws IllegalStateException if the response headers cannot be sent by the transport
      */
     public StreamedResponse stream(Request request) throws Exception {
+        return stream(request, null);
+    }
+
+    /**
+     * Like {@link #stream(Request)}, with the request body handed to the handler incrementally
+     * through {@code reader}. The client closes the reader when the exchange ends.
+     *
+     * @param request request to execute
+     * @param reader source of body bytes, or null for the buffered hand-off
+     * @return the response head and a reader for its body
+     * @throws Exception if the handler fails before the head is known
+     */
+    public StreamedResponse stream(Request request, BodyReader reader) throws Exception {
         Objects.requireNonNull(request, "request");
+        var body = handoff(request, reader);
         var context = ExecutionContext.create(application.requestTimeout());
         var route = application.resolve(request);
         var key = route.<Object>map(value -> value).orElse(UNMATCHED);
@@ -291,7 +366,7 @@ public final class TestClient implements AutoCloseable {
         RequestDispatcher.Task<Response> task;
         try {
             task = dispatcher.submit(session, key, policy, context, () -> {
-                var response = application.handle(request, context);
+                var response = application.handle(request, context, body);
                 checkSerializable(response);
                 if (!response.isStreaming()) {
                     head.complete(answered(response));
@@ -323,9 +398,11 @@ public final class TestClient implements AutoCloseable {
                 return response.withoutBody();
             }, Response::status);
         } catch (RejectedExecutionException overloaded) {
+            body.close();
             return answered(Problems.response(503, context.requestId()));
         }
         task.result().whenComplete((response, thrown) -> {
+            body.close();
             var failure = unwrap(thrown);
             if (!head.isDone()) {
                 // The head was never known: the outcome is an admission or deadline answer, or a failure.
@@ -361,6 +438,9 @@ public final class TestClient implements AutoCloseable {
      * listener would answer 500 when this client maps failures, or null for any other failure.
      */
     private Response problem(Throwable failure, ExecutionContext context) {
+        if (failure instanceof BodyReadException read && read.reason() == BodyReadException.Reason.LIMIT_EXCEEDED) {
+            return Problems.response(413, context.requestId());
+        }
         if (failure instanceof RequestDispatcher.DeadlineExceededException) {
             return Problems.response(504, context.requestId());
         }

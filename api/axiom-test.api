@@ -50,6 +50,8 @@ public final class com.jsgalactic.axiom.test.StreamedResponse implements java.la
 public final class com.jsgalactic.axiom.test.TestClient implements java.lang.AutoCloseable {
   public com.jsgalactic.axiom.http.Response execute(com.jsgalactic.axiom.http.Request) throws java.lang.Exception;
     descriptor: (Lcom/jsgalactic/axiom/http/Request;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response execute(com.jsgalactic.axiom.http.Request, com.jsgalactic.axiom.http.BodyReader) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;Lcom/jsgalactic/axiom/http/BodyReader;)Lcom/jsgalactic/axiom/http/Response;
   public com.jsgalactic.axiom.http.Response get(java.lang.String) throws java.lang.Exception;
     descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
   public com.jsgalactic.axiom.http.Response patch(java.lang.String, java.lang.String, byte[]) throws java.lang.Exception;
@@ -66,8 +68,12 @@ public final class com.jsgalactic.axiom.test.TestClient implements java.lang.Aut
     descriptor: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/jsgalactic/axiom/http/Response;
   public com.jsgalactic.axiom.test.StreamedResponse stream(com.jsgalactic.axiom.http.Request) throws java.lang.Exception;
     descriptor: (Lcom/jsgalactic/axiom/http/Request;)Lcom/jsgalactic/axiom/test/StreamedResponse;
+  public com.jsgalactic.axiom.test.StreamedResponse stream(com.jsgalactic.axiom.http.Request, com.jsgalactic.axiom.http.BodyReader) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;Lcom/jsgalactic/axiom/http/BodyReader;)Lcom/jsgalactic/axiom/test/StreamedResponse;
   public java.util.concurrent.CompletableFuture<com.jsgalactic.axiom.http.Response> submit(com.jsgalactic.axiom.http.Request);
     descriptor: (Lcom/jsgalactic/axiom/http/Request;)Ljava/util/concurrent/CompletableFuture;
+  public java.util.concurrent.CompletableFuture<com.jsgalactic.axiom.http.Response> submit(com.jsgalactic.axiom.http.Request, com.jsgalactic.axiom.http.BodyReader);
+    descriptor: (Lcom/jsgalactic/axiom/http/Request;Lcom/jsgalactic/axiom/http/BodyReader;)Ljava/util/concurrent/CompletableFuture;
   public static com.jsgalactic.axiom.test.TestClient start(com.jsgalactic.axiom.application.Application);
     descriptor: (Lcom/jsgalactic/axiom/application/Application;)Lcom/jsgalactic/axiom/test/TestClient;
   public static com.jsgalactic.axiom.test.TestClient start(com.jsgalactic.axiom.application.Application, com.jsgalactic.axiom.test.StreamBuffering);

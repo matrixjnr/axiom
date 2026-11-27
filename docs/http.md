@@ -98,8 +98,8 @@ request and validated as described in [routing rules](routing.md#query-parameter
 a malformed or oversized query also receives 400. Request headers are available to handlers, the
 connection's peer is `ctx.request().remoteAddress()` (forwarding headers are never applied
 to it; see [trusted proxies](security.md#client-address-and-trusted-proxies)), and
-request bodies are read up to the application's limit; see
-[request bodies](bodies.md). Responses support UTF-8 strings, byte arrays, empty
+request bodies are read up to the application's limit, either buffered or incrementally on a
+[streaming route](bodies.md#streaming-request-bodies); see [request bodies](bodies.md). Responses support UTF-8 strings, byte arrays, empty
 bodies, values encoded by an installed codec and [streams](streaming.md). Unencodable body objects and
 handler exceptions other than `AxiomException` produce a generic 500 and close the
 connection; exception details are not sent to clients. The in-memory API still
@@ -307,8 +307,10 @@ responses and the connection closes), so `3 × L` with
 `L = maxRequestBody`. Across all of a listener's connections, request bodies are further
 limited by `maxInFlightBodyBytes` (64 MiB by default): a request whose body does not fit in what
 remains is answered 503 and its connection closes, instead of the listener holding up to
-`128 × 3 × L`; see [request bodies](bodies.md#memory-per-connection). Body bytes are copied out of
-network buffers as they arrive, so no Netty buffer is retained across reads.
+`128 × 3 × L`; see [request bodies](bodies.md#memory-per-connection). A streaming route holds only
+the bytes its reader has not consumed, pauses channel reads at 64 KiB and resumes below 16 KiB,
+and charges those queued bytes to the same budget. Body bytes are copied out of network buffers as
+they arrive, so no Netty buffer is retained across reads.
 Response bodies are limited to 1 MiB of encoded bytes (a `String` counts its UTF-8
 bytes) and response headers to 8 KiB, counted as name, value and four characters
 per field; header values must be Latin-1. Other responses produce 500. The listener
@@ -346,8 +348,9 @@ The default execution deadline is ten seconds, configurable before startup throu
 that is predictable within one process and must not be used as a secret or credential.
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
-A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2, streaming request bodies,
-WebSocket and observability integrations remain future work.
+A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2, WebSocket and further
+observability integrations remain future work; streaming request bodies and multipart parsing are
+available as described in [request bodies](bodies.md#streaming-request-bodies).
 
 ## Listener options
 

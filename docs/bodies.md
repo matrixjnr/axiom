@@ -29,8 +29,11 @@ codec; application code never compiles against it. See the
 
 `app.maxRequestBody(bytes)` sets the largest accepted body before startup. The
 default is 1 MiB; accepted values are 0 to 64 MiB, and zero rejects every non-empty
-body. Bodies are buffered completely in memory before the handler runs; there is no
-streaming API. Larger bodies receive **413** and the handler is never invoked.
+body. Ordinary routes receive a body buffered completely in memory before the handler
+runs; a route registered with a [`StreamingHandler`](#streaming-request-bodies) gets an
+incremental reader instead. Larger buffered bodies receive **413** and the handler is
+never invoked; a streamed body is stopped with 413 as soon as its running total passes
+the limit.
 
 **Why 64 MiB is the ceiling, and why it stays.** Every accepted body is held in memory in one
 array, at least once for the listener and once more for a codec that decodes from an array. The
@@ -38,9 +41,10 @@ limit is therefore a heap-safety bound, not only a policy: 64 MiB equals the lis
 in-flight body budget (`maxInFlightBodyBytes`), which must be at least `maxRequestBody` for a
 listener to start, so the largest permitted body always fits the default budget. A higher limit
 would need a larger budget, `3 × L` of per-connection memory, and a heap sized for several such
-bodies at once, which defeats the purpose of bounding them. The range is kept deliberately;
-anything larger than a request body that fits in memory is an upload and belongs in a streaming
-path, which this release does not provide. Raise `maxRequestBody` only together with
+bodies at once, which defeats the purpose of bounding them. The range is kept deliberately for
+buffered bodies; uploads that need a larger bound belong on a streaming route, where bytes are
+handed to the handler as they arrive and only the bytes still queued are held. Raise
+`maxRequestBody` only together with
 `maxInFlightBodyBytes` and the heap, as described under
 [memory per connection](#memory-per-connection):
 
@@ -167,6 +171,74 @@ is capped at the limit and trimmed once at the end. The finished array is handed
 `Content-Type`; `mediaType()` and `charset()` parse it. Request headers are
 available through `ctx.header(name)` (one value per name; repeated fields are joined
 with `", "`). `Request.toString` omits header values.
+
+## Streaming request bodies
+
+A handler that implements the `StreamingHandler` marker opts its route into incremental
+delivery. Such a handler reads `ctx.bodyReader()` instead of `ctx.body(...)` or
+`ctx.request().body()`, which is empty on that route:
+
+```java
+app.post("/upload", (StreamingHandler) ctx -> {
+    var reader = ctx.bodyReader();
+    var out = new ByteArrayOutputStream();
+    var chunk = new byte[8192];
+    for (int count; (count = reader.read(chunk)) >= 0;) {
+        out.write(chunk, 0, count);
+    }
+    return ctx.text("received " + out.size());
+});
+```
+
+`BodyReader.read(...)` copies up to the array's length, blocks until a byte arrives, and returns
+`-1` at the end of the body. Reads are confined to the handler's thread and honour the request
+deadline: an interrupted read throws an `IOException` with the interrupt flag restored. The
+listener starts the handler as soon as the request head is accepted, so the handler reads while
+bytes arrive; `pause()` and `resume()` ask the transport to stop and start reading the connection.
+The transport also pauses itself when the queued bytes pass 64 KiB and resumes below 16 KiB, so a
+slow handler applies back-pressure to the client rather than growing a buffer without limit. The
+bytes still in that queue are charged to the listener's `maxInFlightBodyBytes` budget, exactly as
+a buffered body is; the reservation is trimmed as the handler consumes them and returned when the
+response is final. A streamed declared body reserves only the bytes that actually arrived, while
+a buffered declared body reserves its full announced length at the head.
+
+The aggregate `maxRequestBody` limit still applies incrementally: an over-large Content-Length
+gets 413 before any byte is read, and a chunked body gets 413 as soon as the running total passes
+the limit, with a single response and `Connection: close`. A handler that stops reading before
+the body ends also ends its connection: the remaining input is discarded after the response, as
+for any request whose framing can no longer be trusted. Closing the connection, a deadline, a
+listener error and cancellation all close the reader, which unblocks a waiting read with an
+`IOException`. `TestClient` hands over the buffered body through the same reader, applies the same
+aggregate cap to a reader supplied with `execute(request, reader)` or `submit(request, reader)`,
+and closes it at the end of the exchange, so embedded and live tests see the same contract.
+
+### Multipart uploads
+
+`MultipartParser` is an event-based parser over a `BodyReader`. It accepts `multipart/*` with a
+quoted or bare `boundary` parameter and calls a listener once per completed part, in wire order,
+with its headers, `name`, `filename` and bytes. It never holds the whole body: part content stays
+in memory up to 8 KiB and then spills to one temporary file per part, deleted by `close()` on
+success, failure or early cancellation.
+
+```java
+app.post("/form", (StreamingHandler) ctx -> {
+    try (var parser = new MultipartParser(ctx.bodyReader(), ctx.header("Content-Type").orElse(null),
+            MultipartParser.Limits.DEFAULT, part -> save(part.name(), part.bytes()))) {
+        parser.parse();
+    }
+    return ctx.noContent();
+});
+```
+
+`MultipartParser.Limits` makes every bound explicit: `maxParts` (16), `maxPartBytes` (1 MiB),
+`maxHeaderBytes` (8 KiB per part, including line ends) and `maxTotalBytes` (16 MiB, including
+boundaries and preamble). Each is checked while bytes arrive. A malformed body throws
+`MultipartException` with code `malformed_multipart` (400), and an exceeded bound uses
+`multipart_limit_exceeded` (400); neither carries input in its message. Part values are valid
+only while the parser is open; a handler that needs a value after `close()` must copy it.
+A container can pass a `Path` as a fifth constructor argument to choose the temporary directory.
+The parser does not close its source reader, and the handler should use try-with-resources for
+both.
 
 ### Handler-side cost
 
