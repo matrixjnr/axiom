@@ -18,6 +18,8 @@ val descriptions = mapOf(
     "axiom-security" to "Axiom authentication middleware, role and permission policies, trusted proxies, header redaction and security headers.",
     "axiom-security-jwt" to "Axiom strict JWT bearer-token authenticator using only the JDK (HMAC, RSA and ECDSA).",
     "axiom-metrics" to "Axiom in-memory metrics registry and Prometheus text exposition, using only the JDK.",
+    "axiom-metrics-micrometer" to "Axiom adapter that records the Metrics SPI through a Micrometer MeterRegistry.",
+    "axiom-otel" to "Axiom OpenTelemetry adapter: SERVER spans from W3C trace context and Metrics on OTel instruments, using the API only.",
     "axiom-openapi" to "Axiom OpenAPI 3.1 and Swagger 2.0 document generation from route metadata, using only the JDK.",
     "axiom-openapi-ui" to "Axiom Swagger UI served from the application itself, with the UI files packaged statically (no CDN).",
     "axiom-bom" to "Axiom bill of materials aligning the versions of all Axiom modules."

@@ -150,7 +150,8 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 - **Observability (opt-in registry)**: a dependency-free `Metrics` SPI instrumenting requests
   by route template and status class, latency, admission rejections and queue depth and wait;
   an in-memory registry with Prometheus text output; liveness and readiness routes that turn
-  unready while draining; and a strictly parsed W3C `traceparent` on the context
+  unready while draining; a strictly parsed W3C `traceparent` on the context; and opt-in adapters
+  for OpenTelemetry SERVER spans and instruments and for Micrometer registries
   ([observability](docs/observability.md)).
 - **Secure path handling**: raw paths with dot or empty segments, backslashes or encoded
   separators are rejected with 400, never normalized ([routing](docs/routing.md#raw-paths-and-ownership)).
@@ -161,7 +162,6 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 - WebSocket
 - Streaming request bodies (request bodies are buffered in memory)
 - Sessions, cookie authentication, CSRF, CORS and OAuth flows; JWKS key fetching
-- OpenTelemetry, tracing spans and metrics exporters other than Prometheus text
 - Native transports (epoll, io_uring)
 - Publication to Maven Central
 
@@ -183,6 +183,8 @@ remaining milestones in the [roadmap, #18](https://github.com/matrixjnr/axiom/is
 | `axiom-security` | `axiom-security` | Authenticator SPI, role and permission policies, trusted proxies, header redaction, security headers (opt-in) |
 | `axiom-security-jwt` | `axiom-security-jwt` | Strict JWT bearer-token authenticator on the JDK only (opt-in) |
 | `axiom-metrics` | `axiom-metrics` | Bounded in-memory metrics registry and Prometheus text output (opt-in) |
+| `axiom-otel` | `axiom-otel` | OpenTelemetry API adapter: W3C SERVER spans and `Metrics` on OTel instruments (opt-in) |
+| `axiom-metrics-micrometer` | `axiom-metrics-micrometer` | Micrometer adapter that records the `Metrics` SPI in a `MeterRegistry` (opt-in) |
 | `axiom-openapi` | `axiom-openapi` | OpenAPI 3.1 and Swagger 2.0 documents from route descriptions (opt-in) |
 | `axiom-openapi-ui` | `axiom-openapi-ui` | Swagger UI served from the application, files packaged statically, no CDN (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
@@ -277,7 +279,8 @@ Forwarded client addresses are believed only from configured proxies
 ## Observability
 
 Metrics, health checks and trace context need no extra dependency; `axiom-metrics` adds an
-in-memory registry and a Prometheus renderer.
+in-memory registry and a Prometheus renderer, `axiom-otel` adds OpenTelemetry API spans and
+instruments, and `axiom-metrics-micrometer` records through a Micrometer registry.
 
 ```java
 var registry = MetricsRegistry.create();

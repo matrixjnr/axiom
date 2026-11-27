@@ -63,7 +63,12 @@ use the JDK. Both may use `axiom-test` in test configurations only. They are pub
 constrained by the BOM but not part of the starter.
 `axiom-metrics` depends on core only, declares no external dependency (the registry and the
 Prometheus text renderer use the JDK) and may use `axiom-test` in test configurations only.
-The Metrics SPI itself lives in core.
+The Metrics SPI itself lives in core. The two opt-in adapters keep the same shape: `axiom-otel`
+depends on core and confines `io.opentelemetry` to its API dependency (the SDK and testing
+exporter are test-only), and `axiom-metrics-micrometer` confines `io.micrometer` to its
+`micrometer-core` dependency. Both may use `axiom-test` in test configurations only, and neither
+is part of the starter. Their versions are pinned in `gradle/libs.versions.toml` and checksummed in
+`gradle/verification-metadata.xml` like every other external artifact.
 `axiom-openapi` depends on core and `axiom-validation` (to map rule sets to schema constraints),
 declares no external dependency (it writes JSON itself) and may use `axiom-test` and `axiom-json` in
 test configurations only, to compare generated schemas with the real codec. The route metadata it
@@ -153,10 +158,12 @@ ran 3 / 31 and 12 / 193 immediately before it, 5 / 80 and 12 / 144 after, 224 te
 | axiom-security | 3 / 48 | - |
 | axiom-security-jwt | 2 / 27 | - |
 | axiom-metrics | 2 / 11 | - |
+| axiom-otel | 2 / 6 | - |
+| axiom-metrics-micrometer | 1 / 2 | - |
 | integration-tests | disabled | 5 / 66 |
 | examples/readme | 1 / 2 | 1 / 1 |
 | examples/rest-api | 1 / 3 | 1 / 1 |
-| total | 77 / 836 | 19 / 212 |
+| total | 80 / 844 | 19 / 212 |
 
 `build-logic` has its own `test` task (2 / 20) that the root `check` runs through the included build.
 

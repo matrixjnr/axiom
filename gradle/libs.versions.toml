@@ -14,6 +14,9 @@ swagger-ui = "5.34.1"
 checkstyle = "14.3.0"
 japicmp = "0.27.0"
 asm = "9.11.1"
+# Adapter dependencies are opt-in: only axiom-otel and axiom-metrics-micrometer resolve them.
+opentelemetry = "1.68.0"
+micrometer = "1.18.0"
 
 [libraries]
 japicmp = { module = "com.github.siom79.japicmp:japicmp", version.ref = "japicmp" }
@@ -38,3 +41,7 @@ jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
 jmh-generator = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
 jakarta-validation-api = { module = "jakarta.validation:jakarta.validation-api", version.ref = "jakarta-validation" }
 hibernate-validator = { module = "org.hibernate.validator:hibernate-validator", version.ref = "hibernate-validator" }
+opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api", version.ref = "opentelemetry" }
+# Test only: in-memory exporters and readers, never on an adapter's published classpath.
+opentelemetry-sdk-testing = { module = "io.opentelemetry:opentelemetry-sdk-testing", version.ref = "opentelemetry" }
+micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
