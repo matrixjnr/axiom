@@ -212,6 +212,7 @@ is a record of what shipped. Remaining milestones are in the [roadmap, #18](http
 | `axiom-metrics-micrometer` | `axiom-metrics-micrometer` | Micrometer adapter that records the `Metrics` SPI in a `MeterRegistry` (opt-in) |
 | `axiom-openapi` | `axiom-openapi` | OpenAPI 3.1 and Swagger 2.0 documents from route descriptions (opt-in) |
 | `axiom-openapi-ui` | `axiom-openapi-ui` | Swagger UI served from the application, files packaged statically, no CDN (opt-in) |
+| `axiom-grpc` | `axiom-grpc` | Generated gRPC services on their own listener, with Axiom lifecycle and health hooks (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
@@ -319,6 +320,13 @@ app.get("/metrics", PrometheusText.handler(registry), security.hasRole("ops"));
 Tags are route templates and status classes, never raw paths or user input. **Do not expose
 `/metrics` or the health routes publicly without authentication.** See
 [observability](docs/observability.md).
+
+## gRPC
+
+The opt-in `axiom-grpc` module runs generated services on their own listener: gRPC needs HTTP/2 and
+`h2` ALPN, while Axiom's listener speaks HTTP/1.1, so the two do not share a port. Closing the
+application drains the gRPC server; deadlines, cancellation and readiness are available through
+Axiom's own types, and no grpc-netty class appears in the API. See [gRPC](docs/grpc.md).
 
 ## OpenAPI and Swagger
 

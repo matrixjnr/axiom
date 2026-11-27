@@ -646,6 +646,18 @@ public interface Application extends RouteGroup, AutoCloseable {
   Application onDrain(Runnable action);
 
   /**
+   * Registers an action that runs once when {@link #close()} closes this application, after the
+   * dispatcher is retired and before owned listeners close. It is meant for resources the
+   * application owns, such as a gRPC server, that must stop with it. Actions run in registration
+   * order on the thread calling close; an exception is logged and does not stop the other actions.
+   *
+   * @param action what to run
+   * @return this application
+   * @throws IllegalStateException if the application is closed
+   */
+  Application onClose(Runnable action);
+
+  /**
    * Permanently rejects new requests. Already accepted requests may finish. Idempotent and
    * nonblocking. Each owned listener starts the graceful drain described by {@link Server#close()}:
    * queued requests are answered 503, running network handlers get a grace period before they are

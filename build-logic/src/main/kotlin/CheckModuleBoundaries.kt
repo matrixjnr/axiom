@@ -31,7 +31,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-metrics-micrometer" to setOf("axiom-test"),
                 // Round-trip tests compare generated schemas with the real JSON codec.
                 "axiom-openapi" to setOf("axiom-test", "axiom-json"),
-                "axiom-openapi-ui" to setOf("axiom-test")
+                "axiom-openapi-ui" to setOf("axiom-test"),
+                "axiom-grpc" to setOf("axiom-test")
             )
             val testOnlyModules = ModuleBoundaries.testOnlyModules
             // Third-party production dependencies are confined to the module that adapts them.
@@ -41,7 +42,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-validation-jakarta" to setOf("jakarta.validation", "org.hibernate.validator"),
                 "axiom-openapi-ui" to setOf("org.webjars"),
                 "axiom-otel" to setOf("io.opentelemetry"),
-                "axiom-metrics-micrometer" to setOf("io.micrometer")
+                "axiom-metrics-micrometer" to setOf("io.micrometer"),
+                "axiom-grpc" to setOf("io.grpc", "com.google.protobuf")
             )
             val moduleAllowed = allowed[module]
                 ?: throw GradleException(

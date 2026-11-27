@@ -138,6 +138,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
   }
 
   private final List<Runnable> drainActions = new ArrayList<>();
+  private final List<Runnable> closeActions = new ArrayList<>();
   private Duration drainDelay = Duration.ZERO;
   private DrainPause drainPause = delay -> Thread.sleep(delay);
 
@@ -217,6 +218,18 @@ final class DefaultApplication implements Application, ExecutionAccess {
     // The application closed while binding; it must not leave an unowned listener behind.
     server.close();
     throw new IllegalStateException("Application closed while the listener was binding");
+  }
+
+  @Override
+  public Application onClose(Runnable action) {
+    Objects.requireNonNull(action, "action");
+    synchronized (this) {
+      if (state == State.CLOSED) {
+        throw new IllegalStateException("Application is closed");
+      }
+      closeActions.add(action);
+    }
+    return this;
   }
 
   @Override
@@ -1050,11 +1063,14 @@ final class DefaultApplication implements Application, ExecutionAccess {
   @Override
   public void close() {
     List<Server> owned;
+    List<Runnable> closing;
     Thread hook;
     RequestDispatcher execution;
     synchronized (this) {
       hook = shutdownHook;
       shutdownHook = null;
+      closing = List.copyOf(closeActions);
+      closeActions.clear();
       var published = runtime;
       runtime =
           published == null
@@ -1080,6 +1096,13 @@ final class DefaultApplication implements Application, ExecutionAccess {
     // its session closes and the shared dispatcher shuts its executors down.
     if (execution != null) {
       execution.retire();
+    }
+    for (var action : closing) {
+      try {
+        action.run();
+      } catch (RuntimeException failure) {
+        LOG.log(System.Logger.Level.WARNING, "A close action failed", failure);
+      }
     }
     owned.forEach(Server::close);
     // An explicit close makes the hook unnecessary; the hook itself, or a JVM already shutting

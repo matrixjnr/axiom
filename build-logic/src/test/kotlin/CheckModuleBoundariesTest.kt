@@ -71,6 +71,12 @@ class CheckModuleBoundariesTest {
             .doesNotThrowAnyException()
         assertThatThrownBy { verify("axiom-json", "external|io.netty:netty-handler|implementation") }
             .hasMessageContaining("outside its adapter module")
+        assertThatCode { verify("axiom-grpc", "external|io.grpc:grpc-stub|implementation") }
+            .doesNotThrowAnyException()
+        assertThatCode { verify("axiom-grpc", "external|com.google.protobuf:protobuf-java|implementation") }
+            .doesNotThrowAnyException()
+        assertThatThrownBy { verify("axiom-grpc", "external|io.netty:netty-handler|implementation") }
+            .hasMessageContaining("outside its adapter module")
     }
 
     @Test

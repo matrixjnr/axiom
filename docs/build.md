@@ -30,10 +30,10 @@ the ecosystem; moving to Jackson 3 would only change `axiom-json` internals.
 Telemetry adapters are opt-in modules: `axiom-otel` depends on the OpenTelemetry API
 and `axiom-metrics-micrometer` on Micrometer; neither pulls an SDK or exporter into
 the starter. JPMS is later work; stress and cross-OS suites are diagnostic CI jobs.
-The BOM constrains all 15 published libraries: axiom-core, axiom-server, axiom-http,
+The BOM constrains all 16 published libraries: axiom-core, axiom-server, axiom-http,
 axiom-json, axiom-test, axiom-validation, axiom-validation-jakarta, axiom-security,
 axiom-security-jwt, axiom-metrics, axiom-openapi, axiom-openapi-ui, axiom-otel,
-axiom-metrics-micrometer and the starter.
+axiom-metrics-micrometer, axiom-grpc and the starter.
 
 Validation uses Hibernate Validator 9.1 (the Jakarta Validation 3.1 reference
 implementation, actively maintained, Java 17+, with container-element constraints and
@@ -82,6 +82,15 @@ static Swagger UI files that the module serves from memory; nothing is fetched f
 time. The version is pinned in `gradle/libs.versions.toml`, and the jar and its POM are checksummed
 in `gradle/verification-metadata.xml` (added with `./gradlew --write-verification-metadata sha256
 :axiom-openapi-ui:test` and reviewed against the published artifact).
+
+`axiom-grpc` depends on core and confines grpc-java (`io.grpc`) and protobuf
+(`com.google.protobuf`) to its own implementation dependencies; gRPC's shaded Netty never appears
+in an Axiom API. Generated services arrive as `io.grpc.BindableService`, and the adapter builds and
+owns the transport instead of duplicating grpc-java's HTTP/2 implementation. gRPC runs on its own
+listener because the HTTP listener's ALPN is `http/1.1` while gRPC needs `h2`; the decision and its
+limits are documented in [gRPC](grpc.md). Versions are pinned in `gradle/libs.versions.toml` and
+checksummed like every other external artifact. gRPC's in-process server and channel are test-only
+dependencies, so no socket is opened by the unit tests.
 
 Core discovers the default runtime through a JDK service provider. HTTP and test
 client consumers receive core through `api`. HTTP uses server through
