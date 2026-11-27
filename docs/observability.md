@@ -9,8 +9,11 @@ nav_order: 9
 Axiom records what it does in a small, dependency-free `Metrics` SPI, reports liveness and
 readiness through `Health`, and exposes the caller's W3C `traceparent` on the request context.
 The SPI, `Health` and `TraceContext` are in core (`com.jsgalactic.axiom.observability`); the
-optional `axiom-metrics` module adds an in-memory registry and Prometheus text output. None of it
-adds a third-party dependency, and no tracing or metrics library appears in an API.
+optional `axiom-metrics` module adds an in-memory registry and Prometheus text output. Two more
+opt-in adapters connect the same SPI to third-party libraries: `axiom-otel` uses only the
+OpenTelemetry API, and `axiom-metrics-micrometer` records through a Micrometer `MeterRegistry`.
+Core and the starter add no third-party dependency, and no tracing or metrics library appears in
+a core API.
 
 > **Do not expose `/metrics`, `/health/live` or `/health/ready` to the public internet without
 > authentication.** They reveal route templates, traffic volume, dependency names and whether an
@@ -138,6 +141,62 @@ registry reports on itself with `axiom_metrics_series` (gauge: stored series) an
 `axiom_metrics_dropped_series_total` (counter: series refused at the limit), so a full registry is
 visible and can be alerted on. Reads are not an atomic snapshot across series.
 
+## OpenTelemetry (`axiom-otel`)
+
+The opt-in `axiom-otel` module builds against `io.opentelemetry:opentelemetry-api` only. It never
+installs an SDK, selects a sampler or ships an exporter: the application supplies an
+`OpenTelemetry` instance and owns the export pipeline.
+
+```java
+var tracing = Tracing.create(openTelemetry);          // your SDK, or OpenTelemetry.noop()
+var app = Axiom.create()
+        .metrics(OtelMetrics.create(openTelemetry))
+        .use(tracing);
+```
+
+`Tracing.create` returns middleware that starts one `SERVER` span per admitted request. It reads
+the caller's W3C `traceparent` and `tracestate` with the OpenTelemetry propagator, so a valid
+remote header becomes the parent and an absent or invalid header produces a root span. The span
+name is `METHOD route-template` (`GET /users/:id`) for a matched route and the method for a
+router-generated answer. Its attributes are the stable HTTP conventions `http.request.method`,
+`http.route` (the template, not the raw path) and `http.response.status_code`. Query strings,
+header values and identities are never attributes. The tracer and the meter use the instrumentation
+scope `com.jsgalactic.axiom.otel`.
+
+A successful response records its status before the span ends. An exception records the
+exception, sets `ERROR`, records the status of the `AxiomException` (or 500 when there is none),
+and ends the span before the exception leaves the middleware. Error responses do not travel back
+through the chain, so `Middleware.afterError` adds
+`traceresponse: 00-<trace id>-<span id>-<flags>` for the span created for the failed request. A
+failure with no mapped error response has no response to decorate and adds no header. The created
+span is current while the chain runs, so OpenTelemetry instrumentation on the request thread sees
+it as its parent.
+
+`OtelMetrics.create` maps the `Metrics` SPI to OTel instruments: counters to dimensionless
+`LongCounter`s, gauges to `LongUpDownCounter`s and timers to `DoubleHistogram`s in seconds.
+Histograms carry explicit bucket advice of 1 ms, 5 ms, 10 ms, 25 ms, 50 ms, 100 ms, 250 ms,
+500 ms, 1 s, 2.5 s, 5 s and 10 s (`OtelMetrics.DEFAULT_BUCKETS`), the bounds of the in-memory
+registry. A name keeps one kind and one set of tag keys; tag values remain caller-chosen, so keep
+them to route templates, methods and other fixed sets. Readers, views and exporters belong to the
+application.
+
+## Micrometer (`axiom-metrics-micrometer`)
+
+The opt-in `axiom-metrics-micrometer` module depends on `io.micrometer:micrometer-core` only. It
+registers instruments in a registry the application supplies:
+
+```java
+var metrics = MicrometerMetrics.create(registry);     // any MeterRegistry the application owns
+var app = Axiom.create().metrics(metrics);
+```
+
+Counters and gauges map to Micrometer counters and gauges; a gauge holds an `AtomicLong`, so
+deltas from several components add into one value. Timers are registered with service-level
+objectives of 1 ms through 10 s (`MicrometerMetrics.DEFAULT_BUCKETS`, the same bounds as the
+registry) and a published percentile histogram. Nothing is registered until a metric is looked
+up, and the adapter adds no HTTP endpoint, Prometheus renderer, StatsD client or JMX bridge.
+Micrometer registries and an OpenTelemetry Collector provide those publication paths.
+
 ## Health and readiness
 
 ```java
@@ -221,9 +280,10 @@ adds `traceresponse: 00-<trace id>-<span id>-<flags>` to responses to requests t
 logs. Requests without a trace get no header, because Axiom starts no traces of its own. Like all
 middleware it does not decorate responses made from exceptions.
 
-## Limitations
+## Scope
 
-- No OpenTelemetry integration: Axiom neither creates spans nor exports traces.
-- There is no JMX, StatsD or OTLP exporter.
-
-These are tracked in the limitations index, [#13](https://github.com/matrixjnr/axiom/issues/13).
+Axiom starts no traces of its own: it parses `traceparent` for correlation, and creating spans
+requires the opt-in adapter. The core SPI records measurements but publishes nothing, so an
+application chooses a registry or adapter (or writes its own `Metrics`). Publication through
+Prometheus, OTLP, StatsD or JMX is a property of the chosen registry, adapter or Collector, not a
+separate Axiom module.

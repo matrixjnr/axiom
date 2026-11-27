@@ -1,0 +1,24 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.otel.OtelMetrics implements com.jsgalactic.axiom.observability.Metrics {
+  public com.jsgalactic.axiom.observability.Metrics$Counter counter(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Counter;
+  public com.jsgalactic.axiom.observability.Metrics$Gauge gauge(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Gauge;
+  public com.jsgalactic.axiom.observability.Metrics$Timer timer(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Timer;
+  public static com.jsgalactic.axiom.otel.OtelMetrics create(io.opentelemetry.api.OpenTelemetry);
+    descriptor: (Lio/opentelemetry/api/OpenTelemetry;)Lcom/jsgalactic/axiom/otel/OtelMetrics;
+  public static com.jsgalactic.axiom.otel.OtelMetrics create(io.opentelemetry.api.metrics.MeterProvider);
+    descriptor: (Lio/opentelemetry/api/metrics/MeterProvider;)Lcom/jsgalactic/axiom/otel/OtelMetrics;
+  public static final java.util.List<java.lang.Double> DEFAULT_BUCKETS;
+    descriptor: Ljava/util/List;
+}
+
+public final class com.jsgalactic.axiom.otel.Tracing {
+  public static com.jsgalactic.axiom.context.Middleware create(io.opentelemetry.api.OpenTelemetry);
+    descriptor: (Lio/opentelemetry/api/OpenTelemetry;)Lcom/jsgalactic/axiom/context/Middleware;
+  public static com.jsgalactic.axiom.context.Middleware create(io.opentelemetry.api.trace.Tracer);
+    descriptor: (Lio/opentelemetry/api/trace/Tracer;)Lcom/jsgalactic/axiom/context/Middleware;
+  public static final java.lang.String SCOPE_NAME = "com.jsgalactic.axiom.otel";
+    descriptor: Ljava/lang/String;
+}

@@ -1,0 +1,13 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.micrometer.MicrometerMetrics implements com.jsgalactic.axiom.observability.Metrics {
+  public com.jsgalactic.axiom.observability.Metrics$Counter counter(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Counter;
+  public com.jsgalactic.axiom.observability.Metrics$Gauge gauge(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Gauge;
+  public com.jsgalactic.axiom.observability.Metrics$Timer timer(java.lang.String, java.lang.String...);
+    descriptor: (Ljava/lang/String;[Ljava/lang/String;)Lcom/jsgalactic/axiom/observability/Metrics$Timer;
+  public static com.jsgalactic.axiom.micrometer.MicrometerMetrics create(io.micrometer.core.instrument.MeterRegistry);
+    descriptor: (Lio/micrometer/core/instrument/MeterRegistry;)Lcom/jsgalactic/axiom/micrometer/MicrometerMetrics;
+  public static final java.util.List<java.time.Duration> DEFAULT_BUCKETS;
+    descriptor: Ljava/util/List;
+}

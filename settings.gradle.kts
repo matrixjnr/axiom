@@ -11,7 +11,7 @@ include("axiom-starter")
 include("integration-tests")
 include("axiom-validation", "axiom-validation-jakarta")
 include("axiom-security", "axiom-security-jwt")
-include("axiom-metrics")
+include("axiom-metrics", "axiom-metrics-micrometer", "axiom-otel")
 include("axiom-openapi", "axiom-openapi-ui")
 include("examples:hello", "examples:readme", "examples:rest-api", "examples:browser-app", "examples:openapi",
     "benchmarks:http")
