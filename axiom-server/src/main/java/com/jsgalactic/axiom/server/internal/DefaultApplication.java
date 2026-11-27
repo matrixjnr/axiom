@@ -10,6 +10,7 @@ import com.jsgalactic.axiom.error.AxiomException;
 import com.jsgalactic.axiom.error.PayloadTooLargeException;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.http.spi.HttpTransportProvider;
@@ -43,13 +44,14 @@ final class DefaultApplication implements Application {
      * Immutable configuration published at startup. The request path reads it through one
      * volatile field and takes no lock; {@code router} is null once the application closes.
      */
-    private record Runtime(CompiledRouter router, Handler unmatched, List<Route> routes,
-                           Set<Route> routeSet, Map<Route, AdmissionPolicy> routePolicies,
-                           AdmissionPolicy defaultPolicy, Codecs codecs, int maxRequestBody) {
+    private record Runtime(CompiledRouter router, Handler unmatched, List<Route> routes, Set<Route> routeSet,
+                           Map<Route, AdmissionPolicy> routePolicies, AdmissionPolicy defaultPolicy,
+                           Map<Route, StreamPolicy> streamPolicies, StreamPolicy defaultStreamPolicy,
+                           Codecs codecs, int maxRequestBody) {
         /** Drops every reference to application handlers, middleware and error handlers. */
         Runtime withoutRouter() {
             return new Runtime(null, null, routes, routeSet, routePolicies, defaultPolicy,
-                    codecs, maxRequestBody);
+                    streamPolicies, defaultStreamPolicy, codecs, maxRequestBody);
         }
     }
 
@@ -58,12 +60,15 @@ final class DefaultApplication implements Application {
 
     /** Largest configurable request body; bodies are buffered in memory before the handler runs. */
     static final int MAX_REQUEST_BODY_LIMIT = 64 * 1024 * 1024;
+    /** Streams get their own lane so that idle subscribers cannot exhaust request capacity. */
+    private static final StreamPolicy DEFAULT_STREAM_POLICY = StreamPolicy.reject(36);
     private static final System.Logger LOG = System.getLogger(DefaultApplication.class.getName());
 
     // Configuration state; guarded by this until startup publishes a runtime snapshot.
     private final Map<Route, Registration> registrations = new LinkedHashMap<>();
     private final Scope root = new Scope(null, "");
     private final Map<Route, AdmissionPolicy> routePolicies = new LinkedHashMap<>();
+    private final Map<Route, StreamPolicy> streamPolicies = new LinkedHashMap<>();
     private final Map<Route, RouteDoc> routeDocs = new LinkedHashMap<>();
     private final Map<String, Route> shapes = new HashMap<>();
     private final Set<String> recognizedMethods = new TreeSet<>();
@@ -74,6 +79,7 @@ final class DefaultApplication implements Application {
     private int openGroups;
     private final List<Server> listeners = new ArrayList<>();
     private volatile AdmissionPolicy admissionPolicy = AdmissionPolicy.reject(36);
+    private volatile StreamPolicy streamPolicy = DEFAULT_STREAM_POLICY;
     private volatile Metrics metrics = Metrics.NOOP;
     private volatile FailureLog failureLog = FailureLog.DEFAULT;
     private volatile boolean developmentErrors;
@@ -442,6 +448,7 @@ final class DefaultApplication implements Application {
             var route = entry.getKey();
             shapes.remove(route.method() + " " + shape(route.path()), route);
             routePolicies.remove(route);
+            streamPolicies.remove(route);
             routeDocs.remove(route);
             removed.remove();
         }
@@ -530,7 +537,7 @@ final class DefaultApplication implements Application {
     private Runtime snapshot(CompiledRouter router, Handler unmatched, Codecs codecs) {
         var routes = List.copyOf(registrations.keySet());
         return new Runtime(router, unmatched, routes, Set.copyOf(routes), Map.copyOf(routePolicies), admissionPolicy,
-                codecs, maxRequestBody);
+                Map.copyOf(streamPolicies), streamPolicy, codecs, maxRequestBody);
     }
 
     @Override
@@ -588,6 +595,38 @@ final class DefaultApplication implements Application {
         }
         if (!published.routeSet().contains(route)) { throw notRegistered(route); }
         return published.routePolicies().getOrDefault(route, published.defaultPolicy());
+    }
+
+    @Override public synchronized Application streamPolicy(StreamPolicy policy) {
+        requireState(State.CONFIGURING);
+        streamPolicy = Objects.requireNonNull(policy, "policy");
+        return this;
+    }
+
+    @Override public StreamPolicy streamPolicy() { return streamPolicy; }
+
+    @Override public synchronized Application streamPolicy(Route route, StreamPolicy policy) {
+        requireState(State.CONFIGURING);
+        Objects.requireNonNull(route, "route");
+        if (!registrations.containsKey(route)) { throw notRegistered(route); }
+        streamPolicies.put(route, Objects.requireNonNull(policy, "policy"));
+        return this;
+    }
+
+    @Override public StreamPolicy streamPolicy(Route route) {
+        Objects.requireNonNull(route, "route");
+        var published = runtime;
+        if (published == null) {
+            synchronized (this) {
+                published = runtime;
+                if (published == null) {
+                    if (!registrations.containsKey(route)) { throw notRegistered(route); }
+                    return streamPolicies.getOrDefault(route, streamPolicy);
+                }
+            }
+        }
+        if (!published.routeSet().contains(route)) { throw notRegistered(route); }
+        return published.streamPolicies().getOrDefault(route, published.defaultStreamPolicy());
     }
 
     @Override public synchronized Application describe(Route route, RouteDoc doc) {
@@ -742,6 +781,7 @@ final class DefaultApplication implements Application {
             notImplementedHandler = null;
             shapes.clear();
             routePolicies.clear();
+            streamPolicies.clear();
             owned = List.copyOf(listeners);
             listeners.clear();
         }

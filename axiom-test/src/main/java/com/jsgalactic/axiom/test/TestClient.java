@@ -24,9 +24,11 @@ import java.util.concurrent.RejectedExecutionException;
  * In-memory client that owns the supplied application's lifecycle.
  *
  * <p>Each call is admitted by a private dispatcher configured with the application's aggregate and
- * per-route admission policies and request timeout, and runs on a virtual thread, as in a network
- * listener. Admission outcomes map to the same statuses as the HTTP listener: 503 when capacity or
- * the queue is exhausted or the queue wait expires, and 504 when the request deadline expires.
+ * per-route admission and stream policies and request timeout, and runs on a virtual thread, as in
+ * a network listener. A stream leaves the request lane for the separate stream lane before its head
+ * is returned, so idle streams cannot exhaust request capacity. Admission outcomes map to the same
+ * statuses as the HTTP listener: 503 when capacity, stream capacity or the queue is exhausted or
+ * the queue wait expires, and 504 when the request deadline expires.
  * Framework errors use the same {@code application/problem+json} bodies as the listener: request
  * bodies over the application's {@code maxRequestBody} get 413, unknown routes 404 (501 for an
  * unrecognized method), CONNECT 501, method mismatches 405 with {@code Allow}, OPTIONS without an
@@ -57,7 +59,8 @@ public final class TestClient implements AutoCloseable {
         this.mapFailures = mapFailures;
         this.buffering = Objects.requireNonNull(buffering, "buffering");
         this.application = Objects.requireNonNull(application, "application").start();
-        this.dispatcher = new RequestDispatcher(application.admissionPolicy(), application.metrics());
+        this.dispatcher = new RequestDispatcher(application.admissionPolicy(), application.streamPolicy(),
+                application.metrics());
         this.streamMetrics = new StreamMetrics(application.metrics());
     }
 
@@ -230,13 +233,19 @@ public final class TestClient implements AutoCloseable {
         Objects.requireNonNull(request, "request");
         var context = ExecutionContext.create(application.requestTimeout());
         var route = application.resolve(request);
+        var key = route.<Object>map(value -> value).orElse(UNMATCHED);
         var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
+        var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
         RequestDispatcher.Task<Response> task;
         try {
-            task = dispatcher.submit(route.<Object>map(value -> value).orElse(UNMATCHED), policy, context, () -> {
+            task = dispatcher.submit(key, policy, context, () -> {
                 var response = application.handle(request, context);
                 checkSerializable(response);
-                return response.isStreaming() ? collect(response, context, streamScope(route)) : response;
+                if (!response.isStreaming()) { return response; }
+                if (!dispatcher.admitStream(key, streamPolicy)) {
+                    return Problems.response(503, context.requestId());
+                }
+                return collect(response, context, streamScope(route));
             }, Response::status);
         } catch (RejectedExecutionException overloaded) {
             return CompletableFuture.completedFuture(Problems.response(503, context.requestId()));
@@ -254,8 +263,10 @@ public final class TestClient implements AutoCloseable {
      * Executes a request and returns as soon as the response head is known, so that a streamed
      * body (see {@code Response.stream} and {@code Response.sse}) can be read piece by piece with
      * {@link StreamedResponse#next()} while the handler is still writing it. A response that is
-     * not streamed is returned as a single chunk. The request keeps its admission slot until the
-     * body ends or the response is {@linkplain StreamedResponse#close() closed}.
+     * not streamed is returned as a single chunk. A stream transfers its request slot into the
+     * stream lane before the head is returned and holds that slot until the body ends or the
+     * response is {@linkplain StreamedResponse#close() closed}; ordinary requests keep their own
+     * capacity throughout.
      *
      * <p>Failures before the head is known behave as for {@link #execute}: admission and deadline
      * failures give a 503 or 504 problem response, and handler exceptions are thrown. Failures
@@ -270,16 +281,24 @@ public final class TestClient implements AutoCloseable {
         Objects.requireNonNull(request, "request");
         var context = ExecutionContext.create(application.requestTimeout());
         var route = application.resolve(request);
+        var key = route.<Object>map(value -> value).orElse(UNMATCHED);
         var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
+        var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
         var head = new CompletableFuture<StreamedResponse>();
         RequestDispatcher.Task<Response> task;
         try {
-            task = dispatcher.submit(route.<Object>map(value -> value).orElse(UNMATCHED), policy, context, () -> {
+            task = dispatcher.submit(key, policy, context, () -> {
                 var response = application.handle(request, context);
                 checkSerializable(response);
                 if (!response.isStreaming()) {
                     head.complete(answered(response));
                     return response;
+                }
+                // A full stream lane is refused before the head, as an ordinary response.
+                if (!dispatcher.admitStream(key, streamPolicy)) {
+                    var refused = Problems.response(503, context.requestId());
+                    head.complete(answered(refused));
+                    return refused;
                 }
                 var scope = streamScope(route);
                 var stream = new StreamedResponse(response.status(), response.headers(), response.streamLimit(),

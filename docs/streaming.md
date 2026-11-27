@@ -9,7 +9,8 @@ nav_order: 8
 A handler normally returns a complete body, which is limited to 1 MiB and held in memory. When the
 body is large, produced over time, or has no end, return a **stream** instead. The handler's virtual
 thread writes the body to the connection as it produces it, a slow client holds the handler back
-instead of growing a buffer, and the size, the time and the number of streams are all bounded.
+instead of growing a buffer, and the size, the time and the number of streams are all bounded. Open
+streams use their own admission lane, separate from ordinary requests (see [admission](admission.md#stream-capacity)).
 
 ```java
 app.get("/export", ctx -> Response.stream(200, "text/csv", out -> {
@@ -34,10 +35,13 @@ Streams are core API (`com.jsgalactic.axiom.http`); core knows nothing about Net
 
 `Response.stream(status, contentType, [maxBytes,] body)` returns a response whose body is a
 `StreamBody`. The runtime sends the status line and headers first, then calls
-`body.writeTo(out)` once, **on the same virtual thread that ran the handler**. So the request keeps
-its admission slot, its deadline and its interruption behavior for as long as the stream lasts
-(see [execution](execution.md) and [admission](admission.md)), and a stream that is not finished
-holds one of the active slots (36 by default).
+`body.writeTo(out)` once, **on the same virtual thread that ran the handler**. Before the head is
+written, the request's admission slot is transferred into a stream slot: the request slot is free
+for ordinary requests, while the stream keeps its deadline and its interruption behavior for as
+long as the body lasts (see [execution](execution.md) and
+[admission](admission.md#stream-capacity)). A stream that is not finished holds one stream slot;
+the aggregate and per-route bounds are 36 by default. If either bound is full, the response is an
+ordinary 503 and no stream head is written.
 
 - The response ends when `writeTo` returns normally. HTTP/1.1 clients receive chunked transfer
   encoding with a final chunk, so the connection stays usable for the next request. An HTTP/1.0
@@ -97,7 +101,7 @@ handler should let it propagate, or return. Either way the runtime then:
 1. closes the connection **without a final chunk** and sends no second response, because the
    status line is already on the wire (a client sees a truncated chunked body, which is how a
    cut-off download must look);
-2. releases the buffers, the virtual thread and the admission slot;
+2. releases the buffers, the virtual thread and the stream slot;
 3. does not offer the failure to [error handlers](middleware.md): they choose a response, and the
    response is already under way. Exceptions other than a `StreamAbortedException` are logged at
    error level with the request ID, exactly like other handler failures; a client leaving or
@@ -118,7 +122,7 @@ app.get("/events", ctx -> Response.sse(events -> { /* ... */ })
 
 Once the head is sent, the request's deadline moves to the lifetime from that moment, if that is
 later. The stream then ends with `TIMEOUT` when the lifetime passes (and a handler blocked elsewhere
-is interrupted then), and it holds its admission slot all that time. The lifetime is explicit and
+is interrupted then), and it holds its stream slot all that time. The lifetime is explicit and
 bounded: positive, at most one day (`Response.MAX_STREAM_LIFETIME`). It never shortens a deadline,
 so a lifetime below what remains of the request deadline changes nothing. A stream without one keeps
 the request deadline as before. Until the head is sent, the ordinary deadline applies.
@@ -144,7 +148,7 @@ app.use((ctx, next) -> {
   `failure` the body threw, if any. It is called for exactly the streams that run: not for a HEAD
   request, and not for a response refused before its head was sent. The first observer added runs
   first, so inner middleware sees the end before outer middleware. Observers must be quick and must
-  not block: the request still holds its admission slot. One that throws is logged and ignored, and
+  not block: the stream still holds its slot. One that throws is logged and ignored, and
   the others still run. They observe; they cannot change the status or send a second response.
 - `mapStream(UnaryOperator<StreamBody>)` replaces the body with a wrapper of it, to time it, count or
   transform what it writes. Wrap the `BodyWriter` too and delegate `shutdownRequested` and
@@ -170,7 +174,8 @@ the body that shutdown began:
   `retry:` delay.
 - Writes keep working during the grace period. A body still running when it ends is cut like
   before: reason `SHUTDOWN`, the connection closed without a final chunk. A stream that never
-  ends and ignores the signal therefore holds the close for the grace period.
+  ends and ignores the signal therefore holds the close for the grace period, and its stream slot
+  until its body exits.
 - A stream whose head has not been sent yet when shutdown begins is refused with 503 like a request
   that was still waiting. The connection never serves another request after the stream: the
   response closes it, whatever `Connection` header the head carried.
@@ -221,7 +226,8 @@ outlive ten seconds needs `withStreamLifetime(...)` (see [above](#stream-lifetim
 
 Streams are measured as part of the [metrics](observability.md#metrics): they count as requests
 (latency covers the whole stream; the status class is the head's, except that a stream that fails
-counts as `5xx` and one cut by a disconnect or shutdown as `cancelled`) and hold an active slot, plus
+counts as `5xx` and one cut by a disconnect or shutdown as `cancelled`) and, once admitted, hold a
+stream slot in the separate lane, plus
 
 | Name | Kind | Tags | Meaning |
 | --- | --- | --- | --- |
@@ -234,6 +240,8 @@ counts as `5xx` and one cut by a disconnect or shutdown as `cancelled`) and hold
 request series: at most 1024 endpoints get their own series and later ones share `other`, and
 requests that match no route share `none` / `unmatched`. `outcome` takes one of six fixed values. No
 path, query, header or identity is ever a tag. The HTTP listener and `TestClient` record the same series.
+A stream refused for capacity counts as a 503 request and increments
+`axiom.admission.rejected` with the fixed reason tag `stream_capacity` (see [admission](admission.md#observation)).
 
 ## Testing
 
@@ -273,8 +281,26 @@ sets the high water mark (low is a quarter, pieces at most 16 KiB, no stall boun
 returns one piece per call. Chunked framing is part of the wire only: the client delivers the payload
 pieces, which are what the listener's framing carries.
 
+## Many subscribers
+
+A stream still has one virtual thread and one stream slot for as long as its body runs. A handler
+that blocks directly on an event source therefore costs one slot per subscriber. Bound that cost
+with `app.streamPolicy(route, StreamPolicy.reject(n))` on the event route and with the aggregate
+`app.streamPolicy(StreamPolicy.reject(n))`; a subscriber refused for capacity gets an ordinary 503
+before the head, which an `EventSource` can retry.
+
+For a large audience, keep the waiting outside the stream body. Share one application-owned
+publisher that receives each update once, and give each stream handler only a small bounded queue of
+its own: the handler writes from that queue, uses `onShutdown(Runnable)` to wake up when the listener
+closes, and returns without waiting out its whole subscription timeout. The publisher needs no
+request or stream slot and is your code, with its own bounds; Axiom provides no fan-out primitive.
+Size the route bound to the number of bodies you actually want to run at once, and keep the
+listener's `shutdownGrace` long enough for them to end cleanly. A stream that must outlive the
+request deadline needs a bounded `withStreamLifetime(...)`, never a raised global request timeout.
+
 ## Limitations
 
-- Open streams hold an admission slot and a virtual thread each.
+- Each open stream holds one virtual thread and one stream slot. There is no built-in fan-out
+  primitive; see [Many subscribers](#many-subscribers).
 
-These are tracked in the limitations index, [#13](https://github.com/matrixjnr/axiom/issues/13).
+This is tracked in the limitations index, [#13](https://github.com/matrixjnr/axiom/issues/13).

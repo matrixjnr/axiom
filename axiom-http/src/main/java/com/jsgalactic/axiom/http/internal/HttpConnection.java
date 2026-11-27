@@ -2,6 +2,7 @@ package com.jsgalactic.axiom.http.internal;
 
 import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Body;
 import com.jsgalactic.axiom.http.HttpStatus;
 import com.jsgalactic.axiom.http.Request;
@@ -482,18 +483,20 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             // escaping exception would be swallowed.
             if (application.state() != Application.State.RUNNING) { throw new RejectedExecutionException("Application closed"); }
             var route = application.resolve(exchange.request());
+            var key = route.<Object>map(value -> value).orElse(UNMATCHED);
             var policy = route.map(application::admissionPolicy).orElseGet(application::admissionPolicy);
-            var tag = executor.endpointTag(route.<Object>map(value -> value).orElse(UNMATCHED));
-            active = executor.submit(route.<Object>map(value -> value).orElse(UNMATCHED),
-                    policy, exchange.execution(), () -> {
-                        try {
-                            var response = application.handle(exchange.request(), exchange.execution());
-                            return response.isStreaming() ? stream(ctx, exchange, response, tag) : prepare(response, exchange);
-                        } catch (Exception | Error failure) {
-                            logFailure(exchange, failure);
-                            throw failure;
-                        }
-                    }, WireResponse::status);
+            var streamPolicy = route.map(application::streamPolicy).orElseGet(application::streamPolicy);
+            var tag = executor.endpointTag(key);
+            active = executor.submit(key, policy, exchange.execution(), () -> {
+                try {
+                    var response = application.handle(exchange.request(), exchange.execution());
+                    return response.isStreaming() ? stream(ctx, exchange, response, tag, key, streamPolicy)
+                            : prepare(response, exchange);
+                } catch (Exception | Error failure) {
+                    logFailure(exchange, failure);
+                    throw failure;
+                }
+            }, WireResponse::status);
             active.result().whenComplete((response, thrown) -> {
                 // The outcome is final: the request body no longer counts against the listener.
                 exchange.release();
@@ -642,14 +645,18 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
     /**
      * Sends the head of a streamed response, then runs its body on the calling handler thread, so
-     * the admission slot and the deadline cover the whole stream. Returns once the body has
-     * finished; the final chunk is written by {@link #endStream} on the event loop. A body that
-     * ends in failure, or whose writer was aborted even if the body swallowed that, fails the task:
-     * the head is out, so the only honest ending is closing the connection.
+     * the stream slot and the deadline cover the whole stream. The request slot is transferred into
+     * the stream lane before the head is written; a full lane answers 503 as an ordinary response.
+     * Returns once the body has finished; the final chunk is written by {@link #endStream} on the
+     * event loop. A body that ends in failure, or whose writer was aborted even if the body swallowed
+     * that, fails the task: the head is out, so the only honest ending is closing the connection.
      */
     private WireResponse stream(ChannelHandlerContext ctx, Exchange exchange, Response response,
-            EndpointTag tag) throws Exception {
+            EndpointTag tag, Object key, StreamPolicy streamPolicy) throws Exception {
         if (!ResponseSerialization.headersSendable(response.headers())) { return error(500, exchange); }
+        // Everything that can refuse an ordinary response has been checked. Once the slot moves,
+        // a refusal can no longer replace the stream head, so the transfer comes immediately before it.
+        if (!executor.admitStream(key, streamPolicy)) { return error(503, exchange); }
         boolean close = closeRequested(response.headers());
         var scope = streamMetrics.scope(tag);
         var writer = new ChannelBodyWriter(ctx.channel(), exchange.execution(), response.streamLimit(),

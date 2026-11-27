@@ -42,7 +42,7 @@ most 1024 distinct endpoints and pools later ones under `other`.
 | --- | --- | --- | --- |
 | `axiom.http.requests` | counter | `method`, `route`, `status_class` | Finished requests. `status_class` is `1xx`..`5xx`, `cancelled` (client gone or listener closed) or `unknown` |
 | `axiom.http.request.duration` | timer | `method`, `route` | Time from submission to the final outcome, including queue wait |
-| `axiom.admission.rejected` | counter | `method`, `route`, `reason` | `capacity`, `shutdown`, `executor` or `queue_timeout`. Refusals at submission also count as `5xx` requests |
+| `axiom.admission.rejected` | counter | `method`, `route`, `reason` | `capacity`, `shutdown`, `executor`, `queue_timeout` or `stream_capacity` (a full aggregate or route stream lane). Refusals at submission and full stream lanes also count as `5xx` requests |
 | `axiom.admission.queue.wait` | timer | `method`, `route` | Time a request spent queued, whether it was promoted, expired or cancelled |
 | `axiom.admission.active` | gauge | none | Reserved or running executions |
 | `axiom.admission.queued` | gauge | none | Requests waiting for capacity |

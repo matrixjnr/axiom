@@ -3,6 +3,7 @@ package com.jsgalactic.axiom.server.internal.execution;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.AdmissionSnapshot;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.observability.Metrics;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,7 +32,9 @@ import java.util.function.ToIntFunction;
 /** Protocol-neutral, listener-owned execution. All admission state is protected by this object's lock. */
 public final class RequestDispatcher implements AutoCloseable {
     private static final Object DEFAULT_KEY = new Object();
+    private static final StreamPolicy DEFAULT_STREAM_POLICY = StreamPolicy.reject(36);
     private final AdmissionPolicy policy;
+    private final StreamPolicy streamPolicy;
     private final ExecutorService workers;
     private final ScheduledExecutorService deadlines;
     private final LongSupplier clock;
@@ -39,6 +42,9 @@ public final class RequestDispatcher implements AutoCloseable {
     private final Set<Task<?>> tasks = new HashSet<>();
     private final Set<Bucket> queuedBuckets = new LinkedHashSet<>();
     private final Map<Object, Bucket> buckets = new HashMap<>();
+    private final Map<Object, StreamBucket> streamBuckets = new HashMap<>();
+    /** The task executing on this thread, so a stream can transfer its own slot. */
+    private final ThreadLocal<Task<?>> currentTask = new ThreadLocal<>();
     /**
      * Waiting requests ordered by the moment their queue wait or execution deadline runs out,
      * whichever is first, so expired waits are found in order of expiry whatever their budgets.
@@ -48,6 +54,7 @@ public final class RequestDispatcher implements AutoCloseable {
     private final CompletableFuture<Void> stopped = new CompletableFuture<>();
     private int active;
     private int queued;
+    private int streamActive;
     private long sequence;
     private long accepted;
     private long rejected;
@@ -62,10 +69,19 @@ public final class RequestDispatcher implements AutoCloseable {
     public RequestDispatcher(int capacity) { this(AdmissionPolicy.reject(capacity)); }
 
     /**
-     * Creates bounded admission before virtual-thread creation.
+     * Creates bounded admission before virtual-thread creation. Streams use the default bound of 36.
      * @param policy aggregate limits for this dispatcher
      */
-    public RequestDispatcher(AdmissionPolicy policy) { this(policy, Metrics.NOOP); }
+    public RequestDispatcher(AdmissionPolicy policy) { this(policy, DEFAULT_STREAM_POLICY); }
+
+    /**
+     * Creates bounded admission for requests and streams before virtual-thread creation.
+     * @param policy aggregate limits for this dispatcher
+     * @param streamPolicy aggregate limit on active streams
+     */
+    public RequestDispatcher(AdmissionPolicy policy, StreamPolicy streamPolicy) {
+        this(policy, streamPolicy, Metrics.NOOP);
+    }
 
     /**
      * Creates bounded admission before virtual-thread creation, recording request, latency and
@@ -75,7 +91,18 @@ public final class RequestDispatcher implements AutoCloseable {
      * @param metrics receiver of measurements; {@link Metrics#NOOP} disables recording
      */
     public RequestDispatcher(AdmissionPolicy policy, Metrics metrics) {
-        this(policy, Executors.newThreadPerTaskExecutor(
+        this(policy, DEFAULT_STREAM_POLICY, metrics);
+    }
+
+    /**
+     * Creates bounded admission for requests and streams, recording measurements. Metrics calls
+     * happen while the dispatcher holds its lock, so an implementation must not block.
+     * @param policy aggregate limits for this dispatcher
+     * @param streamPolicy aggregate limit on active streams
+     * @param metrics receiver of measurements; {@link Metrics#NOOP} disables recording
+     */
+    public RequestDispatcher(AdmissionPolicy policy, StreamPolicy streamPolicy, Metrics metrics) {
+        this(policy, streamPolicy, Executors.newThreadPerTaskExecutor(
                 Thread.ofVirtual().name("axiom-handler-", 0).factory()), scheduler(), System::nanoTime, metrics);
     }
 
@@ -85,14 +112,25 @@ public final class RequestDispatcher implements AutoCloseable {
 
     RequestDispatcher(AdmissionPolicy policy, ExecutorService workers,
             ScheduledExecutorService deadlines, LongSupplier clock) {
-        this(policy, workers, deadlines, clock, Metrics.NOOP);
+        this(policy, DEFAULT_STREAM_POLICY, workers, deadlines, clock);
     }
 
     RequestDispatcher(AdmissionPolicy policy, ExecutorService workers,
             ScheduledExecutorService deadlines, LongSupplier clock, Metrics metrics) {
+        this(policy, DEFAULT_STREAM_POLICY, workers, deadlines, clock, metrics);
+    }
+
+    RequestDispatcher(AdmissionPolicy policy, StreamPolicy streamPolicy,
+            ExecutorService workers, ScheduledExecutorService deadlines, LongSupplier clock) {
+        this(policy, streamPolicy, workers, deadlines, clock, Metrics.NOOP);
+    }
+
+    RequestDispatcher(AdmissionPolicy policy, StreamPolicy streamPolicy, ExecutorService workers,
+            ScheduledExecutorService deadlines, LongSupplier clock, Metrics metrics) {
         Objects.requireNonNull(metrics, "metrics");
         this.metrics = metrics == Metrics.NOOP ? DispatchMetrics.DISABLED : new DispatchMetrics(metrics);
         this.policy = Objects.requireNonNull(policy, "policy");
+        this.streamPolicy = Objects.requireNonNull(streamPolicy, "streamPolicy");
         this.workers = workers;
         this.deadlines = deadlines;
         this.clock = clock;
@@ -240,6 +278,67 @@ public final class RequestDispatcher implements AutoCloseable {
      */
     public synchronized AdmissionSnapshot snapshot() {
         return new AdmissionSnapshot(active, queued, accepted, rejected, queueTimeouts);
+    }
+
+    /**
+     * Returns the number of active stream slots, and the number for one endpoint when a key is given.
+     * @param key endpoint identity to inspect, or null for the aggregate count
+     * @return active streams in this dispatcher
+     */
+    public synchronized int activeStreams(Object key) {
+        if (key == null) { return streamActive; }
+        var bucket = streamBuckets.get(key);
+        return bucket == null ? 0 : bucket.active;
+    }
+
+    /** Returns the aggregate number of active stream slots. */
+    public synchronized int activeStreams() { return activeStreams(null); }
+
+    /**
+     * Transfers the calling task's request slot into a stream slot for one endpoint. The capacity
+     * checks and the transfer happen under this dispatcher's lock, so no head bytes are written for
+     * a stream that cannot be admitted. A refusal leaves the request slot in place and records a
+     * {@code stream_capacity} rejection; it does not change the request's deadline or cancellation.
+     *
+     * @param key stable endpoint identity, never a request-specific path
+     * @param endpointPolicy immutable stream bound for this endpoint
+     * @return true when the slot was transferred, false when either bound is full
+     * @throws IllegalStateException if called outside a dispatcher task or its slot is no longer active
+     */
+    public boolean admitStream(Object key, StreamPolicy endpointPolicy) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(endpointPolicy, "endpointPolicy");
+        var task = currentTask.get();
+        if (task == null) { throw new IllegalStateException("No active dispatcher task on this thread"); }
+        var signals = new ArrayList<Runnable>();
+        boolean admitted;
+        synchronized (this) {
+            if (task.finished || !task.reserved || task.streaming) {
+                throw new IllegalStateException("The request cannot become a stream");
+            }
+            var bucket = streamBuckets.get(key);
+            if (bucket == null) {
+                bucket = new StreamBucket(key, endpointPolicy);
+            } else if (!bucket.policy.equals(endpointPolicy)) {
+                throw new IllegalArgumentException("Endpoint stream policy changed after admission");
+            }
+            if (streamActive >= streamPolicy.maxActive() || bucket.active >= endpointPolicy.maxActive()) {
+                metrics.rejected(task.series, DispatchMetrics.Reason.STREAM_CAPACITY);
+                admitted = false;
+            } else {
+                releaseRequestSlot(task);
+                prune(task.bucket);
+                streamBuckets.put(key, bucket);
+                bucket.active++;
+                streamActive++;
+                task.streamBucket = bucket;
+                task.streaming = true;
+                drain(signals);
+                admitted = true;
+            }
+        }
+        publish(signals);
+        return admitted;
     }
 
     /**
@@ -391,15 +490,35 @@ public final class RequestDispatcher implements AutoCloseable {
     private void release(Task<?> task) {
         if (!task.reserved) { return; }
         task.reserved = false;
-        active--;
-        metrics.active(-1);
-        task.bucket.active--;
+        if (task.streaming) {
+            task.streaming = false;
+            releaseStreamSlot(task);
+            pruneStream(task.streamBucket);
+            task.streamBucket = null;
+        } else {
+            releaseRequestSlot(task);
+        }
         tasks.remove(task);
         prune(task.bucket);
     }
 
+    private void releaseRequestSlot(Task<?> task) {
+        active--;
+        metrics.active(-1);
+        task.bucket.active--;
+    }
+
+    private void releaseStreamSlot(Task<?> task) {
+        streamActive--;
+        task.streamBucket.active--;
+    }
+
     private void prune(Bucket bucket) {
         if (bucket.active == 0 && bucket.waiting.isEmpty()) { buckets.remove(bucket.key, bucket); }
+    }
+
+    private void pruneStream(StreamBucket bucket) {
+        if (bucket.active == 0) { streamBuckets.remove(bucket.key, bucket); }
     }
 
     private void drain(List<Runnable> signals) {
@@ -461,6 +580,14 @@ public final class RequestDispatcher implements AutoCloseable {
         private void enqueue(Task<?> task) { waiting.add(task); }
     }
 
+    /** Per-endpoint stream slots; unlike requests, streams have no waiting queue. */
+    private static final class StreamBucket {
+        private final Object key;
+        private final StreamPolicy policy;
+        private int active;
+        private StreamBucket(Object key, StreamPolicy policy) { this.key = key; this.policy = policy; }
+    }
+
     /** Runtime deadline expiry, distinct from application-thrown timeout exceptions. */
     public static final class DeadlineExceededException extends TimeoutException {
         private static final long serialVersionUID = 1L;
@@ -502,6 +629,8 @@ public final class RequestDispatcher implements AutoCloseable {
         private Thread runner;
         private boolean waiting;
         private boolean reserved;
+        private boolean streaming;
+        private StreamBucket streamBucket;
         private boolean finished;
 
         private Task(ExecutionContext context, Callable<T> action, Bucket bucket,
@@ -527,6 +656,7 @@ public final class RequestDispatcher implements AutoCloseable {
             T value = null;
             Throwable failure = null;
             Error fatal = null;
+            currentTask.set(this);
             try {
                 synchronized (RequestDispatcher.this) {
                     if (finished) { return; }
@@ -542,6 +672,7 @@ public final class RequestDispatcher implements AutoCloseable {
                 failure = context.isExpired() ? new DeadlineExceededException() : thrown;
                 if (thrown instanceof Error error) { fatal = error; }
             } finally {
+                currentTask.remove();
                 exit(value, failure);
             }
             if (fatal != null) { throw fatal; }

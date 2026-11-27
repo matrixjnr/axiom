@@ -5,6 +5,7 @@ import com.jsgalactic.axiom.context.Handler;
 import com.jsgalactic.axiom.context.Middleware;
 import com.jsgalactic.axiom.execution.AdmissionPolicy;
 import com.jsgalactic.axiom.execution.ExecutionContext;
+import com.jsgalactic.axiom.execution.StreamPolicy;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
 import com.jsgalactic.axiom.lifecycle.ListenerOptions;
@@ -277,6 +278,44 @@ public interface Application extends RouteGroup, AutoCloseable {
      * @throws IllegalArgumentException if the route is not registered
      */
     AdmissionPolicy admissionPolicy(Route route);
+
+    /**
+     * Sets the aggregate bound on active streams for each listener before startup. The default is
+     * {@code StreamPolicy.reject(36)}. The bound also serves as the default for each route and is
+     * independent of request admission: a stream transfers its request slot into a stream slot,
+     * leaving request capacity for ordinary requests.
+     *
+     * @param policy immutable stream bound; also the default bound for each route
+     * @return this application
+     * @throws IllegalStateException after configuration has ended
+     */
+    Application streamPolicy(StreamPolicy policy);
+
+    /**
+     * Returns the aggregate stream bound.
+     * @return configured default stream policy
+     */
+    StreamPolicy streamPolicy();
+
+    /**
+     * Sets the bound on active streams for one registered route before startup. The aggregate bound
+     * still applies, so a stream is admitted only when both bounds have room.
+     *
+     * @param route registered route identity
+     * @param policy complete stream policy for the route
+     * @return this application
+     * @throws IllegalArgumentException if the route is not registered
+     * @throws IllegalStateException after configuration has ended
+     */
+    Application streamPolicy(Route route, StreamPolicy policy);
+
+    /**
+     * Returns a registered route's stream override, or the default policy.
+     * @param route registered route identity
+     * @return effective stream policy
+     * @throws IllegalArgumentException if the route is not registered
+     */
+    StreamPolicy streamPolicy(Route route);
 
     /**
      * Attaches documentation to a registered route before startup, replacing an earlier one. The
