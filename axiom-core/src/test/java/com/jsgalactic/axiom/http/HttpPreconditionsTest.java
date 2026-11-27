@@ -8,6 +8,7 @@ import com.jsgalactic.axiom.context.Context;
 import com.jsgalactic.axiom.error.PreconditionRequiredException;
 import com.jsgalactic.axiom.execution.ExecutionContext;
 import com.jsgalactic.axiom.routing.Route;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -47,6 +48,50 @@ class HttpPreconditionsTest {
         assertThat(HttpPreconditions.evaluate(request("GET", "If-None-Match", TAG), error)).isSameAs(error);
         var stream = Response.stream(200, "application/octet-stream", out -> out.write(new byte[] {1, 2, 3}));
         assertThat(HttpPreconditions.evaluate(request("GET", "Range", "bytes=0-1"), stream)).isSameAs(stream);
+    }
+
+    @Test
+    void evaluatesKnownLengthStreamsWithValidatorsAndRanges() throws Exception {
+        var response = sliced().withHeader("ETag", TAG).withHeader("Last-Modified", MODIFIED);
+        assertThat(HttpPreconditions.evaluate(request("GET", "If-None-Match", TAG), response).status()).isEqualTo(304);
+        assertThat(HttpPreconditions.evaluate(request("GET", "If-Match", "\"other\""), response).status()).isEqualTo(412);
+        assertThat(HttpPreconditions.evaluate(request("GET", "If-Modified-Since", LATER), response).status()).isEqualTo(304);
+
+        var single = HttpPreconditions.evaluate(request("GET", "Range", "bytes=2-5"), response);
+        assertThat(single.status()).isEqualTo(206);
+        assertThat(single.headers()).containsEntry("Content-Range", "bytes 2-5/10")
+                .containsEntry("Accept-Ranges", "bytes");
+        assertThat(slicedBody(single)).isEqualTo("2345");
+
+        var several = HttpPreconditions.evaluate(request("GET", "Range", "bytes=0-1,4-5"), response);
+        assertThat(several.status()).isEqualTo(206);
+        assertThat(several.headers().get("Content-Type")).isEqualTo(
+                "multipart/byteranges; boundary=" + HttpPreconditions.BOUNDARY);
+        assertThat(slicedBody(several)).contains("Content-Range: bytes 0-1/10", "Content-Range: bytes 4-5/10");
+
+        var unsatisfiable = HttpPreconditions.evaluate(request("GET", "Range", "bytes=10-"), response);
+        assertThat(unsatisfiable.status()).isEqualTo(416);
+        assertThat(unsatisfiable.body()).isNull();
+        assertThat(unsatisfiable.headers()).containsEntry("Content-Range", "bytes */10");
+
+        var ignored = HttpPreconditions.evaluate(request("GET", "If-Range", "\"other\"", "Range", "bytes=0-1"), response);
+        assertThat(ignored.status()).isEqualTo(200);
+        assertThat(slicedBody(ignored)).isEqualTo("0123456789");
+    }
+
+    private static Response sliced() {
+        var bytes = "0123456789".getBytes(StandardCharsets.UTF_8);
+        return Response.slicedStream(200, "text/plain", bytes.length, 64,
+                (out, first, last) -> out.write(bytes, (int) first, (int) (last - first + 1)));
+    }
+
+    private static String slicedBody(Response response) throws Exception {
+        var out = new ByteArrayOutputStream();
+        response.streamBody().writeTo(new BodyWriter() {
+            @Override public void write(byte[] bytes, int offset, int length) { out.write(bytes, offset, length); }
+            @Override public long bytesWritten() { return out.size(); }
+        });
+        return out.toString(StandardCharsets.UTF_8);
     }
 
     @Test
