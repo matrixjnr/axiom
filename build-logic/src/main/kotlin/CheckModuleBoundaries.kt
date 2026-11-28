@@ -33,7 +33,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-openapi" to setOf("axiom-test", "axiom-json"),
                 "axiom-openapi-ui" to setOf("axiom-test"),
                 "axiom-grpc" to setOf("axiom-test"),
-                "axiom-graphql" to setOf("axiom-test", "axiom-http")
+                "axiom-graphql" to setOf("axiom-test", "axiom-http"),
+                "axiom-jdbc" to setOf("axiom-test", "axiom-http")
             )
             val testOnlyModules = ModuleBoundaries.testOnlyModules
             // Third-party production dependencies are confined to the module that adapts them.

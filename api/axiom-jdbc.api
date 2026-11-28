@@ -1,0 +1,110 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.jdbc.Jdbc implements com.jsgalactic.axiom.context.Middleware,java.lang.AutoCloseable {
+  public com.jsgalactic.axiom.context.Middleware middleware();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public com.jsgalactic.axiom.http.Response afterError(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.http.Response);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/http/Response;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.http.Response handle(com.jsgalactic.axiom.context.Context, com.jsgalactic.axiom.context.Middleware$Next) throws java.lang.Exception;
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;Lcom/jsgalactic/axiom/context/Middleware$Next;)Lcom/jsgalactic/axiom/http/Response;
+  public com.jsgalactic.axiom.jdbc.Jdbc register();
+    descriptor: ()Lcom/jsgalactic/axiom/jdbc/Jdbc;
+  public com.jsgalactic.axiom.jdbc.JdbcOptions options();
+    descriptor: ()Lcom/jsgalactic/axiom/jdbc/JdbcOptions;
+  public com.jsgalactic.axiom.observability.HealthCheck healthCheck();
+    descriptor: ()Lcom/jsgalactic/axiom/observability/HealthCheck;
+  public javax.sql.DataSource dataSource();
+    descriptor: ()Ljavax/sql/DataSource;
+  public static com.jsgalactic.axiom.jdbc.Jdbc$Builder builder(com.jsgalactic.axiom.application.Application, javax.sql.DataSource);
+    descriptor: (Lcom/jsgalactic/axiom/application/Application;Ljavax/sql/DataSource;)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public static final java.lang.String HEALTH_NAME = "database";
+    descriptor: Ljava/lang/String;
+  public static final java.lang.String REJECTION_CODE = "db_capacity";
+    descriptor: Ljava/lang/String;
+  public void close();
+    descriptor: ()V
+}
+
+public static final class com.jsgalactic.axiom.jdbc.Jdbc$Builder {
+  public com.jsgalactic.axiom.jdbc.Jdbc build();
+    descriptor: ()Lcom/jsgalactic/axiom/jdbc/Jdbc;
+  public com.jsgalactic.axiom.jdbc.Jdbc register();
+    descriptor: ()Lcom/jsgalactic/axiom/jdbc/Jdbc;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder closeConnectionsOnShutdown();
+    descriptor: ()Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder maxConnections(int);
+    descriptor: (I)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder metrics(com.jsgalactic.axiom.observability.Metrics);
+    descriptor: (Lcom/jsgalactic/axiom/observability/Metrics;)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder name(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder probeQuery(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder probeTimeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder readiness(com.jsgalactic.axiom.observability.Health$Builder);
+    descriptor: (Lcom/jsgalactic/axiom/observability/Health$Builder;)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder routeLimit(com.jsgalactic.axiom.routing.Route, int);
+    descriptor: (Lcom/jsgalactic/axiom/routing/Route;I)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+  public com.jsgalactic.axiom.jdbc.Jdbc$Builder wait(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/jdbc/Jdbc$Builder;
+}
+
+public final class com.jsgalactic.axiom.jdbc.JdbcDataSource implements javax.sql.DataSource,java.lang.AutoCloseable {
+  public <T> T unwrap(java.lang.Class<T>) throws java.sql.SQLException;
+    descriptor: (Ljava/lang/Class;)Ljava/lang/Object;
+  public boolean isWrapperFor(java.lang.Class<?>) throws java.sql.SQLException;
+    descriptor: (Ljava/lang/Class;)Z
+  public com.jsgalactic.axiom.jdbc.JdbcDataSource(javax.sql.DataSource, com.jsgalactic.axiom.jdbc.JdbcOptions, com.jsgalactic.axiom.observability.Metrics);
+    descriptor: (Ljavax/sql/DataSource;Lcom/jsgalactic/axiom/jdbc/JdbcOptions;Lcom/jsgalactic/axiom/observability/Metrics;)V
+  public int getLoginTimeout() throws java.sql.SQLException;
+    descriptor: ()I
+  public java.io.PrintWriter getLogWriter() throws java.sql.SQLException;
+    descriptor: ()Ljava/io/PrintWriter;
+  public java.sql.Connection getConnection() throws java.sql.SQLException;
+    descriptor: ()Ljava/sql/Connection;
+  public java.sql.Connection getConnection(java.lang.String, java.lang.String) throws java.sql.SQLException;
+    descriptor: (Ljava/lang/String;Ljava/lang/String;)Ljava/sql/Connection;
+  public java.util.logging.Logger getParentLogger() throws java.sql.SQLFeatureNotSupportedException;
+    descriptor: ()Ljava/util/logging/Logger;
+  public void close();
+    descriptor: ()V
+  public void setLogWriter(java.io.PrintWriter) throws java.sql.SQLException;
+    descriptor: (Ljava/io/PrintWriter;)V
+  public void setLoginTimeout(int) throws java.sql.SQLException;
+    descriptor: (I)V
+}
+
+public final class com.jsgalactic.axiom.jdbc.JdbcOptions extends java.lang.Record {
+  public boolean closeConnectionsOnShutdown();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.jdbc.JdbcOptions(java.lang.String, int, java.time.Duration, java.lang.String, java.time.Duration, java.util.Map<com.jsgalactic.axiom.routing.Route, java.lang.Integer>, boolean);
+    descriptor: (Ljava/lang/String;ILjava/time/Duration;Ljava/lang/String;Ljava/time/Duration;Ljava/util/Map;Z)V
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public final int hashCode();
+    descriptor: ()I
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public int maxConnections();
+    descriptor: ()I
+  public java.lang.String name();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String probeQuery();
+    descriptor: ()Ljava/lang/String;
+  public java.time.Duration maxWait();
+    descriptor: ()Ljava/time/Duration;
+  public java.time.Duration probeTimeout();
+    descriptor: ()Ljava/time/Duration;
+  public java.util.Map<com.jsgalactic.axiom.routing.Route, java.lang.Integer> routeLimits();
+    descriptor: ()Ljava/util/Map;
+  public static final com.jsgalactic.axiom.jdbc.JdbcOptions DEFAULT;
+    descriptor: Lcom/jsgalactic/axiom/jdbc/JdbcOptions;
+  public static final int MAX_PROBE_QUERY_LENGTH = 128;
+    descriptor: I
+  public static final int MAX_ROUTE_LIMITS = 64;
+    descriptor: I
+  public static final java.time.Duration MAX_PROBE_TIMEOUT;
+    descriptor: Ljava/time/Duration;
+  public static final java.time.Duration MAX_WAIT;
+    descriptor: Ljava/time/Duration;
+}
