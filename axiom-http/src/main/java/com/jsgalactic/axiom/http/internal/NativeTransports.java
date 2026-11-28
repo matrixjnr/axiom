@@ -7,13 +7,16 @@ import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.kqueue.KQueue;
 import io.netty.channel.kqueue.KQueueIoHandler;
 import io.netty.channel.kqueue.KQueueServerSocketChannel;
+import io.netty.channel.uring.IoUring;
+import io.netty.channel.uring.IoUringIoHandler;
+import io.netty.channel.uring.IoUringServerSocketChannel;
 
 /**
- * Detects the optional native transports. The Netty classes for epoll and kqueue are compile-time
- * dependencies only: they are on the class path when an application adds the native artifact, and
- * absent otherwise. Every reference to them stays inside the two nested holder classes below, which
- * the JVM loads only when asked, so a missing library surfaces as a {@link LinkageError} caught
- * here and never reaches code that does not use it.
+ * Detects the optional native transports. The Netty classes for epoll, kqueue and io_uring are
+ * compile-time dependencies only: they are on the class path when an application adds the native
+ * artifact, and absent otherwise. Every reference to them stays inside the nested holder classes
+ * below, which the JVM loads only when asked, so a missing library surfaces as a {@link
+ * LinkageError} caught here and never reaches code that does not use it.
  */
 final class NativeTransports {
   private NativeTransports() {}
@@ -53,6 +56,15 @@ final class NativeTransports {
     }
   }
 
+  static Availability ioUring() {
+    try {
+      return IoUrings.probe();
+    } catch (LinkageError missing) {
+      return Availability.unusable(
+          "netty-transport-native-io_uring is not on the class path", missing);
+    }
+  }
+
   private static final class Epolls {
     static Availability probe() {
       if (!Epoll.isAvailable()) {
@@ -74,6 +86,21 @@ final class NativeTransports {
       return Availability.usable(
           new Transport(
               TransportKind.KQUEUE, KQueueIoHandler::newFactory, KQueueServerSocketChannel.class));
+    }
+  }
+
+  private static final class IoUrings {
+    static Availability probe() {
+      if (!IoUring.isAvailable()) {
+        return Availability.unusable(
+            "io_uring is not available on this system (a recent Linux kernel and permission to use io_uring are required)",
+            IoUring.unavailabilityCause());
+      }
+      return Availability.usable(
+          new Transport(
+              TransportKind.IO_URING,
+              IoUringIoHandler::newFactory,
+              IoUringServerSocketChannel.class));
     }
   }
 }

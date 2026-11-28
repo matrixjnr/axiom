@@ -24,8 +24,9 @@ record Transport(
       new Transport(TransportKind.NIO, NioIoHandler::newFactory, NioServerSocketChannel.class);
 
   /**
-   * Chooses the mechanism for a request. {@code AUTO} takes epoll, then kqueue, when usable, and
-   * NIO otherwise. A native kind named explicitly must be usable.
+   * Chooses the mechanism for a request. {@code AUTO} takes epoll, then io_uring, then kqueue when
+   * usable, and NIO otherwise; it never selects io_uring unless that transport is available and
+   * usable. A native kind named explicitly must be usable.
    *
    * @throws IllegalStateException if an explicitly requested native transport is not usable; the
    *     message names the library to add and the cause carries Netty's reason when it has one
@@ -35,10 +36,16 @@ record Transport(
       case NIO -> NIO;
       case EPOLL -> require("EPOLL", "netty-transport-native-epoll", NativeTransports.epoll());
       case KQUEUE -> require("KQUEUE", "netty-transport-native-kqueue", NativeTransports.kqueue());
+      case IO_URING ->
+          require("IO_URING", "netty-transport-native-io_uring", NativeTransports.ioUring());
       case AUTO -> {
         var epoll = NativeTransports.epoll();
         if (epoll.transport() != null) {
           yield epoll.transport();
+        }
+        var ioUring = NativeTransports.ioUring();
+        if (ioUring.transport() != null) {
+          yield ioUring.transport();
         }
         var kqueue = NativeTransports.kqueue();
         yield kqueue.transport() != null ? kqueue.transport() : NIO;

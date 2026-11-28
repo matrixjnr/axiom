@@ -167,6 +167,9 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 - **TLS** on the HTTP/1.1 listener with the JDK's TLS: PEM or `SSLContext` key material validated at
   startup, TLS 1.2 minimum with modern suites, optional mutual TLS, certificate reload without a
   restart, ALPN `http/1.1`, and `Request.isSecure()` ([TLS](docs/tls.md)).
+- **Optional native transports**: epoll and io_uring on Linux and kqueue on macOS/BSD, selected
+   by `ListenerOptions.transport`; applications that add no native library keep NIO
+   ([native transports](docs/http.md#native-transports)).
 - **Security modules (opt-in)**: a request-scoped `SecurityIdentity`, an `Authenticator`
   SPI, `authenticated()`/`hasRole`/`hasPermission` policies (401 vs 403 problem responses),
   a strict JDK-only JWT authenticator with JWKS rotation, trusted-proxy client addresses,
@@ -199,7 +202,6 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 ## Not yet
 
 - OAuth flows (bearer JWT authentication and JWKS rotation are available)
-- io_uring (epoll and kqueue are available as optional native transports)
 - Publication to Maven Central
 
 Known limitations are all resolved; the index in [#13](https://github.com/matrixjnr/axiom/issues/13)

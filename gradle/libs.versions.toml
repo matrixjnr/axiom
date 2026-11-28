@@ -44,6 +44,7 @@ netty-handler = { module = "io.netty:netty-handler" }
 # Compile-time only: the optional native transports (the native libraries are not dependencies of axiom-http).
 netty-classes-epoll = { module = "io.netty:netty-transport-classes-epoll" }
 netty-classes-kqueue = { module = "io.netty:netty-transport-classes-kqueue" }
+netty-classes-iouring = { module = "io.netty:netty-transport-classes-io_uring" }
 jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }

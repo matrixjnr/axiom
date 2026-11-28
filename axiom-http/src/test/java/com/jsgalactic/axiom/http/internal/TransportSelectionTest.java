@@ -19,10 +19,11 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * Transport selection and the behavior of every transport that can run here. The whole integration
- * suite runs twice (see the build file of this module): once without native libraries on the class
- * path, where {@code AUTO} means NIO, and once with the native library of the build platform, where
- * {@code AUTO} must pick it. The native cases here skip when the native transport is not usable and
- * fail instead under {@code -Daxiom.requireNativeTransport=true}.
+ * suite runs three times (see the build file of this module): without native libraries on the class
+ * path, where {@code AUTO} means NIO; with the native libraries of the build platform, where {@code
+ * AUTO} must pick one; and with io_uring alone on Linux, where {@code AUTO} must pick it. The
+ * native cases here skip when the native transport is not usable and fail instead under {@code
+ * -Daxiom.requireNativeTransport=true}.
  */
 @Tag("integration")
 class TransportSelectionTest {
@@ -33,6 +34,7 @@ class TransportSelectionTest {
     return switch (kind) {
       case EPOLL -> NativeTransports.epoll();
       case KQUEUE -> NativeTransports.kqueue();
+      case IO_URING -> NativeTransports.ioUring();
       default -> throw new IllegalArgumentException(kind.name());
     };
   }
@@ -49,12 +51,18 @@ class TransportSelectionTest {
     return null;
   }
 
+  private static boolean supportsIoUring() {
+    return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux");
+  }
+
   /**
    * Skips a native case that cannot run here, unless native transports are required, in which case
    * the one this system should have must be usable and anything else is skipped.
    */
   private static void requireUsable(TransportKind kind) {
-    if (kind != nativeKindOfThisSystem()) {
+    boolean supported =
+        kind == TransportKind.IO_URING ? supportsIoUring() : kind == nativeKindOfThisSystem();
+    if (!supported) {
       Assumptions.abort(kind + " does not exist on this operating system");
     }
     var found = availability(kind);
@@ -79,7 +87,12 @@ class TransportSelectionTest {
     try (var fixture = new Fixture()) {
       fixture.app.get("/", ctx -> "ok");
       var server = (NettyServer) fixture.listen();
-      if (expected.equals("NIO")) {
+      if (expected.equals("IO_URING")) {
+        requireUsable(TransportKind.IO_URING);
+        assertThat(server.transport())
+            .as("AUTO with io_uring as the only native library on the class path")
+            .isEqualTo(TransportKind.IO_URING);
+      } else if (expected.equals("NIO")) {
         assertThat(server.transport()).isEqualTo(TransportKind.NIO);
       } else {
         var kind = nativeKindOfThisSystem();
@@ -99,14 +112,15 @@ class TransportSelectionTest {
       var server = (NettyServer) fixture.listen();
       assertThat(server.settings().options().transport()).isEqualTo(TransportKind.AUTO);
       assertThat(server.transport())
-          .isIn(TransportKind.NIO, TransportKind.EPOLL, TransportKind.KQUEUE);
+          .isIn(
+              TransportKind.NIO, TransportKind.EPOLL, TransportKind.KQUEUE, TransportKind.IO_URING);
     }
   }
 
   @ParameterizedTest
   @EnumSource(
       value = TransportKind.class,
-      names = {"NIO", "EPOLL", "KQUEUE"})
+      names = {"NIO", "EPOLL", "KQUEUE", "IO_URING"})
   void servesPlainHttp(TransportKind kind) throws Exception {
     if (kind != TransportKind.NIO) {
       requireUsable(kind);
@@ -129,7 +143,7 @@ class TransportSelectionTest {
   @ParameterizedTest
   @EnumSource(
       value = TransportKind.class,
-      names = {"NIO", "EPOLL", "KQUEUE"})
+      names = {"NIO", "EPOLL", "KQUEUE", "IO_URING"})
   void servesHttps(TransportKind kind) throws Exception {
     if (kind != TransportKind.NIO) {
       requireUsable(kind);
@@ -165,7 +179,7 @@ class TransportSelectionTest {
   @ParameterizedTest
   @EnumSource(
       value = TransportKind.class,
-      names = {"NIO", "EPOLL", "KQUEUE"})
+      names = {"NIO", "EPOLL", "KQUEUE", "IO_URING"})
   void closeDrainsAnIdleConnectionAndTerminates(TransportKind kind) throws Exception {
     if (kind != TransportKind.NIO) {
       requireUsable(kind);
@@ -188,7 +202,7 @@ class TransportSelectionTest {
   @ParameterizedTest
   @EnumSource(
       value = TransportKind.class,
-      names = {"EPOLL", "KQUEUE"})
+      names = {"EPOLL", "KQUEUE", "IO_URING"})
   void anUnusableNativeTransportFailsStartupWithoutBinding(TransportKind kind) throws Exception {
     Assumptions.assumeTrue(availability(kind).transport() == null, kind + " is usable here");
     try (var fixture = new Fixture()) {
@@ -213,7 +227,9 @@ class TransportSelectionTest {
   @Test
   void resolveNeverReturnsAuto() {
     for (var kind : TransportKind.values()) {
-      if (kind == TransportKind.EPOLL || kind == TransportKind.KQUEUE) {
+      if (kind == TransportKind.EPOLL
+          || kind == TransportKind.KQUEUE
+          || kind == TransportKind.IO_URING) {
         continue;
       }
       assertThat(Transport.resolve(kind).kind()).isNotEqualTo(TransportKind.AUTO);

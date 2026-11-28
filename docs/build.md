@@ -135,16 +135,19 @@ contract, and its `test` task is disabled. A module whose tests carry the tag wi
 applying `axiom.integration-test` fails `check` (`checkIntegrationTags`) instead of
 silently running those tests nowhere.
 
-`axiom-http` also has `integrationTestNative`, part of its `check`: the same tagged classes with the
-Netty native transport of the build platform (epoll on Linux x86_64 and aarch64, kqueue on macOS)
-added to the class path, where the default `AUTO` transport must pick it. `integrationTest` itself has
-no native library, so it covers NIO. The native task is skipped on other platforms, and the native
-cases of `TransportSelectionTest` skip where the library cannot load, unless
+`axiom-http` also has `integrationTestNative` and `integrationTestIoUring`, both part of `check`:
+the same tagged classes with the Netty native transport of the build platform (epoll on Linux
+x86_64 and aarch64, kqueue on macOS) added to the class path, where the default `AUTO` transport
+must pick it, and with io_uring alone on Linux, where `AUTO` must select `IO_URING`. On Linux the
+first task also adds io_uring so its explicit cases run. `integrationTest` itself has no native
+library, so it covers NIO. The native tasks are skipped on platforms without a matching library, and
+the native cases of `TransportSelectionTest` skip where the library cannot load, unless
 `-Daxiom.requireNativeTransport=true` is passed, which makes both a failure; see
 [native transports](http.md#native-transports). The native libraries are not dependencies of the
-published `axiom-http`; the build resolves them in a `nativeTransport` configuration used by that task only, and
-`gradle/verification-metadata.xml` holds the checksums of their jars (all four platform
-classifiers) and POMs.
+published `axiom-http`; the build resolves them in `nativeTransport` and `ioUringTransport`
+configurations used only by those tasks, and `gradle/verification-metadata.xml` holds the checksums
+of their jars (epoll and kqueue for x86_64 and aarch64, io_uring for x86_64, aarch64 and riscv64)
+and POMs, plus the compile-time transport-classes jars.
 
 TLS tests (`TlsListenerTest`) generate their certificates with the JDK's own `keytool` from
 `java.home` and write the PEM files themselves, so they need a JDK rather than a JRE and no

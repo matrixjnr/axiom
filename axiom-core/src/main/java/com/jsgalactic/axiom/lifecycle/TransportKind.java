@@ -12,8 +12,9 @@ package com.jsgalactic.axiom.lifecycle;
  */
 public enum TransportKind {
   /**
-   * Uses a native transport when one is usable on this machine ({@link #EPOLL} on Linux, then
-   * {@link #KQUEUE} on macOS and the BSDs) and {@link #NIO} otherwise. This is the default.
+   * Uses a native transport when one is usable on this machine ({@link #EPOLL} first, then {@link
+   * #IO_URING} on Linux, then {@link #KQUEUE} on macOS and the BSDs) and {@link #NIO} otherwise.
+   * This is the default.
    */
   AUTO,
   /** The JDK's selector-based I/O, available everywhere and needing no extra library. */
@@ -24,5 +25,13 @@ public enum TransportKind {
    * BSD and macOS kqueue through the transport's native library; requires such a system and that
    * library.
    */
-  KQUEUE
+  KQUEUE,
+  /**
+   * Linux io_uring through the transport's native library. Usable only where Netty's io_uring
+   * classes and native library are on the class path, the kernel supports io_uring, and the process
+   * is allowed to use it (container seccomp policies often block it). Applications opt in by adding
+   * {@code netty-transport-native-io_uring} with the platform classifier; {@link #AUTO} selects
+   * this kind only when it is available and usable and no earlier native kind was selected.
+   */
+  IO_URING
 }
