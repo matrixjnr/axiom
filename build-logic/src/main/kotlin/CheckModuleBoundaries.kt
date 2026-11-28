@@ -34,6 +34,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-openapi-ui" to setOf("axiom-test"),
                 "axiom-grpc" to setOf("axiom-test"),
                 "axiom-graphql" to setOf("axiom-test", "axiom-http"),
+                "axiom-jdbc" to setOf("axiom-test", "axiom-http"),
+                "axiom-jta" to setOf("axiom-test"),
                 "axiom-jpa" to setOf("axiom-server")
             )
             val testOnlyModules = ModuleBoundaries.testOnlyModules
@@ -47,6 +49,7 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-metrics-micrometer" to setOf("io.micrometer"),
                 "axiom-grpc" to setOf("io.grpc", "com.google.protobuf"),
                 "axiom-graphql" to setOf("com.graphql-java"),
+                "axiom-jta" to setOf("jakarta.transaction"),
                 "axiom-jpa" to setOf("jakarta.persistence")
             )
             val moduleAllowed = allowed[module]
