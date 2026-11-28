@@ -247,16 +247,15 @@ class RateLimitTest {
       var futures = new ArrayList<Future<?>>();
       for (int t = 0; t < threads; t++) {
         futures.add(
-            pool.submit(
-                () -> {
-                  start.await();
-                  for (int i = 0; i < 100; i++) {
-                    if (limit.acquire("shared").allowed()) {
-                      allowed.incrementAndGet();
-                    }
-                  }
-                  return null;
-                }));
+            pool.submit(() -> {
+              start.await();
+              for (int i = 0; i < 100; i++) {
+                if (limit.acquire("shared").allowed()) {
+                  allowed.incrementAndGet();
+                }
+              }
+              return null;
+            }));
       }
       start.countDown();
       for (var future : futures) {
@@ -377,12 +376,10 @@ class RateLimitTest {
           .isEqualTo(429);
     }
     var byUser = Axiom.create();
-    byUser.use(
-        (ctx, next) -> {
-          ctx.identity(
-              new SecurityIdentity(ctx.header("X-User").orElse("anon"), Set.of(), Set.of()));
-          return next.run();
-        });
+    byUser.use((ctx, next) -> {
+      ctx.identity(new SecurityIdentity(ctx.header("X-User").orElse("anon"), Set.of(), Set.of()));
+      return next.run();
+    });
     byUser.use(
         bucket(1, Duration.ofMinutes(1))
             .key(RateLimitKey.principal(RateLimitKey.peerAddress()))

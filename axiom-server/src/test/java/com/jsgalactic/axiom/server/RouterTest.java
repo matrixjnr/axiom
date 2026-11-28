@@ -345,13 +345,12 @@ class RouterTest {
       var calls = new ArrayList<Callable<String>>();
       for (int i = 0; i < 200; i++) {
         final int id = i;
-        calls.add(
-            () -> {
-              if (!start.await(5, TimeUnit.SECONDS)) {
-                throw new AssertionError("Start gate timed out");
-              }
-              return (String) app.handle(Request.get("/users/" + id + "/files/a/" + id)).body();
-            });
+        calls.add(() -> {
+          if (!start.await(5, TimeUnit.SECONDS)) {
+            throw new AssertionError("Start gate timed out");
+          }
+          return (String) app.handle(Request.get("/users/" + id + "/files/a/" + id)).body();
+        });
       }
       var futures = calls.stream().map(executor::submit).toList();
       start.countDown();

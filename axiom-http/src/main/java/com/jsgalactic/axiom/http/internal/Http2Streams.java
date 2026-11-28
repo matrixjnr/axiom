@@ -23,13 +23,12 @@ final class Http2Streams {
     open++;
     stream
         .closeFuture()
-        .addListener(
-            ignored -> {
-              open--;
-              if (closing && open == 0) {
-                connection.close();
-              }
-            });
+        .addListener(ignored -> {
+          open--;
+          if (closing && open == 0) {
+            connection.close();
+          }
+        });
   }
 
   /** Returns whether this connection has a stream with an exchange in progress. */

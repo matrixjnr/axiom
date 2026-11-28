@@ -53,10 +53,8 @@ class OtelMetricsTest {
     assertThat(point.getCounts()).hasSize(OtelMetrics.DEFAULT_BUCKETS.size() + 1);
     assertThat(point.getCounts().get(1)).isEqualTo(1);
     assertThat(all)
-        .allSatisfy(
-            data ->
-                assertThat(data.getInstrumentationScopeInfo().getName())
-                    .isEqualTo(Tracing.SCOPE_NAME));
+        .allSatisfy(data ->
+            assertThat(data.getInstrumentationScopeInfo().getName()).isEqualTo(Tracing.SCOPE_NAME));
     provider.shutdown();
   }
 

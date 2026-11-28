@@ -177,22 +177,21 @@ class InMemorySessionStoreTest {
       var futures = new ArrayList<Future<?>>();
       for (int t = 0; t < threads; t++) {
         futures.add(
-            pool.submit(
-                () -> {
-                  start.await();
-                  for (int i = 0; i < perThread; i++) {
-                    store.update(
-                        "a",
-                        state ->
-                            state.withAttributes(
-                                Map.of(
-                                    "n",
-                                    Integer.toString(
-                                        Integer.parseInt(state.attributes().getOrDefault("n", "0"))
-                                            + 1))));
-                  }
-                  return null;
-                }));
+            pool.submit(() -> {
+              start.await();
+              for (int i = 0; i < perThread; i++) {
+                store.update(
+                    "a",
+                    state ->
+                        state.withAttributes(
+                            Map.of(
+                                "n",
+                                Integer.toString(
+                                    Integer.parseInt(state.attributes().getOrDefault("n", "0"))
+                                        + 1))));
+              }
+              return null;
+            }));
       }
       start.countDown();
       for (var future : futures) {
@@ -214,11 +213,10 @@ class InMemorySessionStoreTest {
       for (int t = 0; t < threads; t++) {
         var target = "target" + t;
         futures.add(
-            pool.submit(
-                () -> {
-                  start.await();
-                  return store.rename("a", target);
-                }));
+            pool.submit(() -> {
+              start.await();
+              return store.rename("a", target);
+            }));
       }
       start.countDown();
       int winners = 0;
@@ -241,12 +239,11 @@ class InMemorySessionStoreTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> InMemorySessionStore.builder().maxSessions(0));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                InMemorySessionStore.builder()
-                    .idleTimeout(Duration.ofHours(2))
-                    .absoluteTimeout(Duration.ofHours(1))
-                    .build());
+        .isThrownBy(() ->
+            InMemorySessionStore.builder()
+                .idleTimeout(Duration.ofHours(2))
+                .absoluteTimeout(Duration.ofHours(1))
+                .build());
     var store = store().build();
     store.create("super-secret-identifier", SIGNED_IN);
     assertThat(store.toString()).doesNotContain("super-secret");

@@ -231,15 +231,11 @@ class JwksSourceTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> JwksSource.url(URI.create("https:///jwks")));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                JwksSource.url(
-                    URI.create("https://issuer.example.com/jwks"), Duration.ofMillis(99)));
+        .isThrownBy(() ->
+            JwksSource.url(URI.create("https://issuer.example.com/jwks"), Duration.ofMillis(99)));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                JwksSource.url(
-                    URI.create("https://issuer.example.com/jwks"), Duration.ofSeconds(61)));
+        .isThrownBy(() ->
+            JwksSource.url(URI.create("https://issuer.example.com/jwks"), Duration.ofSeconds(61)));
     JwksSource.url(URI.create("https://issuer.example.com/.well-known/jwks.json"));
     JwksSource.url(URI.create("http://localhost:8080/jwks"));
     JwksSource.url(URI.create("http://[::1]:8080/jwks"));

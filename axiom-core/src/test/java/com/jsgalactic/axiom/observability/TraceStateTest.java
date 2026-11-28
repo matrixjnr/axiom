@@ -101,10 +101,9 @@ class TraceStateTest {
     assertThatIllegalArgumentException().isThrownBy(() -> new TraceState.Member("Bad", "v"));
     assertThatIllegalArgumentException().isThrownBy(() -> new TraceState.Member("k", "a=b"));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                new TraceState(
-                    List.of(new TraceState.Member("k", "1"), new TraceState.Member("k", "2"))));
+        .isThrownBy(() ->
+            new TraceState(
+                List.of(new TraceState.Member("k", "1"), new TraceState.Member("k", "2"))));
     var tooLong = new ArrayList<TraceState.Member>();
     for (int i = 0; i < 3; i++) {
       tooLong.add(new TraceState.Member("k" + i, "v".repeat(200)));

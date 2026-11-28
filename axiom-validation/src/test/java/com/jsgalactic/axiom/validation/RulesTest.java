@@ -231,17 +231,16 @@ class RulesTest {
   void sharedValidatorsGiveTheSameResultsAcrossThreads() throws Exception {
     var inputs =
         IntStream.range(0, 64)
-            .mapToObj(
-                i ->
-                    new Order(
-                        i % 3 == 0 ? "" : "c" + i,
-                        i % 2 == 0 ? "user" + i + "@example.org" : "bad" + i,
-                        i % 7,
-                        valid().address(),
-                        List.of(new Item(i % 5 == 0 ? "bad" : "ABC-1234", i % 4)),
-                        List.of("t" + i),
-                        i % 3,
-                        1))
+            .mapToObj(i ->
+                new Order(
+                    i % 3 == 0 ? "" : "c" + i,
+                    i % 2 == 0 ? "user" + i + "@example.org" : "bad" + i,
+                    i % 7,
+                    valid().address(),
+                    List.of(new Item(i % 5 == 0 ? "bad" : "ABC-1234", i % 4)),
+                    List.of("t" + i),
+                    i % 3,
+                    1))
             .toList();
     var expected = inputs.stream().map(ORDER::validate).toList();
     var threads = 8;
@@ -250,18 +249,17 @@ class RulesTest {
       var futures = new ArrayList<Future<Boolean>>();
       for (int t = 0; t < threads; t++) {
         futures.add(
-            executor.submit(
-                () -> {
-                  start.await();
-                  for (int round = 0; round < 200; round++) {
-                    for (int i = 0; i < inputs.size(); i++) {
-                      if (!ORDER.validate(inputs.get(i)).equals(expected.get(i))) {
-                        return false;
-                      }
-                    }
+            executor.submit(() -> {
+              start.await();
+              for (int round = 0; round < 200; round++) {
+                for (int i = 0; i < inputs.size(); i++) {
+                  if (!ORDER.validate(inputs.get(i)).equals(expected.get(i))) {
+                    return false;
                   }
-                  return true;
-                }));
+                }
+              }
+              return true;
+            }));
       }
       start.countDown();
       for (var future : futures) {

@@ -531,13 +531,12 @@ class JwksTest {
     var failure = new AtomicReference<RuntimeException>(new IllegalStateException("boom"));
     var jwt =
         builder()
-            .jwks(
-                max -> {
-                  if (failure.get() != null) {
-                    throw failure.get();
-                  }
-                  return bytes(set(rsaJwk("k1", "RS256")));
-                })
+            .jwks(max -> {
+              if (failure.get() != null) {
+                throw failure.get();
+              }
+              return bytes(set(rsaJwk("k1", "RS256")));
+            })
             .build();
     rejects(jwt, rs256("k1"), "boom");
     failure.set(null);
@@ -566,10 +565,9 @@ class JwksTest {
         .isThrownBy(() -> options.minRefreshInterval(Duration.ZERO));
     assertThatIllegalArgumentException().isThrownBy(() -> options.maxStale(Duration.ofDays(8)));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                JwtAuthenticator.builder()
-                    .jwks(source, options.minRefreshInterval(Duration.ofMinutes(11))));
+        .isThrownBy(() ->
+            JwtAuthenticator.builder()
+                .jwks(source, options.minRefreshInterval(Duration.ofMinutes(11))));
     assertThatIllegalArgumentException()
         .isThrownBy(
             () -> JwtAuthenticator.builder().jwks(source, options.maxStale(Duration.ofMinutes(5))));

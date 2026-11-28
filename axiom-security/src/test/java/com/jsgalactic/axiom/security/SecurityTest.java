@@ -194,20 +194,19 @@ class SecurityTest {
   @Test
   void rejectsUnsafeConfigurationWhenPoliciesAreCreated() {
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                Security.of(
-                    new Authenticator() {
-                      @Override
-                      public Optional<SecurityIdentity> authenticate(Request request) {
-                        return Optional.empty();
-                      }
+        .isThrownBy(() ->
+            Security.of(
+                new Authenticator() {
+                  @Override
+                  public Optional<SecurityIdentity> authenticate(Request request) {
+                    return Optional.empty();
+                  }
 
-                      @Override
-                      public String challenge() {
-                        return "Bearer\r\nSet-Cookie: x=y";
-                      }
-                    }));
+                  @Override
+                  public String challenge() {
+                    return "Bearer\r\nSet-Cookie: x=y";
+                  }
+                }));
     assertThatIllegalArgumentException().isThrownBy(() -> security.hasRole(""));
     assertThatIllegalArgumentException().isThrownBy(() -> security.hasPermission("a\nb"));
     assertThatIllegalArgumentException().isThrownBy(security::hasAnyRole);

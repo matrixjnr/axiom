@@ -67,17 +67,16 @@ class HttpLingerLiveTest {
       // The client keeps sending pipelined input, which the server never reads as a request.
       sender =
           Thread.ofVirtual()
-              .start(
-                  () -> {
-                    var piece = new byte[16 * 1024];
-                    try {
-                      for (int sent = 0; sent < 4 * 1024 * 1024; sent += piece.length) {
-                        out.write(piece);
-                      }
-                    } catch (IOException closed) {
-                      /* Only the response matters. */
-                    }
-                  });
+              .start(() -> {
+                var piece = new byte[16 * 1024];
+                try {
+                  for (int sent = 0; sent < 4 * 1024 * 1024; sent += piece.length) {
+                    out.write(piece);
+                  }
+                } catch (IOException closed) {
+                  /* Only the response matters. */
+                }
+              });
       // The client reads nothing until it has sent everything: a server that closed early has
       // reset the connection by then, destroying the response it had not delivered yet.
       sender.join();

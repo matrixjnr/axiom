@@ -113,9 +113,8 @@ class CloseReleasesReferencesTest {
 
     app.close();
 
-    refs.forEach(
-        (name, reference) ->
-            assertThat(cleared(reference)).as("%s after close before start", name).isTrue());
+    refs.forEach((name, reference) ->
+        assertThat(cleared(reference)).as("%s after close before start", name).isTrue());
     assertThat(app.state()).isEqualTo(Application.State.CLOSED);
   }
 }

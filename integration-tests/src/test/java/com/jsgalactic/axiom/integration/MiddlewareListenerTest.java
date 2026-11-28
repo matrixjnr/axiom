@@ -35,9 +35,8 @@ class MiddlewareListenerTest {
     app.group(
         "/api",
         api -> {
-          api.use(
-              (ctx, next) ->
-                  ctx.header("Authorization").isPresent() ? next.run() : Response.of(401, null));
+          api.use((ctx, next) ->
+              ctx.header("Authorization").isPresent() ? next.run() : Response.of(401, null));
           api.use((ctx, next) -> next.run().withHeader("X-Route", ctx.route().path()));
           api.get("/items/:id", ctx -> "item " + ctx.path("id"));
           api.get(

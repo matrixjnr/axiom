@@ -214,33 +214,29 @@ class SchemasTest {
     var wrongType =
         Rules.of(Constrained.class).field("age", Constrained::age, unsafe(Rule.maxLength(3)));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                new Schemas(32, Map.of(), Map.of(Constrained.class, wrongType.constraints()))
-                    .schema(Constrained.class, "t"))
+        .isThrownBy(() ->
+            new Schemas(32, Map.of(), Map.of(Constrained.class, wrongType.constraints()))
+                .schema(Constrained.class, "t"))
         .withMessageContaining("LENGTH")
         .withMessageContaining("Constrained.age");
     var unknown = Rules.of(Constrained.class).field("ghost", Constrained::name, Rule.notNull());
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                new Schemas(32, Map.of(), Map.of(Constrained.class, unknown.constraints()))
-                    .schema(Constrained.class, "t"))
+        .isThrownBy(() ->
+            new Schemas(32, Map.of(), Map.of(Constrained.class, unknown.constraints()))
+                .schema(Constrained.class, "t"))
         .withMessageContaining("'ghost'");
     var onReference =
         Rules.of(Constrained.class).field("level", Constrained::level, unsafe(Rule.notBlank()));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                new Schemas(32, Map.of(), Map.of(Constrained.class, onReference.constraints()))
-                    .schema(Constrained.class, "t"))
+        .isThrownBy(() ->
+            new Schemas(32, Map.of(), Map.of(Constrained.class, onReference.constraints()))
+                .schema(Constrained.class, "t"))
         .withMessageContaining("reference");
     var notAList = Rules.of(Constrained.class).each("name", Constrained::tags, Rule.maxLength(3));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                new Schemas(32, Map.of(), Map.of(Constrained.class, notAList.constraints()))
-                    .schema(Constrained.class, "t"))
+        .isThrownBy(() ->
+            new Schemas(32, Map.of(), Map.of(Constrained.class, notAList.constraints()))
+                .schema(Constrained.class, "t"))
         .withMessageContaining("list or array");
   }
 }

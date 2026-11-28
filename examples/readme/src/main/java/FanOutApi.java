@@ -46,14 +46,13 @@ public final class FanOutApi {
           int index = i;
           var lookup = lookups.get(i);
           children.add(
-              completed.submit(
-                  () -> {
-                    var budget = execution.remainingTime();
-                    if (budget.isZero()) {
-                      throw new TimeoutException();
-                    }
-                    return new Part(index, lookup.fetch(id, budget));
-                  }));
+              completed.submit(() -> {
+                var budget = execution.remainingTime();
+                if (budget.isZero()) {
+                  throw new TimeoutException();
+                }
+                return new Part(index, lookup.fetch(id, budget));
+              }));
         }
         var values = new String[2];
         for (int i = 0; i < values.length; i++) {

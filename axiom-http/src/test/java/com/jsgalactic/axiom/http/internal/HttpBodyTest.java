@@ -113,17 +113,16 @@ class HttpBodyTest {
       var failure = new AtomicReference<IOException>();
       var sender =
           Thread.ofVirtual()
-              .start(
-                  () -> {
-                    try {
-                      for (int sent = piece.length; sent < length; sent += piece.length) {
-                        wire.socket.getOutputStream().write(piece);
-                      }
-                      wire.socket.shutdownOutput();
-                    } catch (IOException reset) {
-                      failure.set(reset);
-                    }
-                  });
+              .start(() -> {
+                try {
+                  for (int sent = piece.length; sent < length; sent += piece.length) {
+                    wire.socket.getOutputStream().write(piece);
+                  }
+                  wire.socket.shutdownOutput();
+                } catch (IOException reset) {
+                  failure.set(reset);
+                }
+              });
       try {
         var reply = wire.read(false);
         assertThat(reply.status()).isEqualTo(413);

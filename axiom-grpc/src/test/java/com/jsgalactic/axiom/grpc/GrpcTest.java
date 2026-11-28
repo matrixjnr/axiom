@@ -326,9 +326,8 @@ class GrpcTest {
             assertThat(grpc.isRunning()).isFalse();
             assertThat(grpc.isReady()).isFalse();
             assertThat(health.readiness().status()).isEqualTo(Health.Status.DOWN);
-            assertThatThrownBy(
-                    () ->
-                        ClientCalls.blockingUnaryCall(channel, UNARY, CallOptions.DEFAULT, "later"))
+            assertThatThrownBy(() ->
+                    ClientCalls.blockingUnaryCall(channel, UNARY, CallOptions.DEFAULT, "later"))
                 .isInstanceOf(StatusRuntimeException.class)
                 .satisfies(failure -> assertThat(code(failure)).isEqualTo(Status.Code.UNAVAILABLE));
             release.countDown();
@@ -371,16 +370,14 @@ class GrpcTest {
                 .isInstanceOf(StatusRuntimeException.class)
                 .satisfies(
                     failure -> assertThat(code(failure)).isEqualTo(Status.Code.INVALID_ARGUMENT));
-            assertThatThrownBy(
-                    () ->
-                        ClientCalls.blockingUnaryCall(channel, UNARY, CallOptions.DEFAULT, "other"))
+            assertThatThrownBy(() ->
+                    ClientCalls.blockingUnaryCall(channel, UNARY, CallOptions.DEFAULT, "other"))
                 .isInstanceOf(StatusRuntimeException.class)
-                .satisfies(
-                    failure -> {
-                      assertThat(code(failure)).isEqualTo(Status.Code.FAILED_PRECONDITION);
-                      assertThat(((StatusRuntimeException) failure).getStatus().getDescription())
-                          .isEqualTo("boom");
-                    });
+                .satisfies(failure -> {
+                  assertThat(code(failure)).isEqualTo(Status.Code.FAILED_PRECONDITION);
+                  assertThat(((StatusRuntimeException) failure).getStatus().getDescription())
+                      .isEqualTo("boom");
+                });
           });
     } finally {
       grpc.stop();
@@ -403,9 +400,8 @@ class GrpcTest {
         .isThrownBy(() -> Grpc.builder(app).service(quiet()).address("", 9090))
         .withMessageContaining("Invalid");
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                Grpc.builder(app).service(quiet()).mapError(IllegalStateException.class, Status.OK))
+        .isThrownBy(() ->
+            Grpc.builder(app).service(quiet()).mapError(IllegalStateException.class, Status.OK))
         .withMessageContaining("OK");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Grpc.builder(app).service(quiet()).drainGrace(Duration.ofDays(2)));

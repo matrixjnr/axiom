@@ -31,16 +31,16 @@ import org.junit.jupiter.api.Test;
 class GraphQlTest {
   private static final String SDL =
       """
-            type Query {
-              greeting: String
-              upper(id: ID!): String
-              pair(first: ID!, second: ID!): [String]
-              boom: String
-              deep: Nested
-            }
-            type Nested { child: Nested, label: String }
-            type Mutation { increment: Int }
-            """;
+      type Query {
+        greeting: String
+        upper(id: ID!): String
+        pair(first: ID!, second: ID!): [String]
+        boom: String
+        deep: Nested
+      }
+      type Nested { child: Nested, label: String }
+      type Mutation { increment: Int }
+      """;
 
   private static final String POISON = "POISON<script>java.lang.Runtime";
 
@@ -245,12 +245,11 @@ class GraphQlTest {
           var registry = new DataLoaderRegistry();
           registry.register(
               "names",
-              DataLoaderFactory.<String, String>newDataLoader(
-                  keys -> {
-                    batches.incrementAndGet();
-                    return CompletableFuture.completedFuture(
-                        keys.stream().map(String::toUpperCase).toList());
-                  }));
+              DataLoaderFactory.<String, String>newDataLoader(keys -> {
+                batches.incrementAndGet();
+                return CompletableFuture.completedFuture(
+                    keys.stream().map(String::toUpperCase).toList());
+              }));
           return registry;
         };
     try (var client =

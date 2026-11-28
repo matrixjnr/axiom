@@ -33,14 +33,13 @@ class JdbcExampleTest {
 
     try (var client = TestClient.start(app)) {
       var held =
-          CompletableFuture.supplyAsync(
-              () -> {
-                try {
-                  return client.get("/orders");
-                } catch (Exception failure) {
-                  throw new IllegalStateException(failure);
-                }
-              });
+          CompletableFuture.supplyAsync(() -> {
+            try {
+              return client.get("/orders");
+            } catch (Exception failure) {
+              throw new IllegalStateException(failure);
+            }
+          });
       assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
       var refused = client.get("/orders");
       assertThat(refused.status()).isEqualTo(503);

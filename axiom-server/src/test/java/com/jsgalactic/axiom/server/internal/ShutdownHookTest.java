@@ -165,24 +165,22 @@ class ShutdownHookTest {
     app.adopt(server, ListenerOptions.defaults());
     var health = Health.builder(app).readiness("db", () -> true).build();
     var order = new ArrayList<String>();
-    app.onDrain(
-        () -> {
-          throw new IllegalStateException("a broken action must not stop the shutdown");
-        });
+    app.onDrain(() -> {
+      throw new IllegalStateException("a broken action must not stop the shutdown");
+    });
     app.onDrain(
         () -> order.add("drain: ready=" + health.readiness().status() + ", state=" + app.state()));
     var paused = new ArrayList<Duration>();
-    app.drainPause(
-        delay -> {
-          paused.add(delay);
-          order.add(
-              "pause: draining="
-                  + health.isDraining()
-                  + ", state="
-                  + app.state()
-                  + ", closed="
-                  + (server.closed.getCount() == 0));
-        });
+    app.drainPause(delay -> {
+      paused.add(delay);
+      order.add(
+          "pause: draining="
+              + health.isDraining()
+              + ", state="
+              + app.state()
+              + ", closed="
+              + (server.closed.getCount() == 0));
+    });
     assertThat(health.isDraining()).isFalse();
     app.closeOnJvmShutdown(Duration.ofSeconds(7));
     app.closeOnJvmShutdown(Duration.ofSeconds(99)); // The first call's delay stays.
@@ -208,10 +206,9 @@ class ShutdownHookTest {
     app.start();
     var drained = new AtomicInteger();
     app.onDrain(drained::incrementAndGet);
-    app.drainPause(
-        delay -> {
-          throw new AssertionError("must not pause for a zero delay");
-        });
+    app.drainPause(delay -> {
+      throw new AssertionError("must not pause for a zero delay");
+    });
     assertThatIllegalArgumentException()
         .isThrownBy(() -> app.closeOnJvmShutdown(Duration.ofSeconds(-1)));
     assertThatIllegalArgumentException()

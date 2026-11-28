@@ -82,12 +82,11 @@ final class ChannelBodyWriter implements BodyWriter {
       // A failed write means the connection is gone; the next write or wait reports it.
       channel
           .writeAndFlush(new DefaultHttpContent(buffer))
-          .addListener(
-              done -> {
-                if (!done.isSuccess()) {
-                  abort(shutdown ? Reason.SHUTDOWN : Reason.CLIENT_DISCONNECTED);
-                }
-              });
+          .addListener(done -> {
+            if (!done.isSuccess()) {
+              abort(shutdown ? Reason.SHUTDOWN : Reason.CLIENT_DISCONNECTED);
+            }
+          });
       sent += piece;
       written += piece;
     }

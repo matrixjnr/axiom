@@ -90,13 +90,12 @@ public record TraceContext(String traceId, String parentId, int flags, TraceStat
    */
   public static Optional<TraceContext> parse(String traceparent, String tracestate) {
     return parse(traceparent)
-        .map(
-            parsed ->
-                new TraceContext(
-                    parsed.traceId,
-                    parsed.parentId,
-                    parsed.flags,
-                    TraceState.parse(tracestate).orElse(TraceState.EMPTY)));
+        .map(parsed ->
+            new TraceContext(
+                parsed.traceId,
+                parsed.parentId,
+                parsed.flags,
+                TraceState.parse(tracestate).orElse(TraceState.EMPTY)));
   }
 
   /**

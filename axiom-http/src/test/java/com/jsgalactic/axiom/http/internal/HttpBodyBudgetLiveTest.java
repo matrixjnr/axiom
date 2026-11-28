@@ -72,10 +72,9 @@ class HttpBodyBudgetLiveTest {
   void aListenerWhoseBudgetIsSmallerThanTheBodyLimitRefusesToStart() throws Exception {
     try (var fixture = new Fixture()) {
       fixture.app.maxRequestBody(512);
-      assertThatThrownBy(
-              () ->
-                  fixture.app.listen(
-                      LOOPBACK, ListenerOptions.builder().maxInFlightBodyBytes(511).build()))
+      assertThatThrownBy(() ->
+              fixture.app.listen(
+                  LOOPBACK, ListenerOptions.builder().maxInFlightBodyBytes(511).build()))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("maxInFlightBodyBytes");
       // The application is unharmed, and a budget that fits works.

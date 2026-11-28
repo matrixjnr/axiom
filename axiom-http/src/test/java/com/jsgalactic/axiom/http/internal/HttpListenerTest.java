@@ -457,15 +457,14 @@ class HttpListenerTest {
         server
             .listener
             .eventLoop()
-            .execute(
-                () -> {
-                  acceptorBlocked.countDown();
-                  try {
-                    unblockAcceptor.await();
-                  } catch (InterruptedException stop) {
-                    Thread.currentThread().interrupt();
-                  }
-                });
+            .execute(() -> {
+              acceptorBlocked.countDown();
+              try {
+                unblockAcceptor.await();
+              } catch (InterruptedException stop) {
+                Thread.currentThread().interrupt();
+              }
+            });
         assertThat(acceptorBlocked.await(30, TimeUnit.SECONDS)).isTrue();
         server.close();
         // The queued request is answered once admission stops; the running one must

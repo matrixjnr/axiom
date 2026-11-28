@@ -38,11 +38,9 @@ class ExecutionBudgetTest {
       app.executionBudget(new ExecutionBudget(aggregate, Map.of(route, override)));
       assertThat(app.executionBudget().aggregate()).isEqualTo(aggregate);
       assertThat(app.executionBudget().routePolicies()).containsExactly(Map.entry(route, override));
-      assertThatThrownBy(
-              () ->
-                  app.executionBudget(
-                      new ExecutionBudget(
-                          aggregate, Map.of(new Route("GET", "/missing"), override))))
+      assertThatThrownBy(() ->
+              app.executionBudget(
+                  new ExecutionBudget(aggregate, Map.of(new Route("GET", "/missing"), override))))
           .isInstanceOf(IllegalArgumentException.class);
       app.executionBudget(route, AdmissionPolicy.reject(3));
       assertThat(app.executionBudget(route)).isEqualTo(AdmissionPolicy.reject(3));

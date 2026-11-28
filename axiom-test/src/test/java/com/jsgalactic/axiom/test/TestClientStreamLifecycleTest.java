@@ -93,16 +93,15 @@ class TestClientStreamLifecycleTest {
     var outcomes = new CompletableFuture<StreamOutcome>();
     var wrapped = new AtomicLong();
     var app = Axiom.create();
-    app.use(
-        (ctx, next) -> {
-          var response = next.run();
-          if (!response.isStreaming()) {
-            return response;
-          }
-          return response
-              .mapStream(body -> out -> body.writeTo(new CountingWriter(out, wrapped)))
-              .onStreamEnd(outcomes::complete);
-        });
+    app.use((ctx, next) -> {
+      var response = next.run();
+      if (!response.isStreaming()) {
+        return response;
+      }
+      return response
+          .mapStream(body -> out -> body.writeTo(new CountingWriter(out, wrapped)))
+          .onStreamEnd(outcomes::complete);
+    });
     app.get(
         "/feed",
         ctx ->
@@ -151,22 +150,18 @@ class TestClientStreamLifecycleTest {
     var order = Collections.synchronizedList(new ArrayList<String>());
     var done = new CountDownLatch(1);
     var app = Axiom.create();
-    app.use(
-        (ctx, next) ->
-            next.run()
-                .onStreamEnd(
-                    outcome -> {
-                      order.add("outer");
-                      done.countDown();
-                    }));
-    app.use(
-        (ctx, next) ->
-            next.run()
-                .onStreamEnd(
-                    outcome -> {
-                      order.add("inner");
-                      throw new IllegalStateException("broken observer");
-                    }));
+    app.use((ctx, next) ->
+        next.run()
+            .onStreamEnd(outcome -> {
+              order.add("outer");
+              done.countDown();
+            }));
+    app.use((ctx, next) ->
+        next.run()
+            .onStreamEnd(outcome -> {
+              order.add("inner");
+              throw new IllegalStateException("broken observer");
+            }));
     app.get(
         "/feed",
         ctx ->
@@ -373,25 +368,21 @@ class TestClientStreamLifecycleTest {
     app.get(
         "/events",
         ctx ->
-            Response.sse(
-                events -> {
-                  var shutdown = new CountDownLatch(1);
-                  events.onShutdown(
-                      () -> {
-                        woken.incrementAndGet();
-                        shutdown.countDown();
-                      });
-                  events.onShutdown(
-                      () -> {
-                        throw new IllegalStateException("a broken action is ignored");
-                      });
-                  events.send("hello");
-                  seenBefore.complete(events.shutdownRequested());
-                  shutdown.await();
-                  events.onShutdown(late::incrementAndGet); // Already begun: runs at once, here.
-                  events.send(
-                      ServerSentEvent.named("bye", "closing").withRetry(Duration.ofSeconds(1)));
-                }));
+            Response.sse(events -> {
+              var shutdown = new CountDownLatch(1);
+              events.onShutdown(() -> {
+                woken.incrementAndGet();
+                shutdown.countDown();
+              });
+              events.onShutdown(() -> {
+                throw new IllegalStateException("a broken action is ignored");
+              });
+              events.send("hello");
+              seenBefore.complete(events.shutdownRequested());
+              shutdown.await();
+              events.onShutdown(late::incrementAndGet); // Already begun: runs at once, here.
+              events.send(ServerSentEvent.named("bye", "closing").withRetry(Duration.ofSeconds(1)));
+            }));
     try (var client = TestClient.start(app);
         var stream = client.stream(get("/events"))) {
       assertThat(stream.nextText().orElseThrow()).contains("hello");

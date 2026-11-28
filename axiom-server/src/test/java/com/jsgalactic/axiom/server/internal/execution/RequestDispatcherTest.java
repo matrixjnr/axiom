@@ -243,22 +243,21 @@ class RequestDispatcherTest {
       var submissions = new ArrayList<Future<Boolean>>();
       for (int i = 0; i < 8; i++) {
         submissions.add(
-            submitters.submit(
-                () -> {
-                  ready.countDown();
-                  start.await();
-                  try {
-                    dispatcher.submit(
-                        context(),
-                        () -> {
-                          release.await();
-                          return null;
-                        });
-                    return true;
-                  } catch (RejectedExecutionException expected) {
-                    return false;
-                  }
-                }));
+            submitters.submit(() -> {
+              ready.countDown();
+              start.await();
+              try {
+                dispatcher.submit(
+                    context(),
+                    () -> {
+                      release.await();
+                      return null;
+                    });
+                return true;
+              } catch (RejectedExecutionException expected) {
+                return false;
+              }
+            }));
       }
       assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
       start.countDown();

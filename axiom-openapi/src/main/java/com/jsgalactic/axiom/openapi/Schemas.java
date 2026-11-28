@@ -501,35 +501,32 @@ final class Schemas {
       }
     }
     var props = new ArrayList<Prop>();
-    found.forEach(
-        (implicit, a) -> {
-          var elements = new ArrayList<AnnotatedElement>();
-          if (a.getter != null) {
-            elements.add(a.getter);
-          }
-          if (a.field != null) {
-            elements.add(a.field);
-          }
-          if (a.setter != null) {
-            elements.add(a.setter);
-          }
-          var json = JacksonNames.read(elements);
-          if (json.ignored()) {
-            return;
-          }
-          var generic =
-              a.getter != null
-                  ? a.getter.getGenericReturnType()
-                  : a.field != null
-                      ? a.field.getGenericType()
-                      : a.setter.getGenericParameterTypes()[0];
-          props.add(
-              new Prop(
-                  json.name() != null ? json.name() : implicit,
-                  generic,
-                  generic instanceof Class<?> c && c.isPrimitive() && a.getter != null,
-                  json.required()));
-        });
+    found.forEach((implicit, a) -> {
+      var elements = new ArrayList<AnnotatedElement>();
+      if (a.getter != null) {
+        elements.add(a.getter);
+      }
+      if (a.field != null) {
+        elements.add(a.field);
+      }
+      if (a.setter != null) {
+        elements.add(a.setter);
+      }
+      var json = JacksonNames.read(elements);
+      if (json.ignored()) {
+        return;
+      }
+      var generic =
+          a.getter != null
+              ? a.getter.getGenericReturnType()
+              : a.field != null ? a.field.getGenericType() : a.setter.getGenericParameterTypes()[0];
+      props.add(
+          new Prop(
+              json.name() != null ? json.name() : implicit,
+              generic,
+              generic instanceof Class<?> c && c.isPrimitive() && a.getter != null,
+              json.required()));
+    });
     props.sort(Comparator.comparing(Prop::name));
     var seen = new LinkedHashSet<String>();
     for (var prop : props) {
@@ -564,29 +561,27 @@ final class Schemas {
     if (described == null) {
       return;
     }
-    described.forEach(
-        (key, constraints) -> {
-          var element = key.endsWith("[]");
-          var property = element ? key.substring(0, key.length() - 2) : key;
-          var schema = properties.get(property);
-          if (schema == null) {
-            throw fail(
-                name,
-                "the rule set names a property '" + property + "' that the schema does not have");
-          }
-          var target = schema;
-          if (element) {
-            if (!(schema.get("items") instanceof Map<?, ?>)) {
-              throw fail(name + "." + property, "element rules need a list or array property");
-            }
-            @SuppressWarnings("unchecked")
-            var items = (Map<String, Object>) schema.get("items");
-            target = items;
-          }
-          for (var constraint : constraints) {
-            apply(name + "." + key, target, constraint, element ? null : property, required);
-          }
-        });
+    described.forEach((key, constraints) -> {
+      var element = key.endsWith("[]");
+      var property = element ? key.substring(0, key.length() - 2) : key;
+      var schema = properties.get(property);
+      if (schema == null) {
+        throw fail(
+            name, "the rule set names a property '" + property + "' that the schema does not have");
+      }
+      var target = schema;
+      if (element) {
+        if (!(schema.get("items") instanceof Map<?, ?>)) {
+          throw fail(name + "." + property, "element rules need a list or array property");
+        }
+        @SuppressWarnings("unchecked")
+        var items = (Map<String, Object>) schema.get("items");
+        target = items;
+      }
+      for (var constraint : constraints) {
+        apply(name + "." + key, target, constraint, element ? null : property, required);
+      }
+    });
   }
 
   private void apply(

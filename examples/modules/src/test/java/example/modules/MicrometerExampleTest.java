@@ -25,14 +25,13 @@ class MicrometerExampleTest {
 
     try (var client = TestClient.start(app)) {
       var held =
-          java.util.concurrent.CompletableFuture.supplyAsync(
-              () -> {
-                try {
-                  return client.get("/blocked");
-                } catch (Exception failure) {
-                  throw new IllegalStateException(failure);
-                }
-              });
+          java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+              return client.get("/blocked");
+            } catch (Exception failure) {
+              throw new IllegalStateException(failure);
+            }
+          });
       assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
       assertThat(registry.get("axiom.admission.active").gauge().value()).isEqualTo(1);
       release.countDown();

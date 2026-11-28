@@ -732,21 +732,20 @@ public final class RequestDispatcher implements AutoCloseable {
     Thread.ofPlatform()
         .daemon(true)
         .name("axiom-execution-shutdown")
-        .start(
-            () -> {
-              try {
-                while (!workers.awaitTermination(1, TimeUnit.DAYS)) {
-                  /* Cooperative shutdown. */
-                }
-                while (!deadlines.awaitTermination(1, TimeUnit.DAYS)) {
-                  /* Join timer callbacks. */
-                }
-                stopped.complete(null);
-              } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                stopped.completeExceptionally(interrupted);
-              }
-            });
+        .start(() -> {
+          try {
+            while (!workers.awaitTermination(1, TimeUnit.DAYS)) {
+              /* Cooperative shutdown. */
+            }
+            while (!deadlines.awaitTermination(1, TimeUnit.DAYS)) {
+              /* Join timer callbacks. */
+            }
+            stopped.complete(null);
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            stopped.completeExceptionally(interrupted);
+          }
+        });
   }
 
   // Called only under the dispatcher lock. Notifications are published after releasing it.
@@ -840,14 +839,13 @@ public final class RequestDispatcher implements AutoCloseable {
     if (interrupt && task.runner != null) {
       task.runner.interrupt();
     }
-    signals.add(
-        () -> {
-          if (failure == null) {
-            task.result.complete(value);
-          } else {
-            task.result.completeExceptionally(failure);
-          }
-        });
+    signals.add(() -> {
+      if (failure == null) {
+        task.result.complete(value);
+      } else {
+        task.result.completeExceptionally(failure);
+      }
+    });
   }
 
   /** The status code that classifies a finished request, or the cancelled and unknown codes. */

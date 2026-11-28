@@ -121,18 +121,17 @@ class ErrorHandlerTest {
   @Test
   void runsAfterMiddlewareHaveUnwoundAndCoversMiddlewareFailures() throws Exception {
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            calls.add("global>");
-            try {
-              return next.run();
-            } catch (IllegalStateException observed) {
-              calls.add("observed");
-              throw observed;
-            } finally {
-              calls.add("<global");
-            }
-          });
+      app.use((ctx, next) -> {
+        calls.add("global>");
+        try {
+          return next.run();
+        } catch (IllegalStateException observed) {
+          calls.add("observed");
+          throw observed;
+        } finally {
+          calls.add("<global");
+        }
+      });
       app.get(
           "/handler",
           ctx -> {
@@ -333,9 +332,8 @@ class ErrorHandlerTest {
     try (var app = Axiom.create()) {
       app.error(IllegalStateException.class, (ctx, failure) -> Response.of(409, null));
       assertThatIllegalArgumentException()
-          .isThrownBy(
-              () ->
-                  app.error(IllegalStateException.class, (ctx, failure) -> Response.of(409, null)));
+          .isThrownBy(() ->
+              app.error(IllegalStateException.class, (ctx, failure) -> Response.of(409, null)));
       assertThatThrownBy(() -> app.error(null, (ctx, failure) -> null))
           .isInstanceOf(NullPointerException.class);
       assertThatThrownBy(() -> app.error(Exception.class, null))

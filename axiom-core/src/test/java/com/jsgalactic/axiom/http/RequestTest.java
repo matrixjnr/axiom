@@ -255,10 +255,9 @@ class RequestTest {
 
   @Test
   void rejectsAnUnresolvedRemoteAddressSoNothingLooksItUp() {
-    assertThatThrownBy(
-            () ->
-                Request.get("/")
-                    .withRemoteAddress(InetSocketAddress.createUnresolved("example.org", 80)))
+    assertThatThrownBy(() ->
+            Request.get("/")
+                .withRemoteAddress(InetSocketAddress.createUnresolved("example.org", 80)))
         .isInstanceOf(IllegalArgumentException.class);
   }
 }

@@ -248,26 +248,24 @@ class TlsListenerTest {
       var server = tls.identity("localhost");
       var past = Clock.fixed(Instant.parse("2000-01-01T00:00:00Z"), ZoneOffset.UTC);
       var future = Clock.fixed(Instant.now().plus(Duration.ofDays(4000)), ZoneOffset.UTC);
-      assertThatThrownBy(
-              () ->
-                  listen(
-                      fixture,
-                      TlsOptions.builder()
-                          .certificateChain(server.chain())
-                          .privateKey(server.key())
-                          .clock(past)
-                          .build()))
+      assertThatThrownBy(() ->
+              listen(
+                  fixture,
+                  TlsOptions.builder()
+                      .certificateChain(server.chain())
+                      .privateKey(server.key())
+                      .clock(past)
+                      .build()))
           .isInstanceOf(TlsConfigurationException.class)
           .hasMessageContaining("not valid before");
-      assertThatThrownBy(
-              () ->
-                  listen(
-                      fixture,
-                      TlsOptions.builder()
-                          .certificateChain(server.chain())
-                          .privateKey(server.key())
-                          .clock(future)
-                          .build()))
+      assertThatThrownBy(() ->
+              listen(
+                  fixture,
+                  TlsOptions.builder()
+                      .certificateChain(server.chain())
+                      .privateKey(server.key())
+                      .clock(future)
+                      .build()))
           .isInstanceOf(TlsConfigurationException.class)
           .hasMessageContaining("expired");
     }
@@ -314,27 +312,25 @@ class TlsListenerTest {
           .satisfies(
               failure -> assertThat(failure.getMessage()).doesNotContain(keyLine(two.key())));
       // A missing client trust file fails as well.
-      assertThatThrownBy(
-              () ->
-                  listen(
-                      fixture,
-                      TlsOptions.builder()
-                          .certificateChain(one.chain())
-                          .privateKey(one.key())
-                          .requireClientCertificates(missing)
-                          .build()))
+      assertThatThrownBy(() ->
+              listen(
+                  fixture,
+                  TlsOptions.builder()
+                      .certificateChain(one.chain())
+                      .privateKey(one.key())
+                      .requireClientCertificates(missing)
+                      .build()))
           .isInstanceOf(TlsConfigurationException.class)
           .hasMessageContaining("does not exist");
       var expiredTrust = tls.identity("expired-ca", "-3d", 1);
-      assertThatThrownBy(
-              () ->
-                  listen(
-                      fixture,
-                      TlsOptions.builder()
-                          .certificateChain(one.chain())
-                          .privateKey(one.key())
-                          .requireClientCertificates(expiredTrust.chain())
-                          .build()))
+      assertThatThrownBy(() ->
+              listen(
+                  fixture,
+                  TlsOptions.builder()
+                      .certificateChain(one.chain())
+                      .privateKey(one.key())
+                      .requireClientCertificates(expiredTrust.chain())
+                      .build()))
           .isInstanceOf(TlsConfigurationException.class)
           .hasMessageContaining("expired");
       // Nothing that failed left a listener behind.
@@ -358,30 +354,27 @@ class TlsListenerTest {
     try (var tls = new TlsFixture();
         var fixture = new Fixture()) {
       var server = tls.identity("localhost");
-      assertThatThrownBy(
-              () ->
-                  listen(
-                      fixture,
-                      TlsOptions.builder()
-                          .certificateChain(server.chain())
-                          .privateKey(server.key())
-                          .cipherSuites(List.of("TLS_NO_SUCH_SUITE"))
-                          .build()))
+      assertThatThrownBy(() ->
+              listen(
+                  fixture,
+                  TlsOptions.builder()
+                      .certificateChain(server.chain())
+                      .privateKey(server.key())
+                      .cipherSuites(List.of("TLS_NO_SUCH_SUITE"))
+                      .build()))
           .isInstanceOf(TlsConfigurationException.class)
           .hasMessageContaining("cipher suites");
       assertThatThrownBy(() -> listen(fixture, TlsOptions.builder().sslContext(() -> null).build()))
           .isInstanceOf(TlsConfigurationException.class)
           .hasMessageContaining("returned null");
-      assertThatThrownBy(
-              () ->
-                  listen(
-                      fixture,
-                      TlsOptions.builder()
-                          .sslContext(
-                              () -> {
-                                throw new IllegalStateException("vault secret-value unavailable");
-                              })
-                          .build()))
+      assertThatThrownBy(() ->
+              listen(
+                  fixture,
+                  TlsOptions.builder()
+                      .sslContext(() -> {
+                        throw new IllegalStateException("vault secret-value unavailable");
+                      })
+                      .build()))
           .isInstanceOf(TlsConfigurationException.class)
           .hasMessageContaining("IllegalStateException")
           .satisfies(failure -> assertThat(failure.getMessage()).doesNotContain("secret-value"));
@@ -399,17 +392,16 @@ class TlsListenerTest {
       schemeOf(fixture);
       var options =
           TlsOptions.builder()
-              .sslContext(
-                  () -> {
-                    calls.incrementAndGet();
-                    try {
-                      var context = SSLContext.getInstance("TLS");
-                      context.init(TlsFixture.keyManagers(current.get()), null, null);
-                      return context;
-                    } catch (Exception failure) {
-                      throw new IllegalStateException(failure);
-                    }
-                  })
+              .sslContext(() -> {
+                calls.incrementAndGet();
+                try {
+                  var context = SSLContext.getInstance("TLS");
+                  context.init(TlsFixture.keyManagers(current.get()), null, null);
+                  return context;
+                } catch (Exception failure) {
+                  throw new IllegalStateException(failure);
+                }
+              })
               .build();
       var listener = listen(fixture, options);
       assertThat(get(listener, TlsFixture.client(first.certificate(), null)))

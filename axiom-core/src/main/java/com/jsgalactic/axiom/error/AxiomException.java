@@ -78,14 +78,13 @@ public abstract class AxiomException extends RuntimeException {
     this.status = status;
     this.code = code;
     var copy = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-    headers.forEach(
-        (name, value) -> {
-          if (!HEADER_NAMES.contains(name)) {
-            throw new IllegalArgumentException(
-                "Error responses may only add Allow, Retry-After or WWW-Authenticate");
-          }
-          copy.put(name, requireHeaderValue(value));
-        });
+    headers.forEach((name, value) -> {
+      if (!HEADER_NAMES.contains(name)) {
+        throw new IllegalArgumentException(
+            "Error responses may only add Allow, Retry-After or WWW-Authenticate");
+      }
+      copy.put(name, requireHeaderValue(value));
+    });
     this.headers = copy.isEmpty() ? Map.of() : Collections.unmodifiableMap(copy);
   }
 

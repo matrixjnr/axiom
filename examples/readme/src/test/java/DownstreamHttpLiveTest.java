@@ -109,14 +109,13 @@ class DownstreamHttpLiveTest {
       var failure = new AtomicReference<Throwable>();
       var parent =
           Thread.ofVirtual()
-              .start(
-                  () -> {
-                    try {
-                      DownstreamHttp.fetch(http, endpoint.uri(), BUDGET);
-                    } catch (Throwable thrown) {
-                      failure.set(thrown);
-                    }
-                  });
+              .start(() -> {
+                try {
+                  DownstreamHttp.fetch(http, endpoint.uri(), BUDGET);
+                } catch (Throwable thrown) {
+                  failure.set(thrown);
+                }
+              });
       try {
         assertThat(endpoint.sent.await(5, TimeUnit.SECONDS)).isTrue();
         parent.interrupt();
@@ -195,38 +194,37 @@ class DownstreamHttpLiveTest {
       listener = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
       worker =
           Thread.ofVirtual()
-              .start(
-                  () -> {
-                    try (var socket = listener.accept()) {
-                      active.set(socket);
-                      socket.setSoTimeout(10000);
-                      var reader =
-                          new BufferedReader(
-                              new InputStreamReader(
-                                  socket.getInputStream(), StandardCharsets.US_ASCII));
-                      String line;
-                      do {
-                        line = reader.readLine();
-                        if (line == null) {
-                          throw new IOException("Incomplete request");
-                        }
-                      } while (!line.isEmpty());
-                      socket.getOutputStream().write(response.getBytes(StandardCharsets.UTF_8));
-                      socket.getOutputStream().flush();
-                      sent.countDown();
-                      if (!observeDisconnect) {
-                        finished.complete(true);
-                        return;
-                      }
-                      try {
-                        finished.complete(reader.read() == -1);
-                      } catch (SocketException reset) {
-                        finished.complete(true);
-                      }
-                    } catch (Throwable failure) {
-                      finished.completeExceptionally(failure);
+              .start(() -> {
+                try (var socket = listener.accept()) {
+                  active.set(socket);
+                  socket.setSoTimeout(10000);
+                  var reader =
+                      new BufferedReader(
+                          new InputStreamReader(
+                              socket.getInputStream(), StandardCharsets.US_ASCII));
+                  String line;
+                  do {
+                    line = reader.readLine();
+                    if (line == null) {
+                      throw new IOException("Incomplete request");
                     }
-                  });
+                  } while (!line.isEmpty());
+                  socket.getOutputStream().write(response.getBytes(StandardCharsets.UTF_8));
+                  socket.getOutputStream().flush();
+                  sent.countDown();
+                  if (!observeDisconnect) {
+                    finished.complete(true);
+                    return;
+                  }
+                  try {
+                    finished.complete(reader.read() == -1);
+                  } catch (SocketException reset) {
+                    finished.complete(true);
+                  }
+                } catch (Throwable failure) {
+                  finished.completeExceptionally(failure);
+                }
+              });
     }
 
     private URI uri() {

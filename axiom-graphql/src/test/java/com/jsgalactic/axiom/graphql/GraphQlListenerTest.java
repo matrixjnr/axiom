@@ -23,8 +23,8 @@ import org.junit.jupiter.api.Test;
 class GraphQlListenerTest {
   private static final String SDL =
       """
-            type Query { greeting: String }
-            """;
+      type Query { greeting: String }
+      """;
 
   private static HttpResponse<String> send(
       HttpClient client, Server server, String method, String contentType, String body)

@@ -35,14 +35,13 @@ class JdbcTest {
   private static CompletableFuture<Response> get(TestClient client, String path) {
     var result = new CompletableFuture<Response>();
     Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                result.complete(client.get(path));
-              } catch (Throwable failure) {
-                result.completeExceptionally(failure);
-              }
-            });
+        .start(() -> {
+          try {
+            result.complete(client.get(path));
+          } catch (Throwable failure) {
+            result.completeExceptionally(failure);
+          }
+        });
     return result;
   }
 
@@ -317,12 +316,11 @@ class JdbcTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Jdbc.builder(app, source).probeQuery("SELECT 1; DROP TABLE t").build());
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                Jdbc.builder(app, source)
-                    .maxConnections(2)
-                    .routeLimit(new Route("GET", "/x"), 3)
-                    .build());
+        .isThrownBy(() ->
+            Jdbc.builder(app, source)
+                .maxConnections(2)
+                .routeLimit(new Route("GET", "/x"), 3)
+                .build());
     app.close();
   }
 }

@@ -278,13 +278,12 @@ class ForwardedHeadersTest {
     assertThat(new ClientOrigin(InetAddress.getLoopbackAddress(), "http", false).host())
         .isEqualTo(Optional.empty());
     Assertions.assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                new ClientOrigin(
-                    InetAddress.getLoopbackAddress(),
-                    "http",
-                    false,
-                    Optional.empty(),
-                    OptionalInt.of(0)));
+        .isThrownBy(() ->
+            new ClientOrigin(
+                InetAddress.getLoopbackAddress(),
+                "http",
+                false,
+                Optional.empty(),
+                OptionalInt.of(0)));
   }
 }

@@ -112,12 +112,11 @@ class MiddlewareTest {
   void wrapsMappedHandlerResultsIncludingContextStatus() throws Exception {
     var seen = new AtomicReference<Response>();
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            var response = next.run();
-            seen.set(response);
-            return response.withHeader("X-Frame-Options", "DENY");
-          });
+      app.use((ctx, next) -> {
+        var response = next.run();
+        seen.set(response);
+        return response.withHeader("X-Frame-Options", "DENY");
+      });
       app.post("/items", ctx -> ctx.status(201).response("created"));
       app.get("/empty", ctx -> null);
       app.start();
@@ -153,12 +152,11 @@ class MiddlewareTest {
     record Item(String name) {}
     var seen = new AtomicReference<Object>();
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            var response = next.run();
-            seen.set(response.body());
-            return response;
-          });
+      app.use((ctx, next) -> {
+        var response = next.run();
+        seen.set(response.body());
+        return response;
+      });
       app.get("/item", ctx -> ctx.json(new Item("pen")));
       app.get("/blocked", ctx -> "never", (ctx, next) -> ctx.status(403).json(new Item("none")));
       app.start();
@@ -175,15 +173,14 @@ class MiddlewareTest {
   @Test
   void observesAndTranslatesExceptionsFromTheRestOfTheChain() throws Exception {
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            try {
-              return next.run();
-            } catch (IllegalStateException failure) {
-              calls.add("observed");
-              return Response.of(409, "conflict");
-            }
-          });
+      app.use((ctx, next) -> {
+        try {
+          return next.run();
+        } catch (IllegalStateException failure) {
+          calls.add("observed");
+          return Response.of(409, "conflict");
+        }
+      });
       app.get(
           "/conflict",
           ctx -> {
@@ -209,10 +206,9 @@ class MiddlewareTest {
       app.group(
           "/admin",
           admin -> {
-            admin.use(
-                (ctx, next) -> {
-                  throw new ForbiddenException();
-                });
+            admin.use((ctx, next) -> {
+              throw new ForbiddenException();
+            });
             admin.get("/users", ctx -> "users");
           });
       app.get(
@@ -277,14 +273,13 @@ class MiddlewareTest {
           (ctx, next) -> {
             var other =
                 Thread.ofPlatform()
-                    .start(
-                        () -> {
-                          try {
-                            next.run();
-                          } catch (Throwable thrown) {
-                            failure.set(thrown);
-                          }
-                        });
+                    .start(() -> {
+                      try {
+                        next.run();
+                      } catch (Throwable thrown) {
+                        failure.set(thrown);
+                      }
+                    });
             other.join(10_000);
             return Response.of(202, null);
           });
@@ -301,15 +296,14 @@ class MiddlewareTest {
   void globalMiddlewareWrapsRouterAnswersButGroupAndRouteMiddlewareDoNot() throws Exception {
     var routes = new ArrayList<String>();
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            try {
-              routes.add(ctx.route().path());
-            } catch (IllegalStateException unmatched) {
-              routes.add("none:" + ctx.pathParameters().size());
-            }
-            return next.run().withHeader("X-Content-Type-Options", "nosniff");
-          });
+      app.use((ctx, next) -> {
+        try {
+          routes.add(ctx.route().path());
+        } catch (IllegalStateException unmatched) {
+          routes.add("none:" + ctx.pathParameters().size());
+        }
+        return next.run().withHeader("X-Content-Type-Options", "nosniff");
+      });
       app.group(
           "/api",
           api -> {
@@ -347,19 +341,18 @@ class MiddlewareTest {
   void globalMiddlewareCanAlwaysAskWhetherARouteMatched() throws Exception {
     var seen = Collections.synchronizedList(new ArrayList<String>());
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            var response = next.run();
-            seen.add(
-                ctx.method()
-                    + " "
-                    + ctx.path()
-                    + " "
-                    + response.status()
-                    + " "
-                    + ctx.matchedRoute().map(Route::path).orElse("-"));
-            return response;
-          });
+      app.use((ctx, next) -> {
+        var response = next.run();
+        seen.add(
+            ctx.method()
+                + " "
+                + ctx.path()
+                + " "
+                + response.status()
+                + " "
+                + ctx.matchedRoute().map(Route::path).orElse("-"));
+        return response;
+      });
       app.get("/items/:id", ctx -> "item " + ctx.matchedRoute().orElseThrow().path());
       app.start();
       assertThat(app.handle(Request.get("/missing")).status()).isEqualTo(404);
@@ -384,11 +377,10 @@ class MiddlewareTest {
   @Test
   void globalMiddlewareCanReplaceRouterAnswers() throws Exception {
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            var response = next.run();
-            return response.status() == 404 ? Response.of(404, "custom not found") : response;
-          });
+      app.use((ctx, next) -> {
+        var response = next.run();
+        return response.status() == 404 ? Response.of(404, "custom not found") : response;
+      });
       app.start();
       assertThat(app.handle(Request.get("/anything")).body()).isEqualTo("custom not found");
     }
@@ -515,14 +507,13 @@ class MiddlewareTest {
       assertThatIllegalStateException().isThrownBy(() -> saved.get().use(record("late")));
       assertThatIllegalStateException().isThrownBy(() -> saved.get().group("/x", g -> {}));
       assertThatIllegalStateException()
-          .isThrownBy(
-              () ->
-                  app.group(
-                      "/fails",
-                      g -> {
-                        g.get("/kept", ctx -> "kept");
-                        throw new IllegalStateException("configuration failed");
-                      }));
+          .isThrownBy(() ->
+              app.group(
+                  "/fails",
+                  g -> {
+                    g.get("/kept", ctx -> "kept");
+                    throw new IllegalStateException("configuration failed");
+                  }));
       assertThat(app.routes()).isEmpty();
       app.start();
       assertThatIllegalStateException().isThrownBy(() -> app.use(record("late")));

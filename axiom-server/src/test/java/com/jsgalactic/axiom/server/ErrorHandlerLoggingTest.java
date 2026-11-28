@@ -94,14 +94,13 @@ class ErrorHandlerLoggingTest {
         assertThat(records)
             .as(failure.getClass().getSimpleName())
             .singleElement()
-            .satisfies(
-                record -> {
-                  assertThat(record.getLevel()).isEqualTo(Level.WARNING);
-                  assertThat(record.getThrown()).isSameAs(failure);
-                  assertThat(record.getMessage())
-                      .contains(execution.requestId())
-                      .contains(Integer.toString(status));
-                });
+            .satisfies(record -> {
+              assertThat(record.getLevel()).isEqualTo(Level.WARNING);
+              assertThat(record.getThrown()).isSameAs(failure);
+              assertThat(record.getMessage())
+                  .contains(execution.requestId())
+                  .contains(Integer.toString(status));
+            });
       }
     }
   }
@@ -176,11 +175,10 @@ class ErrorHandlerLoggingTest {
       assertThat(response.status()).isEqualTo(500);
       assertThat(records)
           .singleElement()
-          .satisfies(
-              record -> {
-                assertThat(record.getThrown()).isSameAs(failure);
-                assertThat(record.getMessage()).contains("500");
-              });
+          .satisfies(record -> {
+            assertThat(record.getThrown()).isSameAs(failure);
+            assertThat(record.getMessage()).contains("500");
+          });
     }
   }
 

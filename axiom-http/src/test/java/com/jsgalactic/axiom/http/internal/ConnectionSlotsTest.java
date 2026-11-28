@@ -97,37 +97,36 @@ class ConnectionSlotsTest {
     for (int t = 0; t < 8; t++) {
       threads.add(
           Thread.ofPlatform()
-              .start(
-                  () -> {
-                    try {
-                      start.await();
-                    } catch (InterruptedException stop) {
-                      return;
+              .start(() -> {
+                try {
+                  start.await();
+                } catch (InterruptedException stop) {
+                  return;
+                }
+                for (int i = 0; i < 20_000; i++) {
+                  var slot = slots.acquire();
+                  if (slot == null) {
+                    continue;
+                  }
+                  // The pool's counters may overshoot for an instant while refusing, so the
+                  // test
+                  // counts granted slots itself: up after a grant, down before a release.
+                  if (open.incrementAndGet() > 8) {
+                    exceeded.set(true);
+                  }
+                  open.decrementAndGet();
+                  if (i % 2 == 0 && slot.linger()) {
+                    if (lingering.incrementAndGet() > 3) {
+                      exceeded.set(true);
                     }
-                    for (int i = 0; i < 20_000; i++) {
-                      var slot = slots.acquire();
-                      if (slot == null) {
-                        continue;
-                      }
-                      // The pool's counters may overshoot for an instant while refusing, so the
-                      // test
-                      // counts granted slots itself: up after a grant, down before a release.
-                      if (open.incrementAndGet() > 8) {
-                        exceeded.set(true);
-                      }
-                      open.decrementAndGet();
-                      if (i % 2 == 0 && slot.linger()) {
-                        if (lingering.incrementAndGet() > 3) {
-                          exceeded.set(true);
-                        }
-                        lingering.decrementAndGet();
-                      }
-                      slot.release();
-                      if (i % 3 == 0) {
-                        slot.release();
-                      }
-                    }
-                  }));
+                    lingering.decrementAndGet();
+                  }
+                  slot.release();
+                  if (i % 3 == 0) {
+                    slot.release();
+                  }
+                }
+              }));
     }
     start.countDown();
     for (var thread : threads) {
