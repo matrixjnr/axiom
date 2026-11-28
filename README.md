@@ -233,6 +233,7 @@ is a record of what shipped. Remaining milestones are in the [roadmap, #18](http
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
 | `examples/hello`, `examples/rest-api`, `examples/openapi`, `examples/browser-app` | not published | Runnable examples for the core API, JSON, OpenAPI and browser security |
+| `examples/modules` | not published | One runnable app and test per opt-in module |
 
 All artifacts use the group `com.jsgalactic.axiom`. Netty and Jackson never appear in
 an Axiom API; core depends only on the JDK ([build decisions](docs/build.md)).
@@ -390,6 +391,23 @@ if (docsAccess != null) {
 Records, JavaBean and Lombok-style classes, enums and collections become schemas, and validation
 rules become constraints. Treat the documentation as part of your API surface and protect or omit it
 in production. See [OpenAPI and Swagger](docs/openapi.md).
+
+## Opt-in module examples
+
+[`examples/modules`](examples/modules) wires each opt-in adapter into a small application. Every
+example has a `main` method and a JUnit test that starts a real Axiom application in memory, so
+`./gradlew check` proves the adapters work from application code and not just from their own tests.
+The tests use `TestClient` everywhere except gRPC, which runs on an in-process server and channel.
+
+| Command | Module shown |
+| --- | --- |
+| `./gradlew :examples:modules:runOtel` | `Tracing.create(...)` and a recorded SERVER span |
+| `./gradlew :examples:modules:runMicrometer` | `app.metrics(...)` publishing counters, gauges and timers |
+| `./gradlew :examples:modules:runGrpc` | a `BindableService` on its own gRPC listener |
+| `./gradlew :examples:modules:runGraphQl` | an application-owned `GraphQL` on `/graphql` |
+| `./gradlew :examples:modules:runJdbc` | a `Jdbc` gate around an application-owned `DataSource` |
+| `./gradlew :examples:modules:runJta` | `Jta` boundaries around handlers |
+| `./gradlew :examples:modules:runJpa` | a per-request EntityManager from `Jpa` |
 
 ## Build and test
 
