@@ -540,8 +540,11 @@ final class NettyServer implements Server {
               () -> {
                 var connection = channel.pipeline().get(HttpConnection.class);
                 var h2 = channel.pipeline().get(Http2GracefulCloseHandler.class);
+                var webSocket = channel.pipeline().get(NettyWebSocketSession.class);
                 if (h2 != null) {
                   h2.goAway();
+                } else if (webSocket != null) {
+                  webSocket.shutdown();
                 } else if (connection == null) {
                   channel.close();
                 } else {

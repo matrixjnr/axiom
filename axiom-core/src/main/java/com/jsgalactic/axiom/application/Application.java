@@ -17,6 +17,7 @@ import com.jsgalactic.axiom.observability.Metrics;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteDoc;
 import com.jsgalactic.axiom.routing.RouteGroup;
+import com.jsgalactic.axiom.websocket.WebSocketHandler;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
@@ -91,6 +92,27 @@ public interface Application extends RouteGroup, AutoCloseable {
    */
   @Override
   Route route(String method, String path, Handler handler, Middleware... middleware);
+
+  /**
+   * Registers a WebSocket route on an HTTP/1.1 listener, before startup. Only a GET upgrade
+   * carrying a valid WebSocket handshake on this path becomes a session; ordinary requests to the
+   * path keep their normal routes, and an upgrade on any other path is still answered 501. The
+   * template follows the same syntax as a route path and may carry named parameters, which are
+   * matched but not exposed to the handler. A second registration for the same path shape is
+   * rejected.
+   *
+   * <p>Registration is frozen by {@link #start()} like route registration. A handler is shared by
+   * all sessions on the path and must be thread-safe; the transport owns each session and ends
+   * every one of them within the listener's shutdown grace period. The JDK-only API carries no
+   * Netty types.
+   *
+   * @param path absolute path template without query or fragment
+   * @param handler shared, thread-safe session callbacks
+   * @return this application
+   * @throws IllegalArgumentException for an invalid template or a duplicate path shape
+   * @throws IllegalStateException after configuration has ended
+   */
+  Application webSocket(String path, WebSocketHandler handler);
 
   /**
    * Customises the 404 answer for a path no template matches (and a recognized method; see {@link

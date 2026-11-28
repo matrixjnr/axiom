@@ -12,16 +12,21 @@ import com.jsgalactic.axiom.server.internal.ExecutionAccess;
 import com.jsgalactic.axiom.server.internal.Problems;
 import com.jsgalactic.axiom.server.internal.ResponseSerialization;
 import com.jsgalactic.axiom.server.internal.StreamRun;
+import com.jsgalactic.axiom.server.internal.WebSocketAccess;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import com.jsgalactic.axiom.server.internal.execution.StreamMetrics;
+import com.jsgalactic.axiom.websocket.WebSocketHandler;
+import com.jsgalactic.axiom.websocket.WebSocketSession;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.RejectedExecutionException;
 
 /**
@@ -51,10 +56,18 @@ import java.util.concurrent.RejectedExecutionException;
  * the listener does; a target the listener would answer with 400 throws {@link
  * IllegalArgumentException} instead. Transport rules such as 414, 431, Expect handling, pipelining
  * and keep-alive are not modeled. Admission draws from the application's budget, which is shared
- * with every listener and other test client of that application.
+ * with every listener and other test client of that application. {@link #webSocket} models a
+ * WebSocket handshake in memory: an in-memory session pair follows the same message, error and
+ * close rules as a live session, without opening a socket.
  */
 public final class TestClient implements AutoCloseable {
   private static final Object UNMATCHED = new Object();
+  private static final WebSocketHandler NOOP_WEB_SOCKET_HANDLER = new WebSocketHandler() {};
+  private static final Map<String, String> WEBSOCKET_HEADERS =
+      Map.of(
+          "Connection", "Upgrade",
+          "Upgrade", "websocket",
+          "Sec-WebSocket-Version", "13");
   private final Application application;
   private static final System.Logger LOG = System.getLogger(TestClient.class.getName());
   private final RequestDispatcher dispatcher;
@@ -62,6 +75,7 @@ public final class TestClient implements AutoCloseable {
   private final boolean mapFailures;
   private final StreamMetrics streamMetrics;
   private final StreamBuffering buffering;
+  private final List<WebSocketSession> webSockets = new CopyOnWriteArrayList<>();
 
   private TestClient(Application application, StreamBuffering buffering, boolean mapFailures) {
     this.mapFailures = mapFailures;
@@ -111,6 +125,49 @@ public final class TestClient implements AutoCloseable {
    */
   public static TestClient start(Application application, StreamBuffering buffering) {
     return new TestClient(application, buffering, false);
+  }
+
+  /**
+   * Opens an in-memory WebSocket session on a registered route, without binding a socket. The
+   * application's handler is connected to the supplied test handler: a send on either end calls the
+   * other end's {@code onMessage}, and a close on either end delivers one close callback to each.
+   * The session has the same 64 KiB message bound and close rules as a live session, but no remote
+   * address. Closing this client closes every session it opened with code 1001. An unregistered
+   * path throws instead of answering 501, since there is no HTTP handshake to answer.
+   *
+   * @param target absolute raw path, optionally with a query, as for {@link #get(String)}
+   * @param handler callbacks of the test end; shared with other sessions, so thread-safe
+   * @return the test end of the pair
+   * @throws IllegalArgumentException if no WebSocket route matches the target
+   */
+  public WebSocketSession webSocket(String target, WebSocketHandler handler) {
+    var request = Request.fromTarget("GET", target).withHeaders(WEBSOCKET_HEADERS);
+    var route = WebSocketAccess.of(application).route(request);
+    if (route.isEmpty()) {
+      throw new IllegalArgumentException("No WebSocket route for " + target);
+    }
+    var session =
+        InMemoryWebSocket.connect(
+            route.get(),
+            request,
+            request,
+            ExecutionContext.create(application.requestTimeout()),
+            Objects.requireNonNull(handler, "handler"),
+            dispatcher,
+            application.streamPolicy());
+    webSockets.add(session);
+    return session;
+  }
+
+  /**
+   * Like {@link #webSocket(String, WebSocketHandler)}, with no callbacks on the test end. Use the
+   * other overload to observe messages and close.
+   *
+   * @param target absolute raw path, optionally with a query
+   * @return the test end of the pair
+   */
+  public WebSocketSession webSocket(String target) {
+    return webSocket(target, NOOP_WEB_SOCKET_HANDLER);
   }
 
   /**
@@ -587,9 +644,14 @@ public final class TestClient implements AutoCloseable {
     }
   }
 
-  /** Cancels this client's requests and closes the application. */
+  /** Cancels this client's requests, closes its WebSocket sessions and closes the application. */
   @Override
   public void close() {
+    for (var webSocket : webSockets) {
+      if (webSocket.isOpen()) {
+        webSocket.close(1001, "test client closed");
+      }
+    }
     session.close();
     application.close();
   }
