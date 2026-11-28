@@ -51,11 +51,10 @@ class RouterAnswersTest {
     try (var app = Axiom.create()) {
       app.get("/items", ctx -> "list");
       app.post("/items", ctx -> "create");
-      app.methodNotAllowed(
-          ctx ->
-              ctx.path().equals("/items")
-                  ? ctx.text("use another method").withHeader("Allow", "GET")
-                  : Response.of(418, "teapot"));
+      app.methodNotAllowed(ctx ->
+          ctx.path().equals("/items")
+              ? ctx.text("use another method").withHeader("Allow", "GET")
+              : Response.of(418, "teapot"));
       app.start();
       var mismatch = app.handle(new Request("DELETE", "/items"));
       assertThat(mismatch.status()).isEqualTo(405);
@@ -99,26 +98,23 @@ class RouterAnswersTest {
   void globalMiddlewareWrapsTheHandlersAndGroupMiddlewareDoesNot() throws Exception {
     var seen = new ArrayList<String>();
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            seen.add("before " + ctx.matchedRoute().isPresent());
-            return next.run().withHeader("X-Wrapped", "yes");
-          });
+      app.use((ctx, next) -> {
+        seen.add("before " + ctx.matchedRoute().isPresent());
+        return next.run().withHeader("X-Wrapped", "yes");
+      });
       app.group(
           "/api",
           api -> {
-            api.use(
-                (ctx, next) -> {
-                  seen.add("group");
-                  return next.run();
-                });
+            api.use((ctx, next) -> {
+              seen.add("group");
+              return next.run();
+            });
             api.get("/x", ctx -> "x");
           });
-      app.notFound(
-          ctx -> {
-            seen.add("handler");
-            return ctx.text("custom");
-          });
+      app.notFound(ctx -> {
+        seen.add("handler");
+        return ctx.text("custom");
+      });
       app.start();
       var response = app.handle(Request.get("/api/missing"));
       assertThat(response.body()).isEqualTo("custom");
@@ -131,14 +127,12 @@ class RouterAnswersTest {
   void exceptionsFromAHandlerAreMappedLikeAnyOther() throws Exception {
     try (var app = Axiom.create()) {
       app.get("/a", ctx -> "a");
-      app.notFound(
-          ctx -> {
-            throw new ConflictException("custom_missing");
-          });
-      app.methodNotAllowed(
-          ctx -> {
-            throw new IllegalStateException("boom");
-          });
+      app.notFound(ctx -> {
+        throw new ConflictException("custom_missing");
+      });
+      app.methodNotAllowed(ctx -> {
+        throw new IllegalStateException("boom");
+      });
       app.error(IllegalStateException.class, (ctx, failure) -> ctx.status(500).text("mapped"));
       app.start();
       var missing = app.handle(Request.get("/b"));
@@ -150,10 +144,9 @@ class RouterAnswersTest {
     }
     try (var app = Axiom.create()) {
       app.get("/a", ctx -> "a");
-      app.notImplemented(
-          ctx -> {
-            throw new IllegalStateException("boom");
-          });
+      app.notImplemented(ctx -> {
+        throw new IllegalStateException("boom");
+      });
       app.start();
       assertThatThrownBy(() -> app.handle(new Request("FOO", "/b")))
           .isInstanceOf(IllegalStateException.class);

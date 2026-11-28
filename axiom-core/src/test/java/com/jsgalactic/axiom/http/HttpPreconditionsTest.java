@@ -379,15 +379,11 @@ class HttpPreconditionsTest {
   @Test
   void preconditionRequiredOnlyRefusesUnsafeMethodsWithoutACondition() throws Exception {
     var conditional = HttpPreconditions.preconditionRequired();
-    assertThatThrownBy(
-            () ->
-                conditional.handle(
-                    new TestContext(request("POST")), HttpPreconditionsTest::resource))
+    assertThatThrownBy(() ->
+            conditional.handle(new TestContext(request("POST")), HttpPreconditionsTest::resource))
         .isInstanceOf(PreconditionRequiredException.class);
-    assertThatThrownBy(
-            () ->
-                conditional.handle(
-                    new TestContext(request("PATCH")), HttpPreconditionsTest::resource))
+    assertThatThrownBy(() ->
+            conditional.handle(new TestContext(request("PATCH")), HttpPreconditionsTest::resource))
         .isInstanceOf(PreconditionRequiredException.class);
     for (var request :
         new Request[] {
@@ -409,11 +405,10 @@ class HttpPreconditionsTest {
   void parsesByteRangesWithoutOverflow() {
     assertThat(ByteRanges.parse("bytes=0-1, 3-4", 10))
         .get()
-        .satisfies(
-            ranges -> {
-              assertThat(ranges.ranges()).containsExactly(new ByteRange(0, 1), new ByteRange(3, 4));
-              assertThat(ranges.ranges().getFirst().length()).isEqualTo(2);
-            });
+        .satisfies(ranges -> {
+          assertThat(ranges.ranges()).containsExactly(new ByteRange(0, 1), new ByteRange(3, 4));
+          assertThat(ranges.ranges().getFirst().length()).isEqualTo(2);
+        });
     assertThat(ByteRanges.parse("bytes=-99999999999999999999999", 10))
         .get()
         .satisfies(ranges -> assertThat(ranges.ranges()).containsExactly(new ByteRange(0, 9)));

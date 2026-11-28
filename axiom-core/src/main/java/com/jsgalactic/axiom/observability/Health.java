@@ -501,22 +501,21 @@ public final class Health {
     var thread =
         Thread.ofVirtual()
             .name("axiom-health-", 0)
-            .unstarted(
-                () -> {
-                  // The flag clears before the outcome is published, so a prober that saw this
-                  // check
-                  // finish can start it again.
-                  boolean healthy;
-                  try {
-                    healthy = probe.check.isHealthy();
-                  } catch (Throwable failure) {
-                    probe.running.set(false);
-                    outcome.completeExceptionally(failure);
-                    return;
-                  }
-                  probe.running.set(false);
-                  outcome.complete(healthy);
-                });
+            .unstarted(() -> {
+              // The flag clears before the outcome is published, so a prober that saw this
+              // check
+              // finish can start it again.
+              boolean healthy;
+              try {
+                healthy = probe.check.isHealthy();
+              } catch (Throwable failure) {
+                probe.running.set(false);
+                outcome.completeExceptionally(failure);
+                return;
+              }
+              probe.running.set(false);
+              outcome.complete(healthy);
+            });
     thread.start();
     return new Execution(probe, outcome, thread);
   }

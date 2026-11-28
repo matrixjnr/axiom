@@ -366,19 +366,18 @@ public final class TestClient implements AutoCloseable {
       return CompletableFuture.completedFuture(Problems.response(503, context.requestId()));
     }
     return task.result()
-        .handle(
-            (response, thrown) -> {
-              body.close();
-              var failure = unwrap(thrown);
-              if (failure == null) {
-                return response;
-              }
-              var problem = problem(failure, context);
-              if (problem != null) {
-                return problem;
-              }
-              throw new CompletionException(failure);
-            })
+        .handle((response, thrown) -> {
+          body.close();
+          var failure = unwrap(thrown);
+          if (failure == null) {
+            return response;
+          }
+          var problem = problem(failure, context);
+          if (problem != null) {
+            return problem;
+          }
+          throw new CompletionException(failure);
+        })
         .toCompletableFuture();
   }
 
@@ -522,27 +521,26 @@ public final class TestClient implements AutoCloseable {
       return answered(Problems.response(503, context.requestId()));
     }
     task.result()
-        .whenComplete(
-            (response, thrown) -> {
-              body.close();
-              var failure = unwrap(thrown);
-              if (!head.isDone()) {
-                // The head was never known: the outcome is an admission or deadline answer, or a
-                // failure.
-                var problem = failure == null ? null : problem(failure, context);
-                if (failure == null) {
-                  head.complete(answered(response));
-                } else if (problem != null) {
-                  head.complete(answered(problem));
-                } else {
-                  head.completeExceptionally(failure);
-                }
-              } else {
-                // After the head, the reader learns the end and its cause; unread chunks stay
-                // readable.
-                head.join().end(failure);
-              }
-            });
+        .whenComplete((response, thrown) -> {
+          body.close();
+          var failure = unwrap(thrown);
+          if (!head.isDone()) {
+            // The head was never known: the outcome is an admission or deadline answer, or a
+            // failure.
+            var problem = failure == null ? null : problem(failure, context);
+            if (failure == null) {
+              head.complete(answered(response));
+            } else if (problem != null) {
+              head.complete(answered(problem));
+            } else {
+              head.completeExceptionally(failure);
+            }
+          } else {
+            // After the head, the reader learns the end and its cause; unread chunks stay
+            // readable.
+            head.join().end(failure);
+          }
+        });
     StreamedResponse stream;
     try {
       stream = head.join();

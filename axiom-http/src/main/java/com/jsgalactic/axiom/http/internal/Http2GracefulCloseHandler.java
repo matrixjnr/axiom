@@ -42,12 +42,11 @@ final class Http2GracefulCloseHandler extends ChannelInboundHandlerAdapter {
     gone = true;
     context
         .writeAndFlush(new DefaultHttp2GoAwayFrame(Http2Error.NO_ERROR))
-        .addListener(
-            written -> {
-              if (!written.isSuccess()) {
-                context.close();
-              }
-            });
+        .addListener(written -> {
+          if (!written.isSuccess()) {
+            context.close();
+          }
+        });
     streams.closeWhenDone();
   }
 }

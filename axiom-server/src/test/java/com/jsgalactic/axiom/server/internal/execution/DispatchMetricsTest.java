@@ -104,10 +104,8 @@ class DispatchMetricsTest {
   void capacityRefusalsCountAsRejectedAndAsServiceUnavailable() {
     try (var f = new Fixture(AdmissionPolicy.reject(1))) {
       f.dispatcher.submit(USERS, AdmissionPolicy.reject(1), context(), () -> 200, s -> s);
-      assertThatThrownBy(
-              () ->
-                  f.dispatcher.submit(
-                      USERS, AdmissionPolicy.reject(1), context(), () -> 200, s -> s))
+      assertThatThrownBy(() ->
+              f.dispatcher.submit(USERS, AdmissionPolicy.reject(1), context(), () -> 200, s -> s))
           .isInstanceOf(RejectedExecutionException.class);
       assertThat(
               f.metrics.count(
@@ -293,25 +291,24 @@ class DispatchMetricsTest {
       for (int t = 0; t < threads; t++) {
         workers.add(
             Thread.ofPlatform()
-                .start(
-                    () -> {
-                      try {
-                        start.await();
-                      } catch (InterruptedException interrupted) {
-                        return;
-                      }
-                      for (int i = 0; i < perThread; i++) {
-                        try {
-                          results.add(
-                              dispatcher
-                                  .submit(USERS, policy, context(), () -> 200, s -> s)
-                                  .result()
-                                  .toCompletableFuture());
-                        } catch (RejectedExecutionException full) {
-                          refused.incrementAndGet();
-                        }
-                      }
-                    }));
+                .start(() -> {
+                  try {
+                    start.await();
+                  } catch (InterruptedException interrupted) {
+                    return;
+                  }
+                  for (int i = 0; i < perThread; i++) {
+                    try {
+                      results.add(
+                          dispatcher
+                              .submit(USERS, policy, context(), () -> 200, s -> s)
+                              .result()
+                              .toCompletableFuture());
+                    } catch (RejectedExecutionException full) {
+                      refused.incrementAndGet();
+                    }
+                  }
+                }));
       }
       start.countDown();
       for (var worker : workers) {

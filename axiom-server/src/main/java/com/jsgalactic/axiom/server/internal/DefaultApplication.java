@@ -637,20 +637,19 @@ final class DefaultApplication implements Application, ExecutionAccess, WebSocke
     var global = List.copyOf(root.middleware);
     var rootScopes = root.errorScopes();
     var chains = new LinkedHashMap<Route, Handler>();
-    registrations.forEach(
-        (route, registration) -> {
-          var chain = new ArrayList<>(global);
-          registration.scope().collectGroupMiddleware(chain);
-          chain.addAll(registration.middleware());
-          chains.put(
-              route,
-              Pipeline.compose(
-                  chain,
-                  registration.handler(),
-                  registration.scope().errorScopes(),
-                  failureLog,
-                  developmentErrors));
-        });
+    registrations.forEach((route, registration) -> {
+      var chain = new ArrayList<>(global);
+      registration.scope().collectGroupMiddleware(chain);
+      chain.addAll(registration.middleware());
+      chains.put(
+          route,
+          Pipeline.compose(
+              chain,
+              registration.handler(),
+              registration.scope().errorScopes(),
+              failureLog,
+              developmentErrors));
+    });
     var router = CompiledRouter.compile(chains, Set.copyOf(recognizedMethods));
     // WebSocket routes live in a separate table: an upgrade request never runs HTTP middleware or
     // handlers, and an ordinary request to the same path keeps its normal route.

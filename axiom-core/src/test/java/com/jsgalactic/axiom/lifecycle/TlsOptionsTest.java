@@ -31,11 +31,10 @@ class TlsOptionsTest {
         .isEqualTo(TlsOptions.DEFAULT_CIPHER_SUITES)
         .noneMatch(
             suite -> suite.contains("_CBC_") || suite.contains("RC4") || suite.contains("3DES"))
-        .allMatch(
-            suite ->
-                suite.startsWith("TLS_ECDHE_")
-                    || suite.startsWith("TLS_AES_")
-                    || suite.startsWith("TLS_CHACHA20_"));
+        .allMatch(suite ->
+            suite.startsWith("TLS_ECDHE_")
+                || suite.startsWith("TLS_AES_")
+                || suite.startsWith("TLS_CHACHA20_"));
     assertThat(options.clientAuth()).isEqualTo(TlsOptions.ClientAuth.NONE);
     assertThat(options.clientTrust()).isEmpty();
     assertThat(options.reloadInterval()).isEmpty();
@@ -87,35 +86,31 @@ class TlsOptionsTest {
         .hasMessageContaining("together");
     assertThatThrownBy(() -> TlsOptions.builder().privateKey(KEY).build())
         .isInstanceOf(IllegalStateException.class);
-    assertThatThrownBy(
-            () ->
-                TlsOptions.builder()
-                    .certificateChain(CHAIN)
-                    .privateKey(KEY)
-                    .sslContext(() -> context)
-                    .build())
+    assertThatThrownBy(() ->
+            TlsOptions.builder()
+                .certificateChain(CHAIN)
+                .privateKey(KEY)
+                .sslContext(() -> context)
+                .build())
         .isInstanceOf(IllegalStateException.class);
-    assertThatThrownBy(
-            () ->
-                TlsOptions.builder()
-                    .certificateChain(CHAIN)
-                    .privateKey(KEY)
-                    .requireClientCertificates()
-                    .build())
+    assertThatThrownBy(() ->
+            TlsOptions.builder()
+                .certificateChain(CHAIN)
+                .privateKey(KEY)
+                .requireClientCertificates()
+                .build())
         .isInstanceOf(IllegalStateException.class);
-    assertThatThrownBy(
-            () ->
-                TlsOptions.builder()
-                    .sslContext(() -> context)
-                    .requireClientCertificates(Path.of("c.pem"))
-                    .build())
+    assertThatThrownBy(() ->
+            TlsOptions.builder()
+                .sslContext(() -> context)
+                .requireClientCertificates(Path.of("c.pem"))
+                .build())
         .isInstanceOf(IllegalStateException.class);
-    assertThatThrownBy(
-            () ->
-                TlsOptions.builder()
-                    .sslContext(() -> context)
-                    .reloadInterval(Duration.ofSeconds(5))
-                    .build())
+    assertThatThrownBy(() ->
+            TlsOptions.builder()
+                .sslContext(() -> context)
+                .reloadInterval(Duration.ofSeconds(5))
+                .build())
         .isInstanceOf(IllegalStateException.class);
   }
 

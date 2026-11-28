@@ -176,11 +176,10 @@ class JakartaValidationTest {
     // The provider's deprecation warning is left alone on purpose: it points at the annotation to
     // fix.
     assertThat(records)
-        .anySatisfy(
-            record -> {
-              assertThat(record.getLevel()).isEqualTo(Level.WARNING);
-              assertThat(record.getMessage()).startsWith("HV000271").contains("deprecated");
-            });
+        .anySatisfy(record -> {
+          assertThat(record.getLevel()).isEqualTo(Level.WARNING);
+          assertThat(record.getMessage()).startsWith("HV000271").contains("deprecated");
+        });
   }
 
   @Test
@@ -229,11 +228,10 @@ class JakartaValidationTest {
     var violations = VALIDATION.validate(new Many(Collections.nCopies(500, "")));
     assertThat(violations).hasSize(Validation.MAX_VIOLATIONS);
     assertThat(violations)
-        .isSortedAccordingTo(
-            (a, b) ->
-                a.field().equals(b.field())
-                    ? a.code().compareTo(b.code())
-                    : a.field().compareTo(b.field()));
+        .isSortedAccordingTo((a, b) ->
+            a.field().equals(b.field())
+                ? a.code().compareTo(b.code())
+                : a.field().compareTo(b.field()));
     assertThat(VALIDATION.validate(new Many(Collections.nCopies(500, "")))).isEqualTo(violations);
     var failure =
         catchThrowableOfType(

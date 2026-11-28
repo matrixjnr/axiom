@@ -44,26 +44,24 @@ class LifecycleLockTest {
       app.admissionPolicy(route, AdmissionPolicy.reject(2));
       app.start();
       var holder =
-          executor.submit(
-              () -> {
-                synchronized (app) {
-                  held.countDown();
-                  release.await();
-                }
-                return null;
-              });
+          executor.submit(() -> {
+            synchronized (app) {
+              held.countDown();
+              release.await();
+            }
+            return null;
+          });
       try {
         assertThat(held.await(5, TimeUnit.SECONDS)).isTrue();
         var calls =
-            executor.submit(
-                () -> {
-                  assertThat(app.handle(Request.get("/")).body()).isEqualTo("ok");
-                  assertThat(app.resolve(Request.get("/"))).contains(route);
-                  assertThat(app.admissionPolicy(route)).isEqualTo(AdmissionPolicy.reject(2));
-                  assertThat(app.admissionPolicy()).isEqualTo(AdmissionPolicy.reject(36));
-                  assertThat(app.routes()).containsExactly(route);
-                  return null;
-                });
+            executor.submit(() -> {
+              assertThat(app.handle(Request.get("/")).body()).isEqualTo("ok");
+              assertThat(app.resolve(Request.get("/"))).contains(route);
+              assertThat(app.admissionPolicy(route)).isEqualTo(AdmissionPolicy.reject(2));
+              assertThat(app.admissionPolicy()).isEqualTo(AdmissionPolicy.reject(36));
+              assertThat(app.routes()).containsExactly(route);
+              return null;
+            });
         calls.get(5, TimeUnit.SECONDS);
       } finally {
         release.countDown();
@@ -87,11 +85,10 @@ class LifecycleLockTest {
     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
       app.get("/", ctx -> "ok");
       var listen =
-          executor.submit(
-              () -> {
-                Thread.currentThread().setContextClassLoader(loader);
-                return app.listen(new InetSocketAddress("127.0.0.1", 0));
-              });
+          executor.submit(() -> {
+            Thread.currentThread().setContextClassLoader(loader);
+            return app.listen(new InetSocketAddress("127.0.0.1", 0));
+          });
       assertThat(BlockingProvider.binding.await(5, TimeUnit.SECONDS)).isTrue();
       // Closing needs the lifecycle lock; it must not wait for the blocked bind.
       executor.submit(app::close).get(5, TimeUnit.SECONDS);

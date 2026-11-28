@@ -53,14 +53,13 @@ class TestClientMiddlewareTest {
     app.group(
         "/api",
         api -> {
-          api.use(
-              (ctx, next) -> {
-                invocations.incrementAndGet();
-                thread.set(Thread.currentThread());
-                entered.countDown();
-                release.await();
-                return next.run();
-              });
+          api.use((ctx, next) -> {
+            invocations.incrementAndGet();
+            thread.set(Thread.currentThread());
+            entered.countDown();
+            release.await();
+            return next.run();
+          });
           route.set(api.get("/work", ctx -> "done"));
         });
     app.admissionPolicy(route.get(), AdmissionPolicy.reject(1));
@@ -81,12 +80,11 @@ class TestClientMiddlewareTest {
     var entered = new CountDownLatch(requests);
     var release = new CountDownLatch(1);
     var app = Axiom.create();
-    app.use(
-        (ctx, next) -> {
-          entered.countDown();
-          release.await();
-          return next.run().withHeader("X-Item", ctx.path("id"));
-        });
+    app.use((ctx, next) -> {
+      entered.countDown();
+      release.await();
+      return next.run().withHeader("X-Item", ctx.path("id"));
+    });
     app.get("/items/:id", ctx -> "item " + ctx.path("id"));
     try (var client = TestClient.start(app)) {
       var responses = new ArrayList<CompletableFuture<Response>>();

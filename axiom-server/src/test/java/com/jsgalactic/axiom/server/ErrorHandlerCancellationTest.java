@@ -27,14 +27,13 @@ class ErrorHandlerCancellationTest {
 
   private Application app(Handler handler) {
     var app = Axiom.create();
-    app.use(
-        (ctx, next) -> {
-          try {
-            return next.run();
-          } finally {
-            unwound.incrementAndGet();
-          }
-        });
+    app.use((ctx, next) -> {
+      try {
+        return next.run();
+      } finally {
+        unwound.incrementAndGet();
+      }
+    });
     app.get("/work", handler);
     app.error(
         Exception.class,
@@ -53,16 +52,14 @@ class ErrorHandlerCancellationTest {
   @Test
   void anExpiredDeadlineSkipsErrorHandlers() throws Exception {
     try (var app =
-        app(
-            ctx -> {
-              while (!ctx.execution().isExpired()) {
-                Thread.onSpinWait();
-              }
-              throw new IllegalStateException("late failure");
-            })) {
-      assertThatThrownBy(
-              () ->
-                  app.handle(Request.get("/work"), ExecutionContext.create(Duration.ofMillis(20))))
+        app(ctx -> {
+          while (!ctx.execution().isExpired()) {
+            Thread.onSpinWait();
+          }
+          throw new IllegalStateException("late failure");
+        })) {
+      assertThatThrownBy(() ->
+              app.handle(Request.get("/work"), ExecutionContext.create(Duration.ofMillis(20))))
           .isInstanceOf(IllegalStateException.class);
       assertThat(unwound).hasValue(1);
       assertThat(mapped).hasValue(0);
@@ -74,22 +71,20 @@ class ErrorHandlerCancellationTest {
     var entered = new CountDownLatch(1);
     var outcome = new AtomicReference<Throwable>();
     try (var app =
-        app(
-            ctx -> {
-              entered.countDown();
-              new CountDownLatch(1).await();
-              return "unreachable";
-            })) {
+        app(ctx -> {
+          entered.countDown();
+          new CountDownLatch(1).await();
+          return "unreachable";
+        })) {
       var worker =
           Thread.ofPlatform()
-              .start(
-                  () -> {
-                    try {
-                      app.handle(Request.get("/work"));
-                    } catch (Throwable failure) {
-                      outcome.set(failure);
-                    }
-                  });
+              .start(() -> {
+                try {
+                  app.handle(Request.get("/work"));
+                } catch (Throwable failure) {
+                  outcome.set(failure);
+                }
+              });
       assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
       worker.interrupt();
       worker.join(10_000);
@@ -102,11 +97,10 @@ class ErrorHandlerCancellationTest {
   @Test
   void failuresOnAnInterruptedThreadAreNotOffered() throws Exception {
     try (var app =
-        app(
-            ctx -> {
-              Thread.currentThread().interrupt();
-              throw new IllegalStateException("failed while cancelled");
-            })) {
+        app(ctx -> {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("failed while cancelled");
+        })) {
       assertThatThrownBy(() -> app.handle(Request.get("/work")))
           .isInstanceOf(IllegalStateException.class);
       assertThat(Thread.interrupted()).isTrue();
@@ -117,15 +111,13 @@ class ErrorHandlerCancellationTest {
   @Test
   void interruptionAndCancellationAreNeverOffered() throws Exception {
     try (var interrupted =
-            app(
-                ctx -> {
-                  throw new InterruptedException();
-                });
+            app(ctx -> {
+              throw new InterruptedException();
+            });
         var cancelled =
-            app(
-                ctx -> {
-                  throw new CancellationException();
-                })) {
+            app(ctx -> {
+              throw new CancellationException();
+            })) {
       assertThatThrownBy(() -> interrupted.handle(Request.get("/work")))
           .isInstanceOf(InterruptedException.class);
       assertThatThrownBy(() -> cancelled.handle(Request.get("/work")))

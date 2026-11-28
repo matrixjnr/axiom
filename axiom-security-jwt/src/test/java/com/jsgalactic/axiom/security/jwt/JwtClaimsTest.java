@@ -67,21 +67,20 @@ class JwtClaimsTest {
     var jwt =
         hmac()
             .exposeClaims("tenant")
-            .attributes(
-                claims ->
-                    Map.of(
-                        "tenant",
-                        claims.string("org").orElse("none"), // replaces the exposed value
-                        "groups",
-                        String.join(",", claims.strings("groups")),
-                        "age",
-                        String.valueOf(claims.number("age").orElse(-1)),
-                        "admin",
-                        String.valueOf(claims.bool("admin").orElse(false)),
-                        "issuer",
-                        claims.issuer(),
-                        "expires",
-                        claims.expiresAt().toString()))
+            .attributes(claims ->
+                Map.of(
+                    "tenant",
+                    claims.string("org").orElse("none"), // replaces the exposed value
+                    "groups",
+                    String.join(",", claims.strings("groups")),
+                    "age",
+                    String.valueOf(claims.number("age").orElse(-1)),
+                    "admin",
+                    String.valueOf(claims.bool("admin").orElse(false)),
+                    "issuer",
+                    claims.issuer(),
+                    "expires",
+                    claims.expiresAt().toString()))
             .build();
     var identity =
         jwt.verify(
@@ -105,10 +104,9 @@ class JwtClaimsTest {
         hmac().attributes(claims -> Map.of("a\nb", "v")).build(), hs256(claims("")), "not usable");
     var broken =
         hmac()
-            .attributes(
-                claims -> {
-                  throw new IllegalStateException("bug");
-                })
+            .attributes(claims -> {
+              throw new IllegalStateException("bug");
+            })
             .build();
     assertThatThrownBy(() -> broken.verify(hs256(claims(""))))
         .isInstanceOf(IllegalStateException.class)
@@ -122,11 +120,10 @@ class JwtClaimsTest {
   void claimsAccessorsAreTypedAndHideValuesInToString() {
     var seen = new JwtClaims[1];
     hmac()
-        .tokenCheck(
-            claims -> {
-              seen[0] = claims;
-              return true;
-            })
+        .tokenCheck(claims -> {
+          seen[0] = claims;
+          return true;
+        })
         .build()
         .verify(
             hs256(
@@ -163,11 +160,10 @@ class JwtClaimsTest {
     var calls = new AtomicInteger();
     var jwt =
         hmac()
-            .tokenCheck(
-                claims -> {
-                  calls.incrementAndGet();
-                  return !claims.subject().equals("mallory");
-                })
+            .tokenCheck(claims -> {
+              calls.incrementAndGet();
+              return !claims.subject().equals("mallory");
+            })
             .build();
     assertThat(jwt.verify(hs256(claims(""))).principal()).isEqualTo("ada");
     assertThat(calls).hasValue(1);
@@ -214,17 +210,16 @@ class JwtClaimsTest {
       var futures = new ArrayList<Future<?>>();
       for (int i = 0; i < threads; i++) {
         futures.add(
-            executor.submit(
-                () -> {
-                  start.await();
-                  try {
-                    jwt.verify(token);
-                    accepted.incrementAndGet();
-                  } catch (UnauthorizedException replayed) {
-                    // expected for every thread but one
-                  }
-                  return null;
-                }));
+            executor.submit(() -> {
+              start.await();
+              try {
+                jwt.verify(token);
+                accepted.incrementAndGet();
+              } catch (UnauthorizedException replayed) {
+                // expected for every thread but one
+              }
+              return null;
+            }));
       }
       start.countDown();
       for (var future : futures) {
@@ -238,10 +233,9 @@ class JwtClaimsTest {
   void aFailingCheckFailsClosedInsteadOfAcceptingTheToken() {
     var jwt =
         hmac()
-            .tokenCheck(
-                claims -> {
-                  throw new IllegalStateException("revocation store down");
-                })
+            .tokenCheck(claims -> {
+              throw new IllegalStateException("revocation store down");
+            })
             .build();
     assertThatThrownBy(() -> jwt.verify(hs256(claims(""))))
         .isInstanceOf(IllegalStateException.class)

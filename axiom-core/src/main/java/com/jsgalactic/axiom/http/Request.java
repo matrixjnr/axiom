@@ -194,16 +194,15 @@ public final class Request {
       headers = Map.of();
     } else {
       var copy = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-      headers.forEach(
-          (name, value) -> {
-            if (!TOKEN.matcher(name).matches()
-                || value.chars().anyMatch(c -> (c < 32 && c != '\t') || c == 127)) {
-              throw new IllegalArgumentException("Invalid request header");
-            }
-            if (copy.put(name, value) != null) {
-              throw new IllegalArgumentException("Header names must be unique ignoring case");
-            }
-          });
+      headers.forEach((name, value) -> {
+        if (!TOKEN.matcher(name).matches()
+            || value.chars().anyMatch(c -> (c < 32 && c != '\t') || c == 127)) {
+          throw new IllegalArgumentException("Invalid request header");
+        }
+        if (copy.put(name, value) != null) {
+          throw new IllegalArgumentException("Header names must be unique ignoring case");
+        }
+      });
       headers = Collections.unmodifiableMap(copy);
     }
     this.method = method;

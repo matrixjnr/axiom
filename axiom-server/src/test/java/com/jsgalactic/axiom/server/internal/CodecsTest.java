@@ -156,14 +156,13 @@ class CodecsTest {
     for (int i = 0; i < callers; i++) {
       threads.add(
           Thread.ofVirtual()
-              .unstarted(
-                  () -> {
-                    var result =
-                        codecs.forMediaType("application/json").decode(new byte[0], String.class);
-                    synchronized (results) {
-                      results.add(result);
-                    }
-                  }));
+              .unstarted(() -> {
+                var result =
+                    codecs.forMediaType("application/json").decode(new byte[0], String.class);
+                synchronized (results) {
+                  results.add(result);
+                }
+              }));
     }
     threads.forEach(Thread::start);
     for (var thread : threads) {

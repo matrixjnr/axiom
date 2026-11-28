@@ -48,16 +48,15 @@ public record SessionState(
       throw new IllegalArgumentException("Too many session attributes");
     }
     var copy = new TreeMap<String, String>();
-    attributes.forEach(
-        (name, value) -> {
-          if (!NAME.matcher(name).matches()) {
-            throw new IllegalArgumentException("Invalid session attribute name");
-          }
-          if (value.length() > MAX_VALUE_LENGTH) {
-            throw new IllegalArgumentException("Session attribute value too long");
-          }
-          copy.put(name, value);
-        });
+    attributes.forEach((name, value) -> {
+      if (!NAME.matcher(name).matches()) {
+        throw new IllegalArgumentException("Invalid session attribute name");
+      }
+      if (value.length() > MAX_VALUE_LENGTH) {
+        throw new IllegalArgumentException("Session attribute value too long");
+      }
+      copy.put(name, value);
+    });
     attributes = Collections.unmodifiableMap(copy);
   }
 

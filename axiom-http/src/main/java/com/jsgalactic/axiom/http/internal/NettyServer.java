@@ -536,41 +536,38 @@ final class NettyServer implements Server {
     for (var channel : channels) {
       channel
           .eventLoop()
-          .execute(
-              () -> {
-                var connection = channel.pipeline().get(HttpConnection.class);
-                var h2 = channel.pipeline().get(Http2GracefulCloseHandler.class);
-                var webSocket = channel.pipeline().get(NettyWebSocketSession.class);
-                if (h2 != null) {
-                  h2.goAway();
-                } else if (webSocket != null) {
-                  webSocket.shutdown();
-                } else if (connection == null) {
-                  channel.close();
-                } else {
-                  connection.drain();
-                }
-              });
+          .execute(() -> {
+            var connection = channel.pipeline().get(HttpConnection.class);
+            var h2 = channel.pipeline().get(Http2GracefulCloseHandler.class);
+            var webSocket = channel.pipeline().get(NettyWebSocketSession.class);
+            if (h2 != null) {
+              h2.goAway();
+            } else if (webSocket != null) {
+              webSocket.shutdown();
+            } else if (connection == null) {
+              channel.close();
+            } else {
+              connection.drain();
+            }
+          });
     }
     listener
         .close()
-        .addListener(
-            ignored -> {
-              var force =
-                  acceptors
-                      .next()
-                      .schedule(
-                          () -> {
-                            channels.close();
-                          },
-                          settings.shutdownGrace().toNanos(),
-                          TimeUnit.NANOSECONDS);
-              drained.addListener(
-                  done -> {
-                    force.cancel(false);
-                    stop();
-                  });
-            });
+        .addListener(ignored -> {
+          var force =
+              acceptors
+                  .next()
+                  .schedule(
+                      () -> {
+                        channels.close();
+                      },
+                      settings.shutdownGrace().toNanos(),
+                      TimeUnit.NANOSECONDS);
+          drained.addListener(done -> {
+            force.cancel(false);
+            stop();
+          });
+        });
   }
 
   private void stop() {
@@ -581,14 +578,13 @@ final class NettyServer implements Server {
 
   private static CompletableFuture<Void> completion(Future<?> future) {
     var result = new CompletableFuture<Void>();
-    future.addListener(
-        done -> {
-          if (done.isSuccess()) {
-            result.complete(null);
-          } else {
-            result.completeExceptionally(done.cause());
-          }
-        });
+    future.addListener(done -> {
+      if (done.isSuccess()) {
+        result.complete(null);
+      } else {
+        result.completeExceptionally(done.cause());
+      }
+    });
     return result;
   }
 }

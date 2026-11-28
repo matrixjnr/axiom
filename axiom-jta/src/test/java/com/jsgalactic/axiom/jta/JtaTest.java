@@ -164,12 +164,11 @@ class JtaTest {
     var associated = new AtomicReference<Transaction>();
     var app = Axiom.create();
     // An outer piece of application middleware associates a transaction on the request thread.
-    app.use(
-        (ctx, next) -> {
-          tm.begin();
-          associated.set(tm.getTransaction());
-          return next.run();
-        });
+    app.use((ctx, next) -> {
+      tm.begin();
+      associated.set(tm.getTransaction());
+      return next.run();
+    });
     app.get("/inner", ctx -> ctx.text("ok"), Jta.builder(tm).build().transaction());
 
     try (var client = TestClient.start(app)) {

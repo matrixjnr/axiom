@@ -76,14 +76,13 @@ final class NettyWebSocketSession extends SimpleChannelInboundHandler<WebSocketF
   public void handlerAdded(ChannelHandlerContext ctx) {
     context = ctx;
     ctx.executor()
-        .execute(
-            () -> {
-              if (!closed.get()) {
-                started = true;
-                metrics.webSocket(ListenerMetrics.WebSocketOutcome.OPENED);
-                callback(() -> handler.onConnect(this));
-              }
-            });
+        .execute(() -> {
+          if (!closed.get()) {
+            started = true;
+            metrics.webSocket(ListenerMetrics.WebSocketOutcome.OPENED);
+            callback(() -> handler.onConnect(this));
+          }
+        });
   }
 
   @Override
@@ -155,14 +154,13 @@ final class NettyWebSocketSession extends SimpleChannelInboundHandler<WebSocketF
   public void send(WebSocketMessage message) {
     Objects.requireNonNull(message, "message");
     ensureOpen();
-    onLoop(
-        () -> {
-          if (message.isText()) {
-            write(new TextWebSocketFrame(message.text()), "text");
-          } else {
-            write(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(message.bytes())), "binary");
-          }
-        });
+    onLoop(() -> {
+      if (message.isText()) {
+        write(new TextWebSocketFrame(message.text()), "text");
+      } else {
+        write(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(message.bytes())), "binary");
+      }
+    });
   }
 
   @Override
@@ -258,14 +256,13 @@ final class NettyWebSocketSession extends SimpleChannelInboundHandler<WebSocketF
       action.run();
     } else {
       ctx.executor()
-          .execute(
-              () -> {
-                try {
-                  action.run();
-                } catch (RuntimeException failure) {
-                  callback(() -> handler.onError(this, failure));
-                }
-              });
+          .execute(() -> {
+            try {
+              action.run();
+            } catch (RuntimeException failure) {
+              callback(() -> handler.onError(this, failure));
+            }
+          });
     }
   }
 
@@ -280,17 +277,16 @@ final class NettyWebSocketSession extends SimpleChannelInboundHandler<WebSocketF
     if (pendingWrites >= WebSocketSupport.MAX_PENDING_WRITES || !context.channel().isWritable()) {
       pauseReads();
     }
-    written.addListener(
-        future -> {
-          if (pendingWrites > 0) {
-            pendingWrites--;
-          }
-          if (!future.isSuccess()) {
-            end(WebSocketCloseStatus.ABNORMAL_CLOSURE.code(), "", false);
-          } else {
-            resumeReads();
-          }
-        });
+    written.addListener(future -> {
+      if (pendingWrites > 0) {
+        pendingWrites--;
+      }
+      if (!future.isSuccess()) {
+        end(WebSocketCloseStatus.ABNORMAL_CLOSURE.code(), "", false);
+      } else {
+        resumeReads();
+      }
+    });
   }
 
   private void pauseReads() {

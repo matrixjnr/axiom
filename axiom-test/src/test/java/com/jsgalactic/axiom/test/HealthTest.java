@@ -164,17 +164,16 @@ class HealthTest {
     for (int i = 0; i < probers; i++) {
       threads.add(
           Thread.ofPlatform()
-              .start(
-                  () -> {
-                    try {
-                      start.await();
-                    } catch (InterruptedException e) {
-                      return;
-                    }
-                    for (int j = 0; j < 200; j++) {
-                      health.readiness();
-                    }
-                  }));
+              .start(() -> {
+                try {
+                  start.await();
+                } catch (InterruptedException e) {
+                  return;
+                }
+                for (int j = 0; j < 200; j++) {
+                  health.readiness();
+                }
+              }));
     }
     start.countDown();
     for (var thread : threads) {

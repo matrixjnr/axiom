@@ -771,30 +771,29 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
             listenerMetrics);
     handshaker
         .handshake(ctx, full)
-        .addListener(
-            future -> {
-              if (!future.isSuccess()) {
-                executor.releaseStreamSlot(route.admissionKey());
-                listenerMetrics.webSocket(ListenerMetrics.WebSocketOutcome.REFUSED);
-                ctx.close();
-                return;
-              }
-              try {
-                // The encoder must stay before the session in the pipeline: outbound frames travel
-                // toward the head, so they pass through it on their way to the socket.
-                ctx.pipeline()
-                    .addAfter(
-                        "wsencoder",
-                        "wsAggregator",
-                        new WebSocketFrameAggregator(WebSocketSupport.MAX_FRAME));
-                ctx.pipeline().addAfter("wsAggregator", "wsSession", session);
-                ctx.pipeline().remove(this);
-              } catch (RuntimeException failure) {
-                executor.releaseStreamSlot(route.admissionKey());
-                listenerMetrics.webSocket(ListenerMetrics.WebSocketOutcome.REFUSED);
-                ctx.close();
-              }
-            });
+        .addListener(future -> {
+          if (!future.isSuccess()) {
+            executor.releaseStreamSlot(route.admissionKey());
+            listenerMetrics.webSocket(ListenerMetrics.WebSocketOutcome.REFUSED);
+            ctx.close();
+            return;
+          }
+          try {
+            // The encoder must stay before the session in the pipeline: outbound frames travel
+            // toward the head, so they pass through it on their way to the socket.
+            ctx.pipeline()
+                .addAfter(
+                    "wsencoder",
+                    "wsAggregator",
+                    new WebSocketFrameAggregator(WebSocketSupport.MAX_FRAME));
+            ctx.pipeline().addAfter("wsAggregator", "wsSession", session);
+            ctx.pipeline().remove(this);
+          } catch (RuntimeException failure) {
+            executor.releaseStreamSlot(route.admissionKey());
+            listenerMetrics.webSocket(ListenerMetrics.WebSocketOutcome.REFUSED);
+            ctx.close();
+          }
+        });
     return true;
   }
 
@@ -890,12 +889,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
     fields.putAll(receiving.request().headers());
     last.trailingHeaders()
-        .forEach(
-            header ->
-                fields.merge(
-                    header.getKey().toString(),
-                    header.getValue().toString(),
-                    (first, next) -> first + ", " + next));
+        .forEach(header ->
+            fields.merge(
+                header.getKey().toString(),
+                header.getValue().toString(),
+                (first, next) -> first + ", " + next));
     receiving = receiving.withRequest(receiving.request().withHeaders(fields));
   }
 
@@ -986,16 +984,15 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                   responseNanos,
                   TimeUnit.NANOSECONDS);
     }
-    written.addListener(
-        future -> {
-          if (continueTimer != null) {
-            continueTimer.cancel(false);
-            continueTimer = null;
-          }
-          if (!future.isSuccess()) {
-            abort(ctx);
-          }
-        });
+    written.addListener(future -> {
+      if (continueTimer != null) {
+        continueTimer.cancel(false);
+        continueTimer = null;
+      }
+      if (!future.isSuccess()) {
+        abort(ctx);
+      }
+    });
   }
 
   /**
@@ -1081,72 +1078,69 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
               WireResponse::status);
       active
           .result()
-          .whenComplete(
-              (response, thrown) -> {
-                // A handler that did not read its body to the end cannot leave its bytes to be
-                // parsed as another request: the response closes this connection and input is
-                // discarded after it, as for any request whose framing is no longer usable.
-                if (exchange.reader() instanceof StreamingBodyReader reader && !reader.finished()) {
-                  forceClose = true;
-                  dropPending();
-                  var decoder = ctx.pipeline().get(RequestDecoder.class);
-                  if (decoder != null) {
-                    decoder.discard(maxDiscardedInput);
-                  }
-                }
-                boolean refused = exchange == rejected;
-                abandonReader(exchange);
-                // The outcome is final: the request body no longer counts against the listener.
-                exchange.release();
-                var failure = unwrap(thrown);
-                try {
-                  ctx.executor()
-                      .execute(
-                          () -> {
-                            active = null; // The outcome is final; only the response write remains.
-                            activeExchange = null;
-                            // The head of a stream is out, so there is no response left to choose:
-                            // it ends
-                            // with a final chunk when the body completed, and by closing the
-                            // connection
-                            // otherwise.
-                            if (stream != null) {
-                              endStream(ctx, failure);
-                              return;
-                            }
-                            if (refused) {
-                              // The listener's error is the only response for this request.
-                              rejected = null;
-                              busy = false;
-                              dispatch(ctx);
-                              return;
-                            }
-                            if (closing || !ctx.channel().isActive()) {
-                              return;
-                            }
-                            if (failure instanceof Error) {
-                              abort(ctx);
-                            } else {
-                              send(
-                                  ctx,
-                                  exchange,
-                                  failure == null
-                                      ? response
-                                      : error(
-                                          failure instanceof DeadlineExceededException
-                                              ? 504
-                                              : failure instanceof QueueTimeoutException
-                                                      || failure
-                                                          instanceof DispatchRejectedException
-                                                  ? 503
-                                                  : 500,
-                                          exchange));
-                            }
-                          });
-                } catch (RejectedExecutionException stopped) {
-                  /* Channel shutdown owns cleanup. */
-                }
-              });
+          .whenComplete((response, thrown) -> {
+            // A handler that did not read its body to the end cannot leave its bytes to be
+            // parsed as another request: the response closes this connection and input is
+            // discarded after it, as for any request whose framing is no longer usable.
+            if (exchange.reader() instanceof StreamingBodyReader reader && !reader.finished()) {
+              forceClose = true;
+              dropPending();
+              var decoder = ctx.pipeline().get(RequestDecoder.class);
+              if (decoder != null) {
+                decoder.discard(maxDiscardedInput);
+              }
+            }
+            boolean refused = exchange == rejected;
+            abandonReader(exchange);
+            // The outcome is final: the request body no longer counts against the listener.
+            exchange.release();
+            var failure = unwrap(thrown);
+            try {
+              ctx.executor()
+                  .execute(() -> {
+                    active = null; // The outcome is final; only the response write remains.
+                    activeExchange = null;
+                    // The head of a stream is out, so there is no response left to choose:
+                    // it ends
+                    // with a final chunk when the body completed, and by closing the
+                    // connection
+                    // otherwise.
+                    if (stream != null) {
+                      endStream(ctx, failure);
+                      return;
+                    }
+                    if (refused) {
+                      // The listener's error is the only response for this request.
+                      rejected = null;
+                      busy = false;
+                      dispatch(ctx);
+                      return;
+                    }
+                    if (closing || !ctx.channel().isActive()) {
+                      return;
+                    }
+                    if (failure instanceof Error) {
+                      abort(ctx);
+                    } else {
+                      send(
+                          ctx,
+                          exchange,
+                          failure == null
+                              ? response
+                              : error(
+                                  failure instanceof DeadlineExceededException
+                                      ? 504
+                                      : failure instanceof QueueTimeoutException
+                                              || failure instanceof DispatchRejectedException
+                                          ? 503
+                                          : 500,
+                                  exchange));
+                    }
+                  });
+            } catch (RejectedExecutionException stopped) {
+              /* Channel shutdown owns cleanup. */
+            }
+          });
     } catch (RuntimeException unavailable) {
       if (!(unavailable instanceof RejectedExecutionException)) {
         LOG.log(
@@ -1233,12 +1227,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
       }
       response
           .headers()
-          .forEach(
-              (name, value) -> {
-                if (!omitted.contains(name.toLowerCase(Locale.ROOT))) {
-                  message.headers().set(name, value);
-                }
-              });
+          .forEach((name, value) -> {
+            if (!omitted.contains(name.toLowerCase(Locale.ROOT))) {
+              message.headers().set(name, value);
+            }
+          });
       if (!head && response.status() != 204 && response.status() != 304) {
         HttpUtil.setContentLength(message, response.body().length);
       } else if (head) {
@@ -1290,25 +1283,24 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
                   responseNanos,
                   TimeUnit.NANOSECONDS);
     }
-    written.addListener(
-        future -> {
-          if (responseTimer != null) {
-            responseTimer.cancel(false);
-            responseTimer = null;
-          }
-          active = null;
-          if (!future.isSuccess()) {
-            ctx.close();
-            return;
-          }
-          if (!persistent) {
-            linger(ctx);
-            return;
-          }
-          busy = false;
-          dispatch(ctx);
-          sendContinue(ctx);
-        });
+    written.addListener(future -> {
+      if (responseTimer != null) {
+        responseTimer.cancel(false);
+        responseTimer = null;
+      }
+      active = null;
+      if (!future.isSuccess()) {
+        ctx.close();
+        return;
+      }
+      if (!persistent) {
+        linger(ctx);
+        return;
+      }
+      busy = false;
+      dispatch(ctx);
+      sendContinue(ctx);
+    });
   }
 
   private static boolean closeRequested(Map<String, String> headers) {
@@ -1443,12 +1435,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     }
     response
         .headers()
-        .forEach(
-            (name, value) -> {
-              if (!omitted.contains(name.toLowerCase(Locale.ROOT))) {
-                message.headers().set(name, value);
-              }
-            });
+        .forEach((name, value) -> {
+          if (!omitted.contains(name.toLowerCase(Locale.ROOT))) {
+            message.headers().set(name, value);
+          }
+        });
     // HTTP/1.0 has no chunked coding: the body is delimited by closing the connection.
     boolean keepAlive = exchange.keepAlive() && !close && !exchange.http10();
     if (!exchange.http10()) {
@@ -1460,13 +1451,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     stream = writer;
     streamKeepAlive = keepAlive;
     ctx.writeAndFlush(message)
-        .addListener(
-            future -> {
-              if (!future.isSuccess()) {
-                writer.abort(StreamAbortedException.Reason.CLIENT_DISCONNECTED);
-                ctx.close();
-              }
-            });
+        .addListener(future -> {
+          if (!future.isSuccess()) {
+            writer.abort(StreamAbortedException.Reason.CLIENT_DISCONNECTED);
+            ctx.close();
+          }
+        });
     return true;
   }
 
@@ -1605,29 +1595,26 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
     if (ssl == null) {
       duplex
           .shutdownOutput()
-          .addListener(
-              done -> {
-                if (!done.isSuccess()) {
-                  ctx.close();
-                }
-              });
+          .addListener(done -> {
+            if (!done.isSuccess()) {
+              ctx.close();
+            }
+          });
     } else {
       ssl.closeOutbound()
-          .addListener(
-              sent -> {
-                if (!sent.isSuccess() || !ctx.channel().isActive()) {
-                  ctx.close();
-                  return;
-                }
-                duplex
-                    .shutdownOutput()
-                    .addListener(
-                        done -> {
-                          if (!done.isSuccess()) {
-                            ctx.close();
-                          }
-                        });
-              });
+          .addListener(sent -> {
+            if (!sent.isSuccess() || !ctx.channel().isActive()) {
+              ctx.close();
+              return;
+            }
+            duplex
+                .shutdownOutput()
+                .addListener(done -> {
+                  if (!done.isSuccess()) {
+                    ctx.close();
+                  }
+                });
+          });
     }
   }
 

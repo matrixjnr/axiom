@@ -138,11 +138,9 @@ class DevelopmentErrorsTest {
           .isThrownBy(() -> app.listen(new InetSocketAddress(0)))
           .withMessageContaining("loopback");
       assertThatIllegalStateException()
-          .isThrownBy(
-              () ->
-                  app.listen(
-                      new InetSocketAddress(
-                          InetAddress.getByAddress(new byte[] {10, 1, 2, 3}), 0)));
+          .isThrownBy(() ->
+              app.listen(
+                  new InetSocketAddress(InetAddress.getByAddress(new byte[] {10, 1, 2, 3}), 0)));
       assertThatIllegalStateException()
           .isThrownBy(
               () -> app.listen(InetSocketAddress.createUnresolved("example.invalid", 8080)));

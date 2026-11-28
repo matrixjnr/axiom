@@ -562,14 +562,13 @@ class TestClientStreamTest {
     app.get(
         "/events",
         ctx ->
-            Response.sse(
-                events -> {
-                  var closing = new CountDownLatch(1);
-                  events.onShutdown(closing::countDown);
-                  events.send("first");
-                  closing.await();
-                  events.send("bye");
-                }));
+            Response.sse(events -> {
+              var closing = new CountDownLatch(1);
+              events.onShutdown(closing::countDown);
+              events.send("first");
+              closing.await();
+              events.send("bye");
+            }));
     try (var client = TestClient.start(app)) {
       var stream = client.stream(get("/events"));
       assertThat(stream.nextText()).contains("data: first\n\n");
@@ -590,12 +589,11 @@ class TestClientStreamTest {
     app.get(
         "/events",
         ctx ->
-            Response.sse(
-                events -> {
-                  events.send(ServerSentEvent.named("tick", "1").withId("1"));
-                  events.keepAlive();
-                  events.send("line one\r\nevent: forged");
-                }));
+            Response.sse(events -> {
+              events.send(ServerSentEvent.named("tick", "1").withId("1"));
+              events.keepAlive();
+              events.send("line one\r\nevent: forged");
+            }));
     try (var client = TestClient.start(app);
         var stream = client.stream(get("/events"))) {
       assertThat(stream.status()).isEqualTo(200);

@@ -175,11 +175,10 @@ public interface Context {
    */
   default Optional<Integer> queryInt(String name) {
     return query(name)
-        .map(
-            value ->
-                (int)
-                    parseInteger(
-                        value, Integer.MIN_VALUE, Integer.MAX_VALUE, "invalid_query_parameter"));
+        .map(value ->
+            (int)
+                parseInteger(
+                    value, Integer.MIN_VALUE, Integer.MAX_VALUE, "invalid_query_parameter"));
   }
 
   /**
@@ -193,9 +192,8 @@ public interface Context {
    */
   default Optional<Long> queryLong(String name) {
     return query(name)
-        .map(
-            value ->
-                parseInteger(value, Long.MIN_VALUE, Long.MAX_VALUE, "invalid_query_parameter"));
+        .map(value ->
+            parseInteger(value, Long.MIN_VALUE, Long.MAX_VALUE, "invalid_query_parameter"));
   }
 
   /**

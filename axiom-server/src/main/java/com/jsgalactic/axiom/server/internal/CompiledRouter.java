@@ -52,44 +52,43 @@ final class CompiledRouter {
     var nodes = new ArrayList<Builder>();
     var root = new Builder(nodes);
     var exact = new HashMap<String, Builder>();
-    registrations.forEach(
-        (route, handler) -> {
-          var node = root;
-          var segments = route.path().substring(1).split("/", -1);
-          var captures = new ArrayList<Capture>();
-          for (int i = 0; i < segments.length; i++) {
-            var segment = segments[i];
-            if (segment.startsWith(":")) {
-              captures.add(new Capture(segment.substring(1), i, false));
-              if (node.parameter == null) {
-                node.parameter = new Builder(nodes);
-              }
-              node = node.parameter;
-            } else if (segment.startsWith("*")) {
-              captures.add(new Capture(segment.substring(1), i, true));
-              if (node.wildcard == null) {
-                node.wildcard = new Builder(nodes);
-              }
-              node = node.wildcard;
-            } else {
-              node = node.literals.computeIfAbsent(segment, ignored -> new Builder(nodes));
-            }
+    registrations.forEach((route, handler) -> {
+      var node = root;
+      var segments = route.path().substring(1).split("/", -1);
+      var captures = new ArrayList<Capture>();
+      for (int i = 0; i < segments.length; i++) {
+        var segment = segments[i];
+        if (segment.startsWith(":")) {
+          captures.add(new Capture(segment.substring(1), i, false));
+          if (node.parameter == null) {
+            node.parameter = new Builder(nodes);
           }
-          var endpoint = new Endpoint(route, handler, List.copyOf(captures));
-          var previous = node.endpoints.putIfAbsent(route.method(), endpoint);
-          if (previous != null) {
-            throw new IllegalArgumentException(
-                "Ambiguous routes for "
-                    + route.method()
-                    + ": "
-                    + previous.route().path()
-                    + " and "
-                    + route.path());
+          node = node.parameter;
+        } else if (segment.startsWith("*")) {
+          captures.add(new Capture(segment.substring(1), i, true));
+          if (node.wildcard == null) {
+            node.wildcard = new Builder(nodes);
           }
-          if (captures.isEmpty()) {
-            exact.put(route.path(), node);
-          }
-        });
+          node = node.wildcard;
+        } else {
+          node = node.literals.computeIfAbsent(segment, ignored -> new Builder(nodes));
+        }
+      }
+      var endpoint = new Endpoint(route, handler, List.copyOf(captures));
+      var previous = node.endpoints.putIfAbsent(route.method(), endpoint);
+      if (previous != null) {
+        throw new IllegalArgumentException(
+            "Ambiguous routes for "
+                + route.method()
+                + ": "
+                + previous.route().path()
+                + " and "
+                + route.path());
+      }
+      if (captures.isEmpty()) {
+        exact.put(route.path(), node);
+      }
+    });
 
     // Children are created after their parents. Freeze bottom-up without recursive calls.
     for (int i = nodes.size() - 1; i >= 0; i--) {

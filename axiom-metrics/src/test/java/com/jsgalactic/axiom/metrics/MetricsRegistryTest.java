@@ -128,23 +128,22 @@ class MetricsRegistryTest {
     for (int t = 0; t < threads; t++) {
       workers.add(
           Thread.ofPlatform()
-              .start(
-                  () -> {
-                    try {
-                      ready.countDown();
-                      start.await();
-                      for (int i = 0; i < perThread; i++) {
-                        // Every thread looks the series up itself: concurrent creation yields one
-                        // series.
-                        registry.counter("app.hits", "route", "/a").increment();
-                        registry.gauge("app.depth").add(1);
-                        registry.gauge("app.depth").add(-1);
-                        registry.timer("app.work", "route", "/a").record(i);
-                      }
-                    } catch (Throwable thrown) {
-                      failure.set(thrown);
-                    }
-                  }));
+              .start(() -> {
+                try {
+                  ready.countDown();
+                  start.await();
+                  for (int i = 0; i < perThread; i++) {
+                    // Every thread looks the series up itself: concurrent creation yields one
+                    // series.
+                    registry.counter("app.hits", "route", "/a").increment();
+                    registry.gauge("app.depth").add(1);
+                    registry.gauge("app.depth").add(-1);
+                    registry.timer("app.work", "route", "/a").record(i);
+                  }
+                } catch (Throwable thrown) {
+                  failure.set(thrown);
+                }
+              }));
     }
     assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
     start.countDown();

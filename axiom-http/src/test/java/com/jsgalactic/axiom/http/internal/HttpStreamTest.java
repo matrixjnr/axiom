@@ -835,13 +835,12 @@ class HttpStreamTest {
       fixture.app.get(
           "/events",
           ctx ->
-              Response.sse(
-                  events -> {
-                    events.send(ServerSentEvent.named("tick", "1").withId("7"));
-                    events.keepAlive();
-                    // Line breaks in client-influenced text can start no field of their own.
-                    events.send("x\r\nevent: forged\n\nid: 9");
-                  }));
+              Response.sse(events -> {
+                events.send(ServerSentEvent.named("tick", "1").withId("7"));
+                events.keepAlive();
+                // Line breaks in client-influenced text can start no field of their own.
+                events.send("x\r\nevent: forged\n\nid: 9");
+              }));
       var wire = fixture.connect();
       wire.write("GET /events HTTP/1.1\r\nHost: a\r\nAccept: text/event-stream\r\n\r\n");
       var head = wire.head();

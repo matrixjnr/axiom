@@ -69,9 +69,8 @@ final class Renderer {
     out.put("info", info);
     servers(out);
     var pathItems = new LinkedHashMap<String, Object>();
-    paths.forEach(
-        (path, operations) ->
-            pathItems.put(path, new LinkedHashMap<String, Object>(lower(operations))));
+    paths.forEach((path, operations) ->
+        pathItems.put(path, new LinkedHashMap<String, Object>(lower(operations))));
     out.put("paths", pathItems);
     var definitions = new LinkedHashMap<String, Object>(schemas.components());
     var securities = securitySchemes();
@@ -140,42 +139,40 @@ final class Renderer {
   private Map<String, Object> securitySchemes() {
     var out = new LinkedHashMap<String, Object>();
     new TreeMap<>(config.schemes)
-        .forEach(
-            (name, scheme) -> {
-              var map = new LinkedHashMap<String, Object>();
-              switch (scheme.kind()) {
-                case BEARER -> {
-                  if (v2) {
-                    map.put("type", "apiKey");
-                    map.put("name", "Authorization");
-                    map.put("in", "header");
-                  } else {
-                    map.put("type", "http");
-                    map.put("scheme", "bearer");
-                    if (scheme.value() != null) {
-                      map.put("bearerFormat", scheme.value());
-                    }
-                  }
+        .forEach((name, scheme) -> {
+          var map = new LinkedHashMap<String, Object>();
+          switch (scheme.kind()) {
+            case BEARER -> {
+              if (v2) {
+                map.put("type", "apiKey");
+                map.put("name", "Authorization");
+                map.put("in", "header");
+              } else {
+                map.put("type", "http");
+                map.put("scheme", "bearer");
+                if (scheme.value() != null) {
+                  map.put("bearerFormat", scheme.value());
                 }
-                case BASIC -> {
-                  if (v2) {
-                    map.put("type", "basic");
-                  } else {
-                    map.put("type", "http");
-                    map.put("scheme", "basic");
-                  }
-                }
-                case API_KEY_HEADER, API_KEY_QUERY -> {
-                  map.put("type", "apiKey");
-                  map.put("name", scheme.value());
-                  map.put(
-                      "in",
-                      scheme.kind() == SecurityScheme.Kind.API_KEY_HEADER ? "header" : "query");
-                }
-                default -> throw new IllegalStateException(scheme.kind().name());
               }
-              out.put(name, map);
-            });
+            }
+            case BASIC -> {
+              if (v2) {
+                map.put("type", "basic");
+              } else {
+                map.put("type", "http");
+                map.put("scheme", "basic");
+              }
+            }
+            case API_KEY_HEADER, API_KEY_QUERY -> {
+              map.put("type", "apiKey");
+              map.put("name", scheme.value());
+              map.put(
+                  "in", scheme.kind() == SecurityScheme.Kind.API_KEY_HEADER ? "header" : "query");
+            }
+            default -> throw new IllegalStateException(scheme.kind().name());
+          }
+          out.put(name, map);
+        });
     return out;
   }
 
@@ -248,15 +245,14 @@ final class Renderer {
     doc.summary().ifPresent(value -> op.put("summary", value));
     doc.description().ifPresent(value -> op.put("description", value));
     doc.operationId()
-        .ifPresent(
-            id -> {
-              var previous = operationIds.put(id, label);
-              if (previous != null) {
-                throw Schemas.fail(
-                    label, "the operation id '" + id + "' is already used by " + previous);
-              }
-              op.put("operationId", id);
-            });
+        .ifPresent(id -> {
+          var previous = operationIds.put(id, label);
+          if (previous != null) {
+            throw Schemas.fail(
+                label, "the operation id '" + id + "' is already used by " + previous);
+          }
+          op.put("operationId", id);
+        });
     if (doc.isDeprecated()) {
       op.put("deprecated", true);
     }
@@ -283,26 +279,25 @@ final class Renderer {
     var responses = new LinkedHashMap<String, Object>();
     doc.responses().stream()
         .sorted(Comparator.comparingInt(RouteDoc.Reply::status))
-        .forEach(
-            reply -> {
-              var entry = new LinkedHashMap<String, Object>();
-              entry.put("description", reply.description());
-              if (reply.type() != null) {
-                var schema =
-                    schema(() -> schemas.schema(reply.type(), "response " + reply.status()), label);
-                if (v2) {
-                  produces.addAll(reply.mediaTypes());
-                  entry.put("schema", schema);
-                } else {
-                  var content = new LinkedHashMap<String, Object>();
-                  reply
-                      .mediaTypes()
-                      .forEach(type -> content.put(type, Schemas.object("schema", copy(schema))));
-                  entry.put("content", content);
-                }
-              }
-              responses.put(String.valueOf(reply.status()), entry);
-            });
+        .forEach(reply -> {
+          var entry = new LinkedHashMap<String, Object>();
+          entry.put("description", reply.description());
+          if (reply.type() != null) {
+            var schema =
+                schema(() -> schemas.schema(reply.type(), "response " + reply.status()), label);
+            if (v2) {
+              produces.addAll(reply.mediaTypes());
+              entry.put("schema", schema);
+            } else {
+              var content = new LinkedHashMap<String, Object>();
+              reply
+                  .mediaTypes()
+                  .forEach(type -> content.put(type, Schemas.object("schema", copy(schema))));
+              entry.put("content", content);
+            }
+          }
+          responses.put(String.valueOf(reply.status()), entry);
+        });
     if (responses.isEmpty()) {
       responses.put("default", Schemas.object("description", "No response is documented."));
     }
@@ -421,14 +416,13 @@ final class Renderer {
   private static Object rewrite(Object value) {
     if (value instanceof Map<?, ?> map) {
       var out = new LinkedHashMap<String, Object>();
-      map.forEach(
-          (key, element) -> {
-            if ("$ref".equals(key) && element instanceof String ref) {
-              out.put("$ref", ref.replace("#/components/schemas/", "#/definitions/"));
-            } else {
-              out.put((String) key, rewrite(element));
-            }
-          });
+      map.forEach((key, element) -> {
+        if ("$ref".equals(key) && element instanceof String ref) {
+          out.put("$ref", ref.replace("#/components/schemas/", "#/definitions/"));
+        } else {
+          out.put((String) key, rewrite(element));
+        }
+      });
       return out;
     }
     if (value instanceof List<?> list) {

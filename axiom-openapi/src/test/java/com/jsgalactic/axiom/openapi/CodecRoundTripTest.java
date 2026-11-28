@@ -123,19 +123,18 @@ class CodecRoundTripTest {
         (Map<String, Map<String, Object>>)
             schemas.components().get(type.getSimpleName()).get("properties");
     var members = new ArrayList<String>();
-    properties.forEach(
-        (name, schema) ->
-            members.add(
-                "\""
-                    + name
-                    + "\":"
-                    + switch ((String) schema.get("type")) {
-                      case "integer" -> "1";
-                      case "number" -> "1.5";
-                      case "boolean" -> "true";
-                      case "array" -> "[\"x\"]";
-                      default -> "\"x\"";
-                    }));
+    properties.forEach((name, schema) ->
+        members.add(
+            "\""
+                + name
+                + "\":"
+                + switch ((String) schema.get("type")) {
+                  case "integer" -> "1";
+                  case "number" -> "1.5";
+                  case "boolean" -> "true";
+                  case "array" -> "[\"x\"]";
+                  default -> "\"x\"";
+                }));
     return "{" + String.join(",", members) + "}";
   }
 

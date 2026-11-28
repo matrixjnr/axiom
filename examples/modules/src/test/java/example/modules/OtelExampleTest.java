@@ -30,16 +30,14 @@ class OtelExampleTest {
 
       assertThat(exporter.getFinishedSpanItems())
           .singleElement()
-          .satisfies(
-              span -> {
-                assertThat(span.getName()).isEqualTo("GET /items/:id");
-                assertThat(span.getKind()).isEqualTo(SpanKind.SERVER);
-                assertThat(span.getAttributes().get(AttributeKey.stringKey("http.route")))
-                    .isEqualTo("/items/:id");
-                assertThat(
-                        span.getAttributes().get(AttributeKey.longKey("http.response.status_code")))
-                    .isEqualTo(200L);
-              });
+          .satisfies(span -> {
+            assertThat(span.getName()).isEqualTo("GET /items/:id");
+            assertThat(span.getKind()).isEqualTo(SpanKind.SERVER);
+            assertThat(span.getAttributes().get(AttributeKey.stringKey("http.route")))
+                .isEqualTo("/items/:id");
+            assertThat(span.getAttributes().get(AttributeKey.longKey("http.response.status_code")))
+                .isEqualTo(200L);
+          });
     } finally {
       provider.shutdown();
     }

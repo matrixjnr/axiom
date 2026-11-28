@@ -94,45 +94,43 @@ class JakartaValidatedBodyTest {
   @Test
   void validatesDecodedRecordsThroughTestClient() throws Exception {
     try (var client = TestClient.start(app)) {
-      assertContract(
-          (contentType, body) -> {
-            var request =
-                new Request(
-                    "POST",
-                    "/orders",
-                    Map.of("Content-Type", contentType),
-                    Body.of(contentType, body.getBytes(StandardCharsets.UTF_8)));
-            var response = client.execute(request);
-            var content = response.body() instanceof byte[] bytes ? bytes : new byte[0];
-            return Reply.of(response.status(), response.headers(), content);
-          });
+      assertContract((contentType, body) -> {
+        var request =
+            new Request(
+                "POST",
+                "/orders",
+                Map.of("Content-Type", contentType),
+                Body.of(contentType, body.getBytes(StandardCharsets.UTF_8)));
+        var response = client.execute(request);
+        var content = response.body() instanceof byte[] bytes ? bytes : new byte[0];
+        return Reply.of(response.status(), response.headers(), content);
+      });
     }
   }
 
   @Test
   void validatesDecodedRecordsOverALiveListener() throws Exception {
     server = app.listen(0);
-    assertContract(
-        (contentType, body) -> {
-          var bytes = body.getBytes(StandardCharsets.UTF_8);
-          try (var socket = new Socket()) {
-            socket.connect(server.localAddress(), 5000);
-            socket.setSoTimeout(10_000);
-            var out = socket.getOutputStream();
-            out.write(
-                ("POST /orders HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: "
-                        + contentType
-                        + "\r\nContent-Length: "
-                        + bytes.length
-                        + "\r\n\r\n")
-                    .getBytes(StandardCharsets.ISO_8859_1));
-            out.write(bytes);
-            out.flush();
-            return MiddlewareListenerTest.read(socket.getInputStream(), false);
-          } catch (IOException failure) {
-            throw new AssertionError(failure);
-          }
-        });
+    assertContract((contentType, body) -> {
+      var bytes = body.getBytes(StandardCharsets.UTF_8);
+      try (var socket = new Socket()) {
+        socket.connect(server.localAddress(), 5000);
+        socket.setSoTimeout(10_000);
+        var out = socket.getOutputStream();
+        out.write(
+            ("POST /orders HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: "
+                    + contentType
+                    + "\r\nContent-Length: "
+                    + bytes.length
+                    + "\r\n\r\n")
+                .getBytes(StandardCharsets.ISO_8859_1));
+        out.write(bytes);
+        out.flush();
+        return MiddlewareListenerTest.read(socket.getInputStream(), false);
+      } catch (IOException failure) {
+        throw new AssertionError(failure);
+      }
+    });
   }
 
   private void assertContract(Sender sender) throws Exception {

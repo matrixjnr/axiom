@@ -13,7 +13,7 @@ swagger-ui = "5.34.1"
 # Checkstyle, used through the Gradle checkstyle plugin (toolVersion).
 checkstyle = "14.3.0"
 # Formatting gate applied by Spotless to every Java source.
-google-java-format = "1.24.0"
+google-java-format = "2.0.0"
 japicmp = "0.27.0"
 asm = "9.11.1"
 # Adapter dependencies are opt-in: only axiom-otel and axiom-metrics-micrometer resolve them.
@@ -44,6 +44,7 @@ netty-handler = { module = "io.netty:netty-handler" }
 # Compile-time only: the optional native transports (the native libraries are not dependencies of axiom-http).
 netty-classes-epoll = { module = "io.netty:netty-transport-classes-epoll" }
 netty-classes-kqueue = { module = "io.netty:netty-transport-classes-kqueue" }
+netty-classes-iouring = { module = "io.netty:netty-transport-classes-io_uring" }
 jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }

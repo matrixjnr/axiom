@@ -14,14 +14,13 @@ class IdentityTest {
   @Test
   void middlewareAttachesAnIdentityThatTheHandlerAndErrorHandlersSee() throws Exception {
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            if (ctx.header("X-User").isPresent()) {
-              ctx.identity(
-                  new SecurityIdentity(ctx.header("X-User").get(), Set.of("reader"), Set.of()));
-            }
-            return next.run();
-          });
+      app.use((ctx, next) -> {
+        if (ctx.header("X-User").isPresent()) {
+          ctx.identity(
+              new SecurityIdentity(ctx.header("X-User").get(), Set.of("reader"), Set.of()));
+        }
+        return next.run();
+      });
       app.get("/me", ctx -> ctx.identity().map(SecurityIdentity::principal).orElse("anonymous"));
       app.get(
           "/fail",
@@ -47,11 +46,10 @@ class IdentityTest {
   @Test
   void aVerifiedIdentityCannotBeReplacedLaterInTheChain() throws Exception {
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            ctx.identity(SecurityIdentity.of("ada"));
-            return next.run();
-          });
+      app.use((ctx, next) -> {
+        ctx.identity(SecurityIdentity.of("ada"));
+        return next.run();
+      });
       app.get(
           "/escalate",
           ctx -> {
@@ -70,11 +68,10 @@ class IdentityTest {
   @Test
   void routerAnswersRunGlobalMiddlewareWithAnIdentitySlotToo() throws Exception {
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            ctx.identity(SecurityIdentity.of("ada"));
-            return next.run().withHeader("X-Principal", ctx.identity().orElseThrow().principal());
-          });
+      app.use((ctx, next) -> {
+        ctx.identity(SecurityIdentity.of("ada"));
+        return next.run().withHeader("X-Principal", ctx.identity().orElseThrow().principal());
+      });
       app.get("/known", ctx -> "ok");
       app.start();
       assertThat(app.handle(Request.get("/unknown")).headers()).containsEntry("X-Principal", "ada");

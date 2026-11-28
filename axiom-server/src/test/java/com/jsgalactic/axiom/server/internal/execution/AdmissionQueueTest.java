@@ -57,14 +57,13 @@ class AdmissionQueueTest {
       var first = f.dispatcher.submit(context(), () -> "first");
       first
           .result()
-          .thenAccept(
-              v -> {
-                try {
-                  followUp.set(f.dispatcher.submit(context(), () -> "second"));
-                } catch (RuntimeException rejected) {
-                  followUp.set(rejected);
-                }
-              });
+          .thenAccept(v -> {
+            try {
+              followUp.set(f.dispatcher.submit(context(), () -> "second"));
+            } catch (RuntimeException rejected) {
+              followUp.set(rejected);
+            }
+          });
       f.workers.run(0);
       assertThat(followUp.get()).isInstanceOf(RequestDispatcher.Task.class);
       f.workers.run(0);
@@ -448,14 +447,13 @@ class AdmissionQueueTest {
       var callback =
           queued
               .result()
-              .handle(
-                  (value, failure) -> {
-                    try (var observer = Executors.newVirtualThreadPerTaskExecutor()) {
-                      return observer.submit(f.dispatcher::snapshot).get(5, TimeUnit.SECONDS);
-                    } catch (Exception problem) {
-                      throw new AssertionError(problem);
-                    }
-                  });
+              .handle((value, failure) -> {
+                try (var observer = Executors.newVirtualThreadPerTaskExecutor()) {
+                  return observer.submit(f.dispatcher::snapshot).get(5, TimeUnit.SECONDS);
+                } catch (Exception problem) {
+                  throw new AssertionError(problem);
+                }
+              });
       queued.cancel();
       assertThat(callback.toCompletableFuture().join().queued()).isZero();
     }

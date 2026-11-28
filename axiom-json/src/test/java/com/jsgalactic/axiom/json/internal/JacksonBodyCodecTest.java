@@ -293,13 +293,12 @@ class JacksonBodyCodecTest {
         Item.class,
         "malformed_json",
         null);
-    assertThatThrownBy(
-            () ->
-                codec.decode(
-                    ByteBuffer.wrap(utf8("xx{\"name\":\"a\",\"name\":\"b\",\"quantity\":1}"))
-                        .position(2)
-                        .asReadOnlyBuffer(),
-                    Item.class))
+    assertThatThrownBy(() ->
+            codec.decode(
+                ByteBuffer.wrap(utf8("xx{\"name\":\"a\",\"name\":\"b\",\"quantity\":1}"))
+                    .position(2)
+                    .asReadOnlyBuffer(),
+                Item.class))
         .isInstanceOfSatisfying(
             DecodeException.class,
             failure -> assertThat(failure.code()).isEqualTo("duplicate_field"));

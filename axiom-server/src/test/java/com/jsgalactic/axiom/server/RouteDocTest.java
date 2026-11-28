@@ -85,17 +85,13 @@ class RouteDocTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> empty.pathParam("bad name", String.class, null));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                empty
-                    .queryParam("a", int.class, null, true)
-                    .queryParam("a", int.class, null, true));
+        .isThrownBy(() ->
+            empty.queryParam("a", int.class, null, true).queryParam("a", int.class, null, true));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                empty
-                    .headerParam("X-A", String.class, null, true)
-                    .headerParam("x-a", String.class, null, true));
+        .isThrownBy(() ->
+            empty
+                .headerParam("X-A", String.class, null, true)
+                .headerParam("x-a", String.class, null, true));
     var doc =
         RouteDoc.summary("s")
             .description("d")

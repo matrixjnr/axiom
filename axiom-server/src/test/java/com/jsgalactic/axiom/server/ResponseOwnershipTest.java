@@ -20,13 +20,12 @@ class ResponseOwnershipTest {
   void mutationsAfterJsonReturnsCannotChangeTheResponse() throws Exception {
     var source = new StringBuilder("before");
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            var response = next.run();
-            source.append("-middleware");
-            ((byte[]) response.body())[0] = 'X';
-            return response;
-          });
+      app.use((ctx, next) -> {
+        var response = next.run();
+        source.append("-middleware");
+        ((byte[]) response.body())[0] = 'X';
+        return response;
+      });
       app.get(
           "/",
           ctx -> {

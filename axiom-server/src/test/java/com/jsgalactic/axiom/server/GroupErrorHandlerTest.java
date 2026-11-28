@@ -115,13 +115,12 @@ class GroupErrorHandlerTest {
   @Test
   void appliesToExceptionsOfGlobalMiddlewareForTheGroupsRoutesOnly() throws Exception {
     try (var app = Axiom.create()) {
-      app.use(
-          (ctx, next) -> {
-            if (ctx.header("X-Fail").isPresent()) {
-              throw new IllegalStateException();
-            }
-            return next.run();
-          });
+      app.use((ctx, next) -> {
+        if (ctx.header("X-Fail").isPresent()) {
+          throw new IllegalStateException();
+        }
+        return next.run();
+      });
       app.group(
           "/g",
           g -> {
@@ -175,21 +174,19 @@ class GroupErrorHandlerTest {
   @Test
   void aGroupThatFailsToConfigureTakesItsHandlersWithIt() throws Exception {
     try (var app = Axiom.create()) {
-      assertThatThrownBy(
-              () ->
-                  app.group(
-                      "/api",
-                      api -> {
-                        api.error(
-                            IllegalStateException.class,
-                            (ctx, failure) -> Response.of(409, "partial"));
-                        api.get(
-                            "/fail",
-                            ctx -> {
-                              throw new IllegalStateException();
-                            });
-                        throw new UnsupportedOperationException("configuration failed");
-                      }))
+      assertThatThrownBy(() ->
+              app.group(
+                  "/api",
+                  api -> {
+                    api.error(
+                        IllegalStateException.class, (ctx, failure) -> Response.of(409, "partial"));
+                    api.get(
+                        "/fail",
+                        ctx -> {
+                          throw new IllegalStateException();
+                        });
+                    throw new UnsupportedOperationException("configuration failed");
+                  }))
           .isInstanceOf(UnsupportedOperationException.class);
       app.group(
           "/api",
@@ -216,11 +213,9 @@ class GroupErrorHandlerTest {
             leaked.set(g);
             g.error(IllegalStateException.class, (ctx, failure) -> Response.of(409, "g"));
             assertThatIllegalArgumentException()
-                .isThrownBy(
-                    () ->
-                        g.error(
-                            IllegalStateException.class,
-                            (ctx, failure) -> Response.of(409, "again")));
+                .isThrownBy(() ->
+                    g.error(
+                        IllegalStateException.class, (ctx, failure) -> Response.of(409, "again")));
             // The same class in a nested group is a different scope.
             g.group(
                 "/n",

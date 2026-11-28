@@ -65,15 +65,14 @@ class FanOutApiTest {
   @Test
   void preservesDownstreamTimeout() {
     var failure = new TimeoutException("downstream timeout");
-    assertThatThrownBy(
-            () ->
-                FanOutApi.fetch(
-                    "42",
-                    execution(),
-                    (id, budget) -> {
-                      throw failure;
-                    },
-                    (id, budget) -> "ok"))
+    assertThatThrownBy(() ->
+            FanOutApi.fetch(
+                "42",
+                execution(),
+                (id, budget) -> {
+                  throw failure;
+                },
+                (id, budget) -> "ok"))
         .isSameAs(failure);
   }
 
@@ -95,18 +94,17 @@ class FanOutApiTest {
     var failure = new AtomicReference<Throwable>();
     var parent =
         Thread.ofVirtual()
-            .start(
-                () -> {
-                  try {
-                    assertThatThrownBy(() -> FanOutApi.fetch("42", execution(), blocked, blocked))
-                        .isInstanceOf(InterruptedException.class);
-                    assertThat(stopped.getCount()).isZero();
-                  } catch (Throwable thrown) {
-                    failure.set(thrown);
-                  } finally {
-                    parentDone.countDown();
-                  }
-                });
+            .start(() -> {
+              try {
+                assertThatThrownBy(() -> FanOutApi.fetch("42", execution(), blocked, blocked))
+                    .isInstanceOf(InterruptedException.class);
+                assertThat(stopped.getCount()).isZero();
+              } catch (Throwable thrown) {
+                failure.set(thrown);
+              } finally {
+                parentDone.countDown();
+              }
+            });
     try {
       assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
       parent.interrupt();

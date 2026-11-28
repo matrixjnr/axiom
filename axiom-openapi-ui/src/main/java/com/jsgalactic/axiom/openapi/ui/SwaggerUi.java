@@ -199,16 +199,15 @@ public final class SwaggerUi {
 
   private static boolean matches(Context ctx, String etag) {
     return ctx.header("If-None-Match")
-        .map(
-            value -> {
-              for (var candidate : value.split(",")) {
-                var trimmed = candidate.trim();
-                if (trimmed.equals("*") || trimmed.equals(etag)) {
-                  return true;
-                }
-              }
-              return false;
-            })
+        .map(value -> {
+          for (var candidate : value.split(",")) {
+            var trimmed = candidate.trim();
+            if (trimmed.equals("*") || trimmed.equals(etag)) {
+              return true;
+            }
+          }
+          return false;
+        })
         .orElse(false);
   }
 

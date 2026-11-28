@@ -47,10 +47,9 @@ class RejectionObserverListenerTest {
 
   private void serve(RejectionObserver observer) throws Exception {
     app = Axiom.create();
-    app.use(
-        (ctx, next) -> {
-          throw new AssertionError("Middleware must not see listener rejections");
-        });
+    app.use((ctx, next) -> {
+      throw new AssertionError("Middleware must not see listener rejections");
+    });
     app.get(
         "/boom",
         ctx -> {
@@ -96,12 +95,11 @@ class RejectionObserverListenerTest {
       // The observer is called before the response is written, so it has run by now.
       assertThat(seen)
           .singleElement()
-          .satisfies(
-              one -> {
-                assertThat(one.status()).isEqualTo(c[1]);
-                assertThat(one.code()).isEqualTo(c[2]);
-                assertThat(one.requestId()).isEqualTo(reply.headers().get("X-Request-ID"));
-              });
+          .satisfies(one -> {
+            assertThat(one.status()).isEqualTo(c[1]);
+            assertThat(one.code()).isEqualTo(c[2]);
+            assertThat(one.requestId()).isEqualTo(reply.headers().get("X-Request-ID"));
+          });
     }
   }
 
@@ -132,20 +130,18 @@ class RejectionObserverListenerTest {
     assertThat(boom.status()).isEqualTo(500);
     assertThat(seen)
         .singleElement()
-        .satisfies(
-            one -> {
-              assertThat(one.code()).isEqualTo("internal_server_error");
-              assertThat(one.requestId()).isEqualTo(boom.headers().get("X-Request-ID"));
-              assertThat(one.toString()).doesNotContain("secret");
-            });
+        .satisfies(one -> {
+          assertThat(one.code()).isEqualTo("internal_server_error");
+          assertThat(one.requestId()).isEqualTo(boom.headers().get("X-Request-ID"));
+          assertThat(one.toString()).doesNotContain("secret");
+        });
   }
 
   @Test
   void anObserverThatThrowsNeverChangesTheResponse() throws Exception {
-    serve(
-        (status, code, requestId) -> {
-          throw new IllegalStateException("observer bug");
-        });
+    serve((status, code, requestId) -> {
+      throw new IllegalStateException("observer bug");
+    });
     var reply = request("GET / HTTP/1.1\r\n\r\n");
     assertThat(reply.status()).isEqualTo(400);
     assertThat(reply.body()).contains("\"code\":\"bad_request\"").doesNotContain("observer");

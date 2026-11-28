@@ -254,10 +254,8 @@ class JwtAlgorithmsTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> builder.publicKey(JwsAlgorithm.PS256, Tokens.ED25519.getPublic()));
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                builder.publicKey(
-                    JwsAlgorithm.PS512, Tokens.generate("RSA", 1024, null).getPublic()));
+        .isThrownBy(() ->
+            builder.publicKey(JwsAlgorithm.PS512, Tokens.generate("RSA", 1024, null).getPublic()));
     assertThatIllegalArgumentException()
         .isThrownBy(() -> builder.publicKey(JwsAlgorithm.EdDSA, Tokens.RSA.getPublic()));
     assertThatIllegalArgumentException()

@@ -98,13 +98,12 @@ public final class Rules<T> implements Validator<T> {
     var path = FieldPath.root().property(name);
     Objects.requireNonNull(accessor, "accessor");
     Objects.requireNonNull(validator, "validator");
-    return add(
-        (value, out) -> {
-          V nested = accessor.apply(value);
-          if (nested != null) {
-            out.addAll(path, validator.validate(nested));
-          }
-        });
+    return add((value, out) -> {
+      V nested = accessor.apply(value);
+      if (nested != null) {
+        out.addAll(path, validator.validate(nested));
+      }
+    });
   }
 
   /**
@@ -164,23 +163,22 @@ public final class Rules<T> implements Validator<T> {
     var path = FieldPath.root().property(name);
     Objects.requireNonNull(accessor, "accessor");
     Objects.requireNonNull(validator, "validator");
-    return add(
-        (value, out) -> {
-          var elements = accessor.apply(value);
-          if (elements == null) {
-            return;
-          }
-          var index = 0;
-          for (E element : elements) {
-            if (out.isFull()) {
-              return;
-            }
-            var elementPath = path.index(index++);
-            if (element != null) {
-              out.addAll(elementPath, validator.validate(element));
-            }
-          }
-        });
+    return add((value, out) -> {
+      var elements = accessor.apply(value);
+      if (elements == null) {
+        return;
+      }
+      var index = 0;
+      for (E element : elements) {
+        if (out.isFull()) {
+          return;
+        }
+        var elementPath = path.index(index++);
+        if (element != null) {
+          out.addAll(elementPath, validator.validate(element));
+        }
+      }
+    });
   }
 
   /**

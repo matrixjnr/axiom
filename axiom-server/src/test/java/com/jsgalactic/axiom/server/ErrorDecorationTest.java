@@ -142,13 +142,12 @@ class ErrorDecorationTest {
   void skipsMiddlewareThatWereNeverEntered() throws Exception {
     try (var app = Axiom.create()) {
       app.use(tracing("global"));
-      app.use(
-          (ctx, next) -> {
-            if (ctx.header("X-Deny").isPresent()) {
-              throw new ForbiddenException();
-            }
-            return next.run();
-          });
+      app.use((ctx, next) -> {
+        if (ctx.header("X-Deny").isPresent()) {
+          throw new ForbiddenException();
+        }
+        return next.run();
+      });
       app.group(
           "/api",
           api -> {
@@ -173,14 +172,13 @@ class ErrorDecorationTest {
   void followsTheStackWhenAMiddlewareCatchesAndThrowsAnotherException() throws Exception {
     try (var app = Axiom.create()) {
       app.use(tracing("outer"));
-      app.use(
-          (ctx, next) -> {
-            try {
-              return next.run();
-            } catch (ConflictException recovered) {
-              return Response.of(202, "recovered");
-            }
-          });
+      app.use((ctx, next) -> {
+        try {
+          return next.run();
+        } catch (ConflictException recovered) {
+          return Response.of(202, "recovered");
+        }
+      });
       app.use(tracing("inner"));
       app.get(
           "/recovered",
@@ -193,15 +191,14 @@ class ErrorDecorationTest {
     }
     try (var app = Axiom.create()) {
       app.use(tracing("outer"));
-      app.use(
-          (ctx, next) -> {
-            try {
-              next.run();
-            } catch (ConflictException recovered) {
-              // Recovered, then fails differently, from this middleware's own frame.
-            }
-            throw new ForbiddenException();
-          });
+      app.use((ctx, next) -> {
+        try {
+          next.run();
+        } catch (ConflictException recovered) {
+          // Recovered, then fails differently, from this middleware's own frame.
+        }
+        throw new ForbiddenException();
+      });
       app.use(tracing("inner"));
       app.get(
           "/rethrown",
@@ -215,14 +212,13 @@ class ErrorDecorationTest {
     calls.clear();
     try (var app = Axiom.create()) {
       app.use(tracing("outer"));
-      app.use(
-          (ctx, next) -> {
-            try {
-              return next.run();
-            } catch (ConflictException translated) {
-              throw new ForbiddenException();
-            }
-          });
+      app.use((ctx, next) -> {
+        try {
+          return next.run();
+        } catch (ConflictException translated) {
+          throw new ForbiddenException();
+        }
+      });
       app.use(tracing("inner"));
       app.get(
           "/translated",
@@ -256,10 +252,9 @@ class ErrorDecorationTest {
   void decoratesExceptionsOfCustomRouterAnswerHandlersWithGlobalMiddleware() throws Exception {
     try (var app = Axiom.create()) {
       app.use(everywhere("X-Frame-Options", "DENY"));
-      app.notFound(
-          ctx -> {
-            throw new ConflictException();
-          });
+      app.notFound(ctx -> {
+        throw new ConflictException();
+      });
       app.start();
       var response = app.handle(Request.get("/nothing"));
       assertThat(response.status()).isEqualTo(409);

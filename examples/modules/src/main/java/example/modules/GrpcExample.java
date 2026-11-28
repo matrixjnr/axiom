@@ -80,11 +80,10 @@ public final class GrpcExample {
       return ServerServiceDefinition.builder("example.Echo")
           .addMethod(
               ECHO,
-              ServerCalls.asyncUnaryCall(
-                  (request, observer) -> {
-                    observer.onNext("echo:" + request);
-                    observer.onCompleted();
-                  }))
+              ServerCalls.asyncUnaryCall((request, observer) -> {
+                observer.onNext("echo:" + request);
+                observer.onCompleted();
+              }))
           .build();
     }
   }

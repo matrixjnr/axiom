@@ -225,17 +225,16 @@ public final class Grpc implements AutoCloseable {
     current.shutdown();
     Thread.ofVirtual()
         .name("axiom-grpc-drain")
-        .start(
-            () -> {
-              try {
-                if (!current.awaitTermination(drainGrace.toMillis(), TimeUnit.MILLISECONDS)) {
-                  current.shutdownNow();
-                }
-              } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                current.shutdownNow();
-              }
-            });
+        .start(() -> {
+          try {
+            if (!current.awaitTermination(drainGrace.toMillis(), TimeUnit.MILLISECONDS)) {
+              current.shutdownNow();
+            }
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            current.shutdownNow();
+          }
+        });
   }
 
   private static SslContext sslContext(TlsOptions options) throws TlsConfigurationException {

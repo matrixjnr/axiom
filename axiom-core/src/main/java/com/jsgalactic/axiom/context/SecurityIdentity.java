@@ -60,14 +60,13 @@ public record SecurityIdentity(
       throw new IllegalArgumentException(
           "An identity has at most " + MAX_ATTRIBUTES + " attributes");
     }
-    attributes.forEach(
-        (name, value) -> {
-          requireName(name, "attribute name");
-          if (!VALUE.matcher(value).matches()) {
-            throw new IllegalArgumentException(
-                "An attribute value has at most 2048 characters and no control characters");
-          }
-        });
+    attributes.forEach((name, value) -> {
+      requireName(name, "attribute name");
+      if (!VALUE.matcher(value).matches()) {
+        throw new IllegalArgumentException(
+            "An attribute value has at most 2048 characters and no control characters");
+      }
+    });
   }
 
   /**

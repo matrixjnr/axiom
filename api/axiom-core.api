@@ -1388,6 +1388,8 @@ public final class com.jsgalactic.axiom.lifecycle.TransportKind extends java.lan
     descriptor: Lcom/jsgalactic/axiom/lifecycle/TransportKind;
   public static final com.jsgalactic.axiom.lifecycle.TransportKind EPOLL;
     descriptor: Lcom/jsgalactic/axiom/lifecycle/TransportKind;
+  public static final com.jsgalactic.axiom.lifecycle.TransportKind IO_URING;
+    descriptor: Lcom/jsgalactic/axiom/lifecycle/TransportKind;
   public static final com.jsgalactic.axiom.lifecycle.TransportKind KQUEUE;
     descriptor: Lcom/jsgalactic/axiom/lifecycle/TransportKind;
   public static final com.jsgalactic.axiom.lifecycle.TransportKind NIO;

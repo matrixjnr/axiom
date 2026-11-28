@@ -41,17 +41,16 @@ class BodyReaderTest {
     reader.pause();
     var handler =
         Thread.ofVirtual()
-            .start(
-                () -> {
-                  entered.countDown();
-                  try {
-                    result.set(reader.read(new byte[4]));
-                  } catch (Exception failure) {
-                    throw new RuntimeException(failure);
-                  } finally {
-                    finished.countDown();
-                  }
-                });
+            .start(() -> {
+              entered.countDown();
+              try {
+                result.set(reader.read(new byte[4]));
+              } catch (Exception failure) {
+                throw new RuntimeException(failure);
+              } finally {
+                finished.countDown();
+              }
+            });
     assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
     assertThat(finished.await(50, TimeUnit.MILLISECONDS)).as("read waits while paused").isFalse();
     assertThat(reader.paused()).isTrue();
@@ -71,15 +70,14 @@ class BodyReaderTest {
     reader.pause();
     var handler =
         Thread.ofVirtual()
-            .start(
-                () -> {
-                  entered.countDown();
-                  try {
-                    reader.read(new byte[4]);
-                  } catch (Throwable thrown) {
-                    failure.set(thrown);
-                  }
-                });
+            .start(() -> {
+              entered.countDown();
+              try {
+                reader.read(new byte[4]);
+              } catch (Throwable thrown) {
+                failure.set(thrown);
+              }
+            });
     assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
     reader.close();
     handler.join(30_000);

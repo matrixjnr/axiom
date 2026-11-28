@@ -69,19 +69,18 @@ class GroupAtomicityTest {
       assertThat(app.routes()).extracting(Route::path).containsExactly("/api/kept");
 
       assertThatIllegalArgumentException()
-          .isThrownBy(
-              () ->
-                  app.group(
-                      "/outer",
-                      outer -> {
-                        outer.get("/a", ctx -> "a");
-                        outer.group(
-                            "/inner",
-                            inner -> {
-                              inner.get("/b", ctx -> "b");
-                              throw new IllegalArgumentException("uncaught");
-                            });
-                      }));
+          .isThrownBy(() ->
+              app.group(
+                  "/outer",
+                  outer -> {
+                    outer.get("/a", ctx -> "a");
+                    outer.group(
+                        "/inner",
+                        inner -> {
+                          inner.get("/b", ctx -> "b");
+                          throw new IllegalArgumentException("uncaught");
+                        });
+                  }));
       assertThat(app.routes()).extracting(Route::path).containsExactly("/api/kept");
     }
   }
@@ -94,25 +93,24 @@ class GroupAtomicityTest {
     try (var app = Axiom.create()) {
       var configuring =
           Thread.ofPlatform()
-              .start(
-                  () -> {
-                    try {
-                      app.group(
-                          "/admin",
-                          admin -> {
-                            admin.get("/users", ctx -> "secret");
-                            entered.countDown();
-                            try {
-                              assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
-                            } catch (InterruptedException interrupted) {
-                              Thread.currentThread().interrupt();
-                            }
-                            admin.use(DENY_ALL);
-                          });
-                    } catch (Throwable unexpected) {
-                      failure.set(unexpected);
-                    }
-                  });
+              .start(() -> {
+                try {
+                  app.group(
+                      "/admin",
+                      admin -> {
+                        admin.get("/users", ctx -> "secret");
+                        entered.countDown();
+                        try {
+                          assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
+                        } catch (InterruptedException interrupted) {
+                          Thread.currentThread().interrupt();
+                        }
+                        admin.use(DENY_ALL);
+                      });
+                } catch (Throwable unexpected) {
+                  failure.set(unexpected);
+                }
+              });
       assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
       assertThatIllegalStateException().isThrownBy(app::start).withMessageContaining("route group");
       assertThat(app.state()).isEqualTo(Application.State.CONFIGURING);
