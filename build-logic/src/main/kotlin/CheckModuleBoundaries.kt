@@ -34,6 +34,7 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-openapi-ui" to setOf("axiom-test"),
                 "axiom-grpc" to setOf("axiom-test"),
                 "axiom-graphql" to setOf("axiom-test", "axiom-http"),
+                "axiom-jdbc" to setOf("axiom-test", "axiom-http"),
                 "axiom-jta" to setOf("axiom-test")
             )
             val testOnlyModules = ModuleBoundaries.testOnlyModules
