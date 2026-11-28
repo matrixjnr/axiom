@@ -22,6 +22,7 @@ val descriptions = mapOf(
     "axiom-otel" to "Axiom OpenTelemetry adapter: SERVER spans from W3C trace context and Metrics on OTel instruments, using the API only.",
     "axiom-openapi" to "Axiom OpenAPI 3.1 and Swagger 2.0 document generation from route metadata, using only the JDK.",
     "axiom-openapi-ui" to "Axiom Swagger UI served from the application itself, with the UI files packaged statically (no CDN).",
+    "axiom-jdbc" to "Axiom JDK-only gate that bounds concurrent JDBC work around an application-owned DataSource.",
     "axiom-bom" to "Axiom bill of materials aligning the versions of all Axiom modules."
 )
 val repositoryUrl = "https://github.com/matrixjnr/axiom"

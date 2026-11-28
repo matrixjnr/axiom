@@ -45,7 +45,7 @@ most 1024 distinct endpoints and pools later ones under `other`.
 | --- | --- | --- | --- |
 | `axiom.http.requests` | counter | `method`, `route`, `status_class` | Finished requests. `status_class` is `1xx`..`5xx`, `cancelled` (client gone or listener closed) or `unknown` |
 | `axiom.http.request.duration` | timer | `method`, `route` | Time from submission to the final outcome, including queue wait |
-| `axiom.admission.rejected` | counter | `method`, `route`, `reason` | `capacity`, `shutdown`, `executor`, `queue_timeout` or `stream_capacity` (a full aggregate or route stream lane). Refusals at submission and full stream lanes also count as `5xx` requests |
+| `axiom.admission.rejected` | counter | `method`, `route`, `reason` | `capacity`, `shutdown`, `executor`, `queue_timeout`, `stream_capacity` (a full aggregate or route stream lane) or `db_capacity` (the optional [JDBC](jdbc.md) gate is full). Refusals at submission and full stream lanes also count as `5xx` requests |
 | `axiom.admission.queue.wait` | timer | `method`, `route` | Time a request spent queued, whether it was promoted, expired or cancelled |
 | `axiom.admission.active` | gauge | none | Reserved or running executions |
 | `axiom.admission.queued` | gauge | none | Requests waiting for capacity |
@@ -140,6 +140,10 @@ metric has help text, then `# TYPE`; dots become underscores, counters end in `_
 registry reports on itself with `axiom_metrics_series` (gauge: stored series) and
 `axiom_metrics_dropped_series_total` (counter: series refused at the limit), so a full registry is
 visible and can be alerted on. Reads are not an atomic snapshot across series.
+
+The opt-in [JDBC](jdbc.md) module adds gate and connection-checkout series to the same registry,
+with the fixed `db_capacity` rejection reason listed above and one bounded `name` tag on the
+connection series.
 
 ## OpenTelemetry (`axiom-otel`)
 

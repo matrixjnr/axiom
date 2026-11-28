@@ -185,6 +185,9 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 - **GraphQL (opt-in)**: `axiom-graphql` adapts an application-owned graphql-java runtime to a
   route, with bounded requests, depth and complexity limits, per-request DataLoaders and opaque
   problem responses ([GraphQL](docs/graphql.md)).
+- **JDBC (opt-in)**: `axiom-jdbc` bounds concurrent database work around an application-owned
+  `DataSource`, with per-route caps, a bounded wait, counted checkouts and a readiness probe
+  ([JDBC](docs/jdbc.md)).
 
 ## Not yet
 
@@ -217,6 +220,7 @@ is a record of what shipped. Remaining milestones are in the [roadmap, #18](http
 | `axiom-openapi-ui` | `axiom-openapi-ui` | Swagger UI served from the application, files packaged statically, no CDN (opt-in) |
 | `axiom-grpc` | `axiom-grpc` | Generated gRPC services on their own listener, with Axiom lifecycle and health hooks (opt-in) |
 | `axiom-graphql` | `axiom-graphql` | GraphQL query/mutation HTTP adapter over graphql-java, opt-in per route (opt-in) |
+| `axiom-jdbc` | `axiom-jdbc` | JDK-only gate bounding JDBC concurrency around an application-owned DataSource (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |
@@ -402,7 +406,8 @@ Details are in [build decisions](docs/build.md).
   [request bodies and JSON](docs/bodies.md), [streaming and server-sent events](docs/streaming.md),
   [errors](docs/errors.md),
   [middleware](docs/middleware.md), [validation](docs/validation.md), [security](docs/security.md),
-  [observability](docs/observability.md), [OpenAPI and Swagger](docs/openapi.md)
+  [observability](docs/observability.md), [OpenAPI and Swagger](docs/openapi.md),
+  [GraphQL](docs/graphql.md), [gRPC](docs/grpc.md), [JDBC](docs/jdbc.md)
 - [HTTP listeners](docs/http.md), [TLS](docs/tls.md), [execution and deadlines](docs/execution.md),
   [admission](docs/admission.md), [benchmarks](docs/benchmarks.md)
 - [Build decisions](docs/build.md), [releasing](docs/releasing.md),
