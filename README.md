@@ -195,7 +195,7 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 
 ## Not yet
 
-- HTTP/2 and WebSocket
+- WebSocket
 - OAuth flows (bearer JWT authentication and JWKS rotation are available)
 - io_uring (epoll and kqueue are available as optional native transports)
 - Publication to Maven Central
