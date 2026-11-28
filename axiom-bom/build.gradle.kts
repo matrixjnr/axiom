@@ -23,5 +23,6 @@ dependencies {
         api(project(":axiom-grpc"))
         api(project(":axiom-graphql"))
         api(project(":axiom-jdbc"))
+        api(project(":axiom-jta"))
     }
 }

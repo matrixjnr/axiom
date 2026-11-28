@@ -16,5 +16,6 @@ include("axiom-openapi", "axiom-openapi-ui")
 include("axiom-grpc")
 include("axiom-graphql")
 include("axiom-jdbc")
+include("axiom-jta")
 include("examples:hello", "examples:readme", "examples:rest-api", "examples:browser-app", "examples:openapi",
     "benchmarks:http")

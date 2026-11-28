@@ -32,7 +32,9 @@ object ModuleBoundaries {
         // Thin GraphQL HTTP adapter; graphql-java is confined to this module and core stays JDK-only.
         "axiom-graphql" to setOf("axiom-core"),
         // Bounds database concurrency around an application-owned DataSource; java.sql is JDK-only.
-        "axiom-jdbc" to setOf("axiom-core")
+        "axiom-jdbc" to setOf("axiom-core"),
+        // Transaction boundaries around handlers; the JTA API stays inside this opt-in adapter.
+        "axiom-jta" to setOf("axiom-core")
     )
 
     /** Modules that exist only to run tests and are never published. */

@@ -34,7 +34,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-openapi-ui" to setOf("axiom-test"),
                 "axiom-grpc" to setOf("axiom-test"),
                 "axiom-graphql" to setOf("axiom-test", "axiom-http"),
-                "axiom-jdbc" to setOf("axiom-test", "axiom-http")
+                "axiom-jdbc" to setOf("axiom-test", "axiom-http"),
+                "axiom-jta" to setOf("axiom-test")
             )
             val testOnlyModules = ModuleBoundaries.testOnlyModules
             // Third-party production dependencies are confined to the module that adapts them.
@@ -46,7 +47,8 @@ abstract class CheckModuleBoundaries : DefaultTask() {
                 "axiom-otel" to setOf("io.opentelemetry"),
                 "axiom-metrics-micrometer" to setOf("io.micrometer"),
                 "axiom-grpc" to setOf("io.grpc", "com.google.protobuf"),
-                "axiom-graphql" to setOf("com.graphql-java")
+                "axiom-graphql" to setOf("com.graphql-java"),
+                "axiom-jta" to setOf("jakarta.transaction")
             )
             val moduleAllowed = allowed[module]
                 ?: throw GradleException(

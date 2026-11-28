@@ -1,0 +1,126 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.jta.Jta implements com.jsgalactic.axiom.jta.spi.JtaTransactionLookup {
+  public boolean active(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public boolean rollbackOnly(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public com.jsgalactic.axiom.context.Middleware transaction();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public java.lang.String status(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Ljava/lang/String;
+  public static com.jsgalactic.axiom.jta.Jta$Builder builder(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Lcom/jsgalactic/axiom/jta/Jta$Builder;
+  public static java.util.Optional<com.jsgalactic.axiom.jta.TransactionContext> context(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Ljava/util/Optional;
+}
+
+public static final class com.jsgalactic.axiom.jta.Jta$Builder {
+  public com.jsgalactic.axiom.jta.Jta build();
+    descriptor: ()Lcom/jsgalactic/axiom/jta/Jta;
+  public com.jsgalactic.axiom.jta.Jta$Builder commitWhen(java.util.function.Predicate<java.lang.Throwable>);
+    descriptor: (Ljava/util/function/Predicate;)Lcom/jsgalactic/axiom/jta/Jta$Builder;
+  public com.jsgalactic.axiom.jta.Jta$Builder noRollbackOn(java.lang.Class<? extends java.lang.Throwable>);
+    descriptor: (Ljava/lang/Class;)Lcom/jsgalactic/axiom/jta/Jta$Builder;
+  public com.jsgalactic.axiom.jta.Jta$Builder problemStatus(com.jsgalactic.axiom.jta.TransactionFailure, int);
+    descriptor: (Lcom/jsgalactic/axiom/jta/TransactionFailure;I)Lcom/jsgalactic/axiom/jta/Jta$Builder;
+  public com.jsgalactic.axiom.jta.Jta$Builder rollbackOn(java.lang.Class<? extends java.lang.Throwable>);
+    descriptor: (Ljava/lang/Class;)Lcom/jsgalactic/axiom/jta/Jta$Builder;
+  public com.jsgalactic.axiom.jta.Jta$Builder rollbackWhen(java.util.function.Predicate<java.lang.Throwable>);
+    descriptor: (Ljava/util/function/Predicate;)Lcom/jsgalactic/axiom/jta/Jta$Builder;
+  public com.jsgalactic.axiom.jta.Jta$Builder timeout(java.time.Duration);
+    descriptor: (Ljava/time/Duration;)Lcom/jsgalactic/axiom/jta/Jta$Builder;
+}
+
+public final class com.jsgalactic.axiom.jta.JtaLookupService implements com.jsgalactic.axiom.jta.spi.JtaTransactionLookup {
+  public boolean active(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public boolean rollbackOnly(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public com.jsgalactic.axiom.jta.JtaLookupService();
+    descriptor: ()V
+  public java.lang.String status(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Ljava/lang/String;
+}
+
+public final class com.jsgalactic.axiom.jta.TransactionContext {
+  public boolean active();
+    descriptor: ()Z
+  public boolean rollbackOnly();
+    descriptor: ()Z
+  public com.jsgalactic.axiom.jta.TransactionOutcome outcome();
+    descriptor: ()Lcom/jsgalactic/axiom/jta/TransactionOutcome;
+  public com.jsgalactic.axiom.jta.TransactionStatus status();
+    descriptor: ()Lcom/jsgalactic/axiom/jta/TransactionStatus;
+  public java.util.Optional<java.time.Duration> timeout();
+    descriptor: ()Ljava/util/Optional;
+  public static java.util.Optional<com.jsgalactic.axiom.jta.TransactionContext> from(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Ljava/util/Optional;
+  public void setRollbackOnly();
+    descriptor: ()V
+}
+
+public final class com.jsgalactic.axiom.jta.TransactionFailure extends java.lang.Enum<com.jsgalactic.axiom.jta.TransactionFailure> {
+  public static com.jsgalactic.axiom.jta.TransactionFailure valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static com.jsgalactic.axiom.jta.TransactionFailure[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static final com.jsgalactic.axiom.jta.TransactionFailure BEGIN;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static final com.jsgalactic.axiom.jta.TransactionFailure COMMIT;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static final com.jsgalactic.axiom.jta.TransactionFailure INACTIVE;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static final com.jsgalactic.axiom.jta.TransactionFailure MARK;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static final com.jsgalactic.axiom.jta.TransactionFailure RESUME;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static final com.jsgalactic.axiom.jta.TransactionFailure ROLLBACK;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static final com.jsgalactic.axiom.jta.TransactionFailure SUSPEND;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionFailure;
+  public static final com.jsgalactic.axiom.jta.TransactionFailure TIMEOUT;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionFailure;
+}
+
+public final class com.jsgalactic.axiom.jta.TransactionOutcome extends java.lang.Enum<com.jsgalactic.axiom.jta.TransactionOutcome> {
+  public static com.jsgalactic.axiom.jta.TransactionOutcome valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/jta/TransactionOutcome;
+  public static com.jsgalactic.axiom.jta.TransactionOutcome[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/jta/TransactionOutcome;
+  public static final com.jsgalactic.axiom.jta.TransactionOutcome COMMITTED;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionOutcome;
+  public static final com.jsgalactic.axiom.jta.TransactionOutcome FAILED;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionOutcome;
+  public static final com.jsgalactic.axiom.jta.TransactionOutcome PENDING;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionOutcome;
+  public static final com.jsgalactic.axiom.jta.TransactionOutcome ROLLED_BACK;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionOutcome;
+}
+
+public final class com.jsgalactic.axiom.jta.TransactionStatus extends java.lang.Enum<com.jsgalactic.axiom.jta.TransactionStatus> {
+  public static com.jsgalactic.axiom.jta.TransactionStatus valueOf(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/jta/TransactionStatus;
+  public static com.jsgalactic.axiom.jta.TransactionStatus[] values();
+    descriptor: ()[Lcom/jsgalactic/axiom/jta/TransactionStatus;
+  public static final com.jsgalactic.axiom.jta.TransactionStatus ACTIVE;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionStatus;
+  public static final com.jsgalactic.axiom.jta.TransactionStatus COMMITTED;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionStatus;
+  public static final com.jsgalactic.axiom.jta.TransactionStatus INACTIVE;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionStatus;
+  public static final com.jsgalactic.axiom.jta.TransactionStatus MARKED_ROLLBACK;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionStatus;
+  public static final com.jsgalactic.axiom.jta.TransactionStatus ROLLED_BACK;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionStatus;
+  public static final com.jsgalactic.axiom.jta.TransactionStatus UNKNOWN;
+    descriptor: Lcom/jsgalactic/axiom/jta/TransactionStatus;
+}
+
+public interface com.jsgalactic.axiom.jta.spi.JtaTransactionLookup {
+  public abstract boolean active(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public abstract boolean rollbackOnly(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public abstract java.lang.String status(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Ljava/lang/String;
+}
