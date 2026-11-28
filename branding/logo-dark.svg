@@ -1,8 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 432 128" role="img" aria-labelledby="title">
   <title id="title">Axiom</title>
   <rect width="128" height="128" rx="28" fill="#102A43"/>
-  <path d="M24 100 58 28h12l34 72H85L64 53l-21 47Z" fill="#F0F7FA"/>
-  <path d="m49 77-8 17h46l-8-17Z" fill="#32D6BC"/>
+  <g fill="none" stroke-width="10" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M26 44 64 63 102 44" stroke="#32D6BC"/>
+    <path d="M26 64 64 83 102 64" stroke="#F0F7FA"/>
+    <path d="M26 84 64 103 102 84" stroke="#F0F7FA" opacity="0.55"/>
+  </g>
   <g fill="none" stroke="#F0F7FA" stroke-width="8" stroke-linecap="square" stroke-linejoin="miter">
     <path d="m160 88 18-48h4l18 48m-32-14h24"/>
     <path d="m219 40 32 48m0-48-32 48"/>
