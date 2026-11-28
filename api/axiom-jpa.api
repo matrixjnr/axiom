@@ -1,0 +1,40 @@
+# Axiom API signatures; generated with JDK 21 javap.
+public final class com.jsgalactic.axiom.jpa.EntityManagers {
+  public <T> T get(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Ljava/lang/Object;
+  public boolean has(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Z
+}
+
+public final class com.jsgalactic.axiom.jpa.Jpa {
+  public <T> T entityManager(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Ljava/lang/Object;
+  public com.jsgalactic.axiom.context.Middleware readOnlyTransaction();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public com.jsgalactic.axiom.context.Middleware transaction();
+    descriptor: ()Lcom/jsgalactic/axiom/context/Middleware;
+  public com.jsgalactic.axiom.jpa.EntityManagers entityManagers();
+    descriptor: ()Lcom/jsgalactic/axiom/jpa/EntityManagers;
+  public static com.jsgalactic.axiom.jpa.Jpa$Builder builder();
+    descriptor: ()Lcom/jsgalactic/axiom/jpa/Jpa$Builder;
+}
+
+public static final class com.jsgalactic.axiom.jpa.Jpa$Builder {
+  public com.jsgalactic.axiom.jpa.Jpa build();
+    descriptor: ()Lcom/jsgalactic/axiom/jpa/Jpa;
+  public com.jsgalactic.axiom.jpa.Jpa$Builder entityManagerFactory(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Lcom/jsgalactic/axiom/jpa/Jpa$Builder;
+  public com.jsgalactic.axiom.jpa.Jpa$Builder jta(com.jsgalactic.axiom.jpa.JtaTransactionLookup);
+    descriptor: (Lcom/jsgalactic/axiom/jpa/JtaTransactionLookup;)Lcom/jsgalactic/axiom/jpa/Jpa$Builder;
+  public com.jsgalactic.axiom.jpa.Jpa$Builder readOnly();
+    descriptor: ()Lcom/jsgalactic/axiom/jpa/Jpa$Builder;
+  public final com.jsgalactic.axiom.jpa.Jpa$Builder commitOn(java.lang.Class<? extends java.lang.Throwable>...);
+    descriptor: ([Ljava/lang/Class;)Lcom/jsgalactic/axiom/jpa/Jpa$Builder;
+  public final com.jsgalactic.axiom.jpa.Jpa$Builder rollbackOn(java.lang.Class<? extends java.lang.Throwable>...);
+    descriptor: ([Ljava/lang/Class;)Lcom/jsgalactic/axiom/jpa/Jpa$Builder;
+}
+
+public interface com.jsgalactic.axiom.jpa.JtaTransactionLookup {
+  public abstract boolean active(com.jsgalactic.axiom.context.Context);
+    descriptor: (Lcom/jsgalactic/axiom/context/Context;)Z
+}
