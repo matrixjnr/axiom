@@ -52,7 +52,7 @@ jobs:
         if: matrix.language == 'java-kotlin'
         # CodeQL traces every JVM; compile Kotlin in the Gradle process with a fixed heap so the
         # build-logic compilation does not run out of memory in a separate traced daemon.
-        run: ./gradlew assemble testClasses --no-build-cache --max-workers=2 -Pkotlin.compiler.execution.strategy=in-process -Dorg.gradle.jvmargs=-Xmx3g
+        run: bash .github/scripts/gradle-retry.sh assemble testClasses --no-build-cache --max-workers=2 -Pkotlin.compiler.execution.strategy=in-process -Dorg.gradle.jvmargs=-Xmx3g
       - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           category: /language:${{ matrix.language }}
