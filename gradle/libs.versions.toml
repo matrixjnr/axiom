@@ -28,6 +28,9 @@ protobuf = "3.25.9"
 graphql-java = "26.2"
 # Adapter dependency: only the JTA API is pinned here; an actual transaction manager is application-owned.
 jakarta-transaction = "2.0.1"
+# Adapter dependencies: Jakarta Persistence stays inside axiom-jpa; a provider resolves for tests only.
+jakarta-persistence = "3.2.0"
+hibernate = "7.4.16.Final"
 
 [libraries]
 japicmp = { module = "com.github.siom79.japicmp:japicmp", version.ref = "japicmp" }
@@ -66,3 +69,5 @@ grpc-inprocess = { module = "io.grpc:grpc-inprocess", version.ref = "grpc" }
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 graphql-java = { module = "com.graphql-java:graphql-java", version.ref = "graphql-java" }
 jakarta-transaction-api = { module = "jakarta.transaction:jakarta.transaction-api", version.ref = "jakarta-transaction" }
+jakarta-persistence-api = { module = "jakarta.persistence:jakarta.persistence-api", version.ref = "jakarta-persistence" }
+hibernate-core = { module = "org.hibernate.orm:hibernate-core", version.ref = "hibernate" }

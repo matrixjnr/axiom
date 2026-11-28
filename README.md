@@ -191,6 +191,9 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 - **JTA transactions (opt-in)**: `axiom-jta` wraps handlers in a transaction supplied by the
   application, with correct suspend/resume for nested scopes, rollback rules, timeouts and opaque
   problem mappings, and no provider bundled ([JTA transactions](docs/jta.md)).
+- **JPA transactions (opt-in)**: `axiom-jpa` gives each request an EntityManager and a
+  resource-local transaction boundary from an application-owned factory, with read-only and JTA-join
+  options and no third-party type in an Axiom API ([JPA](docs/jpa.md)).
 
 ## Not yet
 
@@ -225,6 +228,7 @@ is a record of what shipped. Remaining milestones are in the [roadmap, #18](http
 | `axiom-graphql` | `axiom-graphql` | GraphQL query/mutation HTTP adapter over graphql-java, opt-in per route (opt-in) |
 | `axiom-jdbc` | `axiom-jdbc` | JDK-only gate bounding JDBC concurrency around an application-owned DataSource (opt-in) |
 | `axiom-jta` | `axiom-jta` | JTA transaction boundaries around handlers, with the manager supplied by the application (opt-in) |
+| `axiom-jpa` | `axiom-jpa` | Per-request EntityManager and resource-local transaction boundaries over Jakarta Persistence (opt-in) |
 | `axiom-bom` | `axiom-bom` | Bill of materials aligning all Axiom versions |
 | `integration-tests` | not published | JSON contract tests with the real codec, in memory and over a live listener |
 | `benchmarks/http` | not published | JMH microbenchmarks; no performance claims ([benchmarks](docs/benchmarks.md)) |

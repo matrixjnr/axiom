@@ -34,7 +34,9 @@ object ModuleBoundaries {
         // Bounds database concurrency around an application-owned DataSource; java.sql is JDK-only.
         "axiom-jdbc" to setOf("axiom-core"),
         // Transaction boundaries around handlers; the JTA API stays inside this opt-in adapter.
-        "axiom-jta" to setOf("axiom-core")
+        "axiom-jta" to setOf("axiom-core"),
+        // Per-request EntityManager boundaries; Jakarta Persistence is confined to this adapter.
+        "axiom-jpa" to setOf("axiom-core")
     )
 
     /** Modules that exist only to run tests and are never published. */
