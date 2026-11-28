@@ -53,6 +53,8 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # Too many simultaneous cold dependency fetches are rate limited by Maven Central (HTTP 429).
+      max-parallel: 4
       matrix: ${{ fromJson(needs.matrix.outputs.modules) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
