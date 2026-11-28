@@ -192,10 +192,12 @@ tests; `checkReadmeSnippets` fails when the README and the source differ.
 - **JPA transactions (opt-in)**: `axiom-jpa` gives each request an EntityManager and a
   resource-local transaction boundary from an application-owned factory, with read-only and JTA-join
   options and no third-party type in an Axiom API ([JPA](docs/jpa.md)).
+- **WebSocket (opt-in)**: a JDK-only API registers text and binary handlers on the HTTP/1.1
+  listener, with bounded frames, ping/pong, backpressure and graceful shutdown; the same sessions
+  run in memory through the test client ([WebSocket](docs/websocket.md)).
 
 ## Not yet
 
-- WebSocket
 - OAuth flows (bearer JWT authentication and JWKS rotation are available)
 - io_uring (epoll and kqueue are available as optional native transports)
 - Publication to Maven Central
@@ -406,6 +408,7 @@ The tests use `TestClient` everywhere except gRPC, which runs on an in-process s
 | `./gradlew :examples:modules:runJdbc` | a `Jdbc` gate around an application-owned `DataSource` |
 | `./gradlew :examples:modules:runJta` | `Jta` boundaries around handlers |
 | `./gradlew :examples:modules:runJpa` | a per-request EntityManager from `Jpa` |
+| `./gradlew :examples:modules:runWebSocket` | a text and binary echo route on `/echo` |
 
 ## Build and test
 
@@ -431,7 +434,8 @@ Details are in [build decisions](docs/build.md).
   [errors](docs/errors.md),
   [middleware](docs/middleware.md), [validation](docs/validation.md), [security](docs/security.md),
   [observability](docs/observability.md), [OpenAPI and Swagger](docs/openapi.md),
-  [GraphQL](docs/graphql.md), [gRPC](docs/grpc.md), [JDBC](docs/jdbc.md)
+  [GraphQL](docs/graphql.md), [gRPC](docs/grpc.md), [JDBC](docs/jdbc.md),
+  [WebSocket](docs/websocket.md)
 - [HTTP listeners](docs/http.md), [TLS](docs/tls.md), [execution and deadlines](docs/execution.md),
   [admission](docs/admission.md), [benchmarks](docs/benchmarks.md)
 - [Build decisions](docs/build.md), [releasing](docs/releasing.md),

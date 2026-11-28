@@ -10,6 +10,8 @@ import com.jsgalactic.axiom.application.Application;
 import com.jsgalactic.axiom.http.InvalidRequestPathException;
 import com.jsgalactic.axiom.http.Request;
 import com.jsgalactic.axiom.http.Response;
+import com.jsgalactic.axiom.server.internal.WebSocketAccess;
+import com.jsgalactic.axiom.websocket.WebSocketHandler;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -64,6 +66,22 @@ class ApplicationTest {
       assertThatIllegalStateException().isThrownBy(app::start);
       assertThatIllegalStateException().isThrownBy(() -> app.get("/late", ctx -> "late"));
       assertThatIllegalStateException().isThrownBy(() -> app.handle(Request.get("/")));
+    }
+  }
+
+  @Test
+  void freezesAndValidatesWebSocketRegistration() {
+    try (var app = Axiom.create()) {
+      assertThatIllegalArgumentException()
+          .isThrownBy(() -> app.webSocket("/bad/{id}", new WebSocketHandler() {}));
+      app.webSocket("/ws", new WebSocketHandler() {});
+      assertThatIllegalArgumentException()
+          .isThrownBy(() -> app.webSocket("/ws", new WebSocketHandler() {}));
+      app.start();
+      assertThatIllegalStateException()
+          .isThrownBy(() -> app.webSocket("/late", new WebSocketHandler() {}));
+      assertThat(WebSocketAccess.of(app).route(Request.get("/ws"))).isPresent();
+      assertThat(WebSocketAccess.of(app).route(Request.get("/missing"))).isEmpty();
     }
   }
 

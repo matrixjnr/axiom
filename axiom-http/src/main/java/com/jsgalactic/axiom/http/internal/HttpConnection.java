@@ -15,6 +15,8 @@ import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.server.internal.Problems;
 import com.jsgalactic.axiom.server.internal.ResponseSerialization;
 import com.jsgalactic.axiom.server.internal.StreamRun;
+import com.jsgalactic.axiom.server.internal.WebSocketAccess;
+import com.jsgalactic.axiom.server.internal.WebSocketAccess.WebSocketRoute;
 import com.jsgalactic.axiom.server.internal.execution.EndpointTag;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher.DeadlineExceededException;
@@ -28,12 +30,16 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DuplexChannel;
 import io.netty.handler.codec.DateFormatter;
+import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.DefaultLastHttpContent;
+import io.netty.handler.codec.http.EmptyHttpHeaders;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaderValues;
+import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponseStatus;
@@ -42,6 +48,8 @@ import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.codec.http.TooLongHttpHeaderException;
 import io.netty.handler.codec.http.TooLongHttpLineException;
+import io.netty.handler.codec.http.websocketx.WebSocketFrameAggregator;
+import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker13;
 import io.netty.handler.codec.http2.Http2StreamChannel;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.IdleStateEvent;
@@ -50,11 +58,13 @@ import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletionException;
@@ -169,6 +179,7 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
   private boolean busy;
   private boolean closing;
   private boolean draining;
+  private boolean upgrading;
 
   /**
    * Status of a listener error waiting for earlier pipelined responses; zero when none. Once set,
@@ -473,6 +484,11 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
 
   @Override
   protected void channelRead0(ChannelHandlerContext ctx, HttpObject message) {
+    // A successful upgrade owns the connection; the trailing LastHttpContent of its head is
+    // dropped.
+    if (upgrading) {
+      return;
+    }
     // After an error, requests already decoded from the same read are dropped unexecuted.
     if (closing || deferredStatus != 0) {
       return;
@@ -528,8 +544,8 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
       fail(ctx, 400);
       return false;
     }
-    if (request.method().name().equals("CONNECT")
-        || request.headers().contains(HttpHeaderNames.UPGRADE)) {
+    // CONNECT requests a tunnel and is rejected before its authority-form target is parsed.
+    if (request.method().name().equals("CONNECT")) {
       fail(ctx, 501);
       return false;
     }
@@ -578,6 +594,50 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
       fail(ctx, 400);
       return false;
     }
+    var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+    for (var header : headers) {
+      fields.merge(header.getKey(), header.getValue(), (first, next) -> first + ", " + next);
+    }
+    boolean upgradeRequested = headers.contains(HttpHeaderNames.UPGRADE);
+    Request prepared;
+    InetSocketAddress peer;
+    try {
+      // Validates the path and query in one pass; any rejection is a 400.
+      // The peer is resolved by the socket; embedded test channels have no IP peer.
+      peer =
+          ctx.channel().remoteAddress() instanceof InetSocketAddress address
+                  && !address.isUnresolved()
+              ? address
+              : null;
+      // An absolute-form target is reduced to its path and query first; Host must agree with it.
+      var target = RequestTargets.originForm(request.uri(), headers.get(HttpHeaderNames.HOST));
+      prepared =
+          Request.fromTarget(request.method().name(), target)
+              .withHeaders(fields)
+              .withRemoteAddress(peer)
+              .withTls(secure(ctx));
+    } catch (IllegalArgumentException invalid) {
+      // An upgrade whose target cannot be routed was answered 501 before WebSocket existed.
+      fail(ctx, upgradeRequested ? 501 : 400);
+      return false;
+    }
+    if (upgradeRequested) {
+      if (!request.method().name().equals("GET") || http10) {
+        fail(ctx, 501);
+        return false;
+      }
+      var route = WebSocketAccess.of(application).route(prepared);
+      if (route.isEmpty()) {
+        fail(ctx, 501);
+        return false;
+      }
+      if (!upgrade(ctx, request, prepared, peer, route.get(), chunked, length)) {
+        return false;
+      }
+      upgrading = true;
+      headComplete();
+      return false;
+    }
     bodyLimit = application.maxRequestBody();
     // Rejected before any body byte is read; the connection closes after the response.
     if (length > bodyLimit) {
@@ -590,33 +650,12 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
       fail(ctx, 417);
       return false;
     }
-    var fields = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-    for (var header : headers) {
-      fields.merge(header.getKey(), header.getValue(), (first, next) -> first + ", " + next);
-    }
-    try {
-      // Validates the path and query in one pass; any rejection is a 400.
-      // The peer is resolved by the socket; embedded test channels have no IP peer.
-      var peer =
-          ctx.channel().remoteAddress() instanceof InetSocketAddress address
-                  && !address.isUnresolved()
-              ? address
-              : null;
-      // An absolute-form target is reduced to its path and query first; Host must agree with it.
-      var target = RequestTargets.originForm(request.uri(), headers.get(HttpHeaderNames.HOST));
-      receiving =
-          new Exchange(
-              Request.fromTarget(request.method().name(), target)
-                  .withHeaders(fields)
-                  .withRemoteAddress(peer)
-                  .withTls(secure(ctx)),
-              HttpUtil.isKeepAlive(request),
-              http10,
-              ExecutionContext.create(application.requestTimeout()));
-    } catch (IllegalArgumentException invalid) {
-      fail(ctx, 400);
-      return false;
-    }
+    receiving =
+        new Exchange(
+            prepared,
+            HttpUtil.isKeepAlive(request),
+            http10,
+            ExecutionContext.create(application.requestTimeout()));
     var streams =
         application.resolve(receiving.request()).map(application::streamsBody).orElse(false);
     if (chunked || length > 0) {
@@ -674,6 +713,114 @@ final class HttpConnection extends SimpleChannelInboundHandler<HttpObject> {
       dispatch(ctx);
     }
     return true;
+  }
+
+  /**
+   * Performs a WebSocket opening handshake on a registered route. An invalid handshake receives an
+   * HTTP error and leaves ordinary routing untouched; a successful one replaces this connection
+   * handler with the session and consumes the rest of the connection.
+   */
+  private boolean upgrade(
+      ChannelHandlerContext ctx,
+      HttpRequest request,
+      Request prepared,
+      InetSocketAddress peer,
+      WebSocketRoute route,
+      boolean chunked,
+      long length) {
+    var headers = request.headers();
+    var keys = headers.getAll(HttpHeaderNames.SEC_WEBSOCKET_KEY);
+    var versions = headers.getAll(HttpHeaderNames.SEC_WEBSOCKET_VERSION);
+    if (!token(headers, HttpHeaderNames.UPGRADE, HttpHeaderValues.WEBSOCKET)
+        || !token(headers, HttpHeaderNames.CONNECTION, HttpHeaderValues.UPGRADE)
+        || versions.size() != 1
+        || !versions.getFirst().trim().equals("13")
+        || keys.size() != 1
+        || !validKey(keys.getFirst())
+        || headers.contains(HttpHeaderNames.SEC_WEBSOCKET_EXTENSIONS)
+        || chunked
+        || length > 0) {
+      fail(ctx, 400);
+      return false;
+    }
+    if (!executor.admitStreamSlot(route.admissionKey(), application.streamPolicy())) {
+      listenerMetrics.webSocket(ListenerMetrics.WebSocketOutcome.REFUSED);
+      fail(ctx, 503);
+      return false;
+    }
+    var url =
+        (secure(ctx) ? "wss://" : "ws://") + headers.get(HttpHeaderNames.HOST) + request.uri();
+    var full =
+        new DefaultFullHttpRequest(
+            request.protocolVersion(),
+            request.method(),
+            request.uri(),
+            Unpooled.EMPTY_BUFFER,
+            new DefaultHttpHeaders().add(request.headers()),
+            EmptyHttpHeaders.INSTANCE);
+    var handshaker = new WebSocketServerHandshaker13(url, null, WebSocketSupport.decoderConfig());
+    var session =
+        new NettyWebSocketSession(
+            route.handler(),
+            prepared,
+            ExecutionContext.create(application.requestTimeout()),
+            Optional.ofNullable(peer),
+            executor,
+            route.admissionKey(),
+            true,
+            listenerMetrics);
+    handshaker
+        .handshake(ctx, full)
+        .addListener(
+            future -> {
+              if (!future.isSuccess()) {
+                executor.releaseStreamSlot(route.admissionKey());
+                listenerMetrics.webSocket(ListenerMetrics.WebSocketOutcome.REFUSED);
+                ctx.close();
+                return;
+              }
+              try {
+                // The encoder must stay before the session in the pipeline: outbound frames travel
+                // toward the head, so they pass through it on their way to the socket.
+                ctx.pipeline()
+                    .addAfter(
+                        "wsencoder",
+                        "wsAggregator",
+                        new WebSocketFrameAggregator(WebSocketSupport.MAX_FRAME));
+                ctx.pipeline().addAfter("wsAggregator", "wsSession", session);
+                ctx.pipeline().remove(this);
+              } catch (RuntimeException failure) {
+                executor.releaseStreamSlot(route.admissionKey());
+                listenerMetrics.webSocket(ListenerMetrics.WebSocketOutcome.REFUSED);
+                ctx.close();
+              }
+            });
+    return true;
+  }
+
+  /** True when a comma-separated header contains the expected case-insensitive token. */
+  private static boolean token(HttpHeaders headers, CharSequence name, CharSequence expected) {
+    for (var value : headers.getAll(name)) {
+      for (var part : value.split(",")) {
+        if (part.trim().equalsIgnoreCase(expected.toString())) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** RFC 6455 requires one base64-encoded 16-byte nonce for version 13. */
+  private static boolean validKey(String key) {
+    if (key.length() != 24 || !key.endsWith("==")) {
+      return false;
+    }
+    try {
+      var decoded = Base64.getDecoder().decode(key);
+      return decoded.length == 16 && Base64.getEncoder().encodeToString(decoded).equals(key);
+    } catch (IllegalArgumentException invalid) {
+      return false;
+    }
   }
 
   /**

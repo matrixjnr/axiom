@@ -18,6 +18,20 @@ final class ListenerMetrics {
   static final String REJECTED = "axiom.http.connections.rejected";
   static final String BYTES = "axiom.http.listener.bytes";
   static final String ANSWERS = "axiom.http.listener.answers";
+  static final String WEB_SOCKET_CONNECTIONS = "axiom.websocket.connections";
+  static final String WEB_SOCKET_FRAMES = "axiom.websocket.frames";
+
+  /** The outcome of one WebSocket connection; the value comes from this fixed set. */
+  enum WebSocketOutcome {
+    OPENED("opened"),
+    CLOSED("closed"),
+    REFUSED("refused");
+    private final String tag;
+
+    WebSocketOutcome(String tag) {
+      this.tag = tag;
+    }
+  }
 
   /** Why an accepted socket was closed at once. */
   enum Refusal {
@@ -44,6 +58,10 @@ final class ListenerMetrics {
   private final Metrics.Counter[] refused = new Metrics.Counter[Refusal.values().length];
   private final Metrics.Counter in;
   private final Metrics.Counter out;
+  private final Metrics.Counter[] webSocketConnections =
+      new Metrics.Counter[WebSocketOutcome.values().length];
+  private final ConcurrentHashMap<String, Metrics.Counter> webSocketFrames =
+      new ConcurrentHashMap<>();
 
   ListenerMetrics(Metrics metrics, String listener) {
     this.metrics = metrics;
@@ -56,6 +74,10 @@ final class ListenerMetrics {
       }
       in = counter(BYTES, "listener", listener, "direction", "in");
       out = counter(BYTES, "listener", listener, "direction", "out");
+      for (var outcome : WebSocketOutcome.values()) {
+        webSocketConnections[outcome.ordinal()] =
+            counter(WEB_SOCKET_CONNECTIONS, "listener", listener, "outcome", outcome.tag);
+      }
     } else {
       accepted = null;
       in = null;
@@ -101,6 +123,40 @@ final class ListenerMetrics {
               status,
               code ->
                   metrics.counter(ANSWERS, "listener", listener, "status", Integer.toString(code)))
+          .increment();
+    } catch (RuntimeException failure) {
+      dropped(failure);
+    }
+  }
+
+  /** Counts one WebSocket handshake outcome; the tag comes from this class's fixed set. */
+  void webSocket(WebSocketOutcome outcome) {
+    add(webSocketConnections[outcome.ordinal()], 1);
+  }
+
+  /**
+   * Counts one WebSocket frame. Both tags come from fixed sets in the transport, never from a peer.
+   *
+   * @param direction "in" or "out"
+   * @param kind "text", "binary" or "control"
+   */
+  void frame(String direction, String kind) {
+    if (!enabled) {
+      return;
+    }
+    try {
+      webSocketFrames
+          .computeIfAbsent(
+              direction + ":" + kind,
+              ignored ->
+                  metrics.counter(
+                      WEB_SOCKET_FRAMES,
+                      "listener",
+                      listener,
+                      "direction",
+                      direction,
+                      "kind",
+                      kind))
           .increment();
     } catch (RuntimeException failure) {
       dropped(failure);

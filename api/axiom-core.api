@@ -53,6 +53,8 @@ public interface com.jsgalactic.axiom.application.Application extends com.jsgala
     descriptor: (Lcom/jsgalactic/axiom/routing/Route;Lcom/jsgalactic/axiom/execution/StreamPolicy;)Lcom/jsgalactic/axiom/application/Application;
   public abstract com.jsgalactic.axiom.application.Application use(com.jsgalactic.axiom.context.Middleware);
     descriptor: (Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/application/Application;
+  public abstract com.jsgalactic.axiom.application.Application webSocket(java.lang.String, com.jsgalactic.axiom.websocket.WebSocketHandler);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/websocket/WebSocketHandler;)Lcom/jsgalactic/axiom/application/Application;
   public abstract com.jsgalactic.axiom.application.Application$State state();
     descriptor: ()Lcom/jsgalactic/axiom/application/Application$State;
   public abstract com.jsgalactic.axiom.execution.AdmissionPolicy admissionPolicy();
@@ -1761,4 +1763,61 @@ public interface com.jsgalactic.axiom.routing.RouteGroup {
     descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
   public default com.jsgalactic.axiom.routing.Route put(java.lang.String, com.jsgalactic.axiom.context.Handler, com.jsgalactic.axiom.context.Middleware...);
     descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/context/Handler;[Lcom/jsgalactic/axiom/context/Middleware;)Lcom/jsgalactic/axiom/routing/Route;
+}
+
+public interface com.jsgalactic.axiom.websocket.WebSocketHandler {
+  public default void onClose(com.jsgalactic.axiom.websocket.WebSocketSession, int, java.lang.String);
+    descriptor: (Lcom/jsgalactic/axiom/websocket/WebSocketSession;ILjava/lang/String;)V
+  public default void onConnect(com.jsgalactic.axiom.websocket.WebSocketSession);
+    descriptor: (Lcom/jsgalactic/axiom/websocket/WebSocketSession;)V
+  public default void onError(com.jsgalactic.axiom.websocket.WebSocketSession, java.lang.Throwable);
+    descriptor: (Lcom/jsgalactic/axiom/websocket/WebSocketSession;Ljava/lang/Throwable;)V
+  public default void onMessage(com.jsgalactic.axiom.websocket.WebSocketSession, com.jsgalactic.axiom.websocket.WebSocketMessage);
+    descriptor: (Lcom/jsgalactic/axiom/websocket/WebSocketSession;Lcom/jsgalactic/axiom/websocket/WebSocketMessage;)V
+}
+
+public final class com.jsgalactic.axiom.websocket.WebSocketMessage {
+  public boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+  public boolean isText();
+    descriptor: ()Z
+  public byte[] bytes();
+    descriptor: ()[B
+  public int hashCode();
+    descriptor: ()I
+  public int length();
+    descriptor: ()I
+  public java.lang.String text();
+    descriptor: ()Ljava/lang/String;
+  public java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+  public static com.jsgalactic.axiom.websocket.WebSocketMessage binary(byte[]);
+    descriptor: ([B)Lcom/jsgalactic/axiom/websocket/WebSocketMessage;
+  public static com.jsgalactic.axiom.websocket.WebSocketMessage binary(java.nio.ByteBuffer);
+    descriptor: (Ljava/nio/ByteBuffer;)Lcom/jsgalactic/axiom/websocket/WebSocketMessage;
+  public static com.jsgalactic.axiom.websocket.WebSocketMessage text(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/websocket/WebSocketMessage;
+}
+
+public interface com.jsgalactic.axiom.websocket.WebSocketSession {
+  public abstract boolean isOpen();
+    descriptor: ()Z
+  public abstract com.jsgalactic.axiom.execution.ExecutionContext execution();
+    descriptor: ()Lcom/jsgalactic/axiom/execution/ExecutionContext;
+  public abstract com.jsgalactic.axiom.http.Request request();
+    descriptor: ()Lcom/jsgalactic/axiom/http/Request;
+  public abstract java.util.Optional<java.net.InetSocketAddress> remoteAddress();
+    descriptor: ()Ljava/util/Optional;
+  public abstract void close();
+    descriptor: ()V
+  public abstract void close(int, java.lang.String);
+    descriptor: (ILjava/lang/String;)V
+  public abstract void ping(byte[]);
+    descriptor: ([B)V
+  public abstract void send(com.jsgalactic.axiom.websocket.WebSocketMessage);
+    descriptor: (Lcom/jsgalactic/axiom/websocket/WebSocketMessage;)V
+  public abstract void sendBinary(byte[]);
+    descriptor: ([B)V
+  public abstract void sendText(java.lang.String);
+    descriptor: (Ljava/lang/String;)V
 }

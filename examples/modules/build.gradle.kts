@@ -33,6 +33,7 @@ val examples =
         "Jdbc" to "example.modules.JdbcExample",
         "Jta" to "example.modules.JtaExample",
         "Jpa" to "example.modules.JpaExample",
+        "WebSocket" to "example.modules.WebSocketExample",
     )
 examples.forEach { (name, mainClass) ->
     tasks.register<JavaExec>("run$name") {

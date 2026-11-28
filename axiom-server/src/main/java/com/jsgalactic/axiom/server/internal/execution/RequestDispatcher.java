@@ -501,6 +501,61 @@ public final class RequestDispatcher implements AutoCloseable {
   }
 
   /**
+   * Reserves a stream slot for a long-lived connection such as a WebSocket session, outside any
+   * dispatcher task. The aggregate and endpoint bounds apply as for a streamed response. The caller
+   * must release the slot with {@link #releaseStreamSlot} when the connection ends; a refused
+   * reservation records a rejection and must not be released.
+   *
+   * @param key stable endpoint identity, never a request-specific path
+   * @param endpointPolicy immutable stream bound for this endpoint
+   * @return true when a slot was reserved, false when either bound was full
+   */
+  public boolean admitStreamSlot(Object key, StreamPolicy endpointPolicy) {
+    Objects.requireNonNull(key, "key");
+    Objects.requireNonNull(endpointPolicy, "endpointPolicy");
+    boolean admitted;
+    synchronized (this) {
+      if (streamActive >= streamPolicy.maxActive()) {
+        metrics.rejected(metrics.series(key), DispatchMetrics.Reason.STREAM_CAPACITY);
+        admitted = false;
+      } else {
+        var bucket = streamBuckets.get(key);
+        if (bucket == null) {
+          bucket = new StreamBucket(key, endpointPolicy);
+        } else if (!bucket.policy.equals(endpointPolicy)) {
+          throw new IllegalArgumentException("Endpoint stream policy changed after admission");
+        }
+        admitted = bucket.active < endpointPolicy.maxActive();
+        if (admitted) {
+          bucket.active++;
+          streamActive++;
+          streamBuckets.put(key, bucket);
+        } else {
+          metrics.rejected(metrics.series(key), DispatchMetrics.Reason.STREAM_CAPACITY);
+        }
+      }
+    }
+    return admitted;
+  }
+
+  /**
+   * Releases a slot reserved by {@link #admitStreamSlot}. Idempotent for an unknown key.
+   *
+   * @param key identity passed to {@code admitStreamSlot}
+   */
+  public void releaseStreamSlot(Object key) {
+    Objects.requireNonNull(key, "key");
+    synchronized (this) {
+      var bucket = streamBuckets.get(key);
+      if (bucket != null && bucket.active > 0) {
+        bucket.active--;
+        streamActive--;
+        pruneStream(bucket);
+      }
+    }
+  }
+
+  /**
    * Observes complete resource termination, including handlers that ignore interruption.
    *
    * @return completion after executors stop

@@ -24,7 +24,9 @@ import com.jsgalactic.axiom.observability.TraceContext;
 import com.jsgalactic.axiom.routing.Route;
 import com.jsgalactic.axiom.routing.RouteDoc;
 import com.jsgalactic.axiom.routing.RouteGroup;
+import com.jsgalactic.axiom.server.internal.WebSocketAccess.WebSocketRoute;
 import com.jsgalactic.axiom.server.internal.execution.RequestDispatcher;
+import com.jsgalactic.axiom.websocket.WebSocketHandler;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
@@ -44,7 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
-final class DefaultApplication implements Application, ExecutionAccess {
+final class DefaultApplication implements Application, ExecutionAccess, WebSocketAccess {
   /**
    * Immutable configuration published at startup. The request path reads it through one volatile
    * field and takes no lock; {@code router} is null once the application closes. The dispatcher is
@@ -61,7 +63,10 @@ final class DefaultApplication implements Application, ExecutionAccess {
       StreamPolicy defaultStreamPolicy,
       Codecs codecs,
       int maxRequestBody,
-      Set<Route> streamingRoutes) {
+      Set<Route> streamingRoutes,
+      CompiledRouter webSocketRouter,
+      Map<Route, WebSocketHandler> webSocketHandlers,
+      Map<Route, Object> webSocketKeys) {
     /** Drops every reference to application handlers, middleware and error handlers. */
     Runtime withoutRouter() {
       return new Runtime(
@@ -75,7 +80,10 @@ final class DefaultApplication implements Application, ExecutionAccess {
           defaultStreamPolicy,
           codecs,
           maxRequestBody,
-          streamingRoutes);
+          streamingRoutes,
+          null,
+          Map.of(),
+          Map.of());
     }
   }
 
@@ -97,6 +105,8 @@ final class DefaultApplication implements Application, ExecutionAccess {
   private final Map<Route, RouteDoc> routeDocs = new LinkedHashMap<>();
   private final Set<Route> streamingRoutes = new HashSet<>();
   private final Map<String, Route> shapes = new HashMap<>();
+  private final Map<Route, WebSocketHandler> webSockets = new LinkedHashMap<>();
+  private final Map<String, Route> webSocketShapes = new HashMap<>();
   private final Set<String> recognizedMethods = new TreeSet<>();
   private Handler notFoundHandler;
   private Handler methodNotAllowedHandler;
@@ -321,6 +331,21 @@ final class DefaultApplication implements Application, ExecutionAccess {
   @Override
   public Route route(String method, String path, Handler handler, Middleware... middleware) {
     return register(root, method, path, handler, middleware);
+  }
+
+  @Override
+  public synchronized Application webSocket(String path, WebSocketHandler handler) {
+    requireState(State.CONFIGURING);
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(handler, "handler");
+    var route = new Route("GET", path);
+    var previous = webSocketShapes.putIfAbsent(shape(path), route);
+    if (previous != null) {
+      throw new IllegalArgumentException(
+          "Duplicate WebSocket route: " + previous.path() + " and " + path);
+    }
+    webSockets.put(route, handler);
+    return this;
   }
 
   @Override
@@ -627,6 +652,11 @@ final class DefaultApplication implements Application, ExecutionAccess {
                   developmentErrors));
         });
     var router = CompiledRouter.compile(chains, Set.copyOf(recognizedMethods));
+    // WebSocket routes live in a separate table: an upgrade request never runs HTTP middleware or
+    // handlers, and an ordinary request to the same path keeps its normal route.
+    var webSocketChains = new LinkedHashMap<Route, Handler>();
+    webSockets.keySet().forEach(route -> webSocketChains.put(route, context -> null));
+    var webSocketRouter = CompiledRouter.compile(webSocketChains);
     // Answers the router produces itself are wrapped by global middleware only.
     var unmatched =
         Pipeline.compose(
@@ -635,7 +665,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
             rootScopes,
             failureLog,
             developmentErrors);
-    runtime = snapshot(router, unmatched, codecs);
+    runtime = snapshot(router, unmatched, codecs, webSocketRouter);
     registrations.clear();
     shapes.clear();
     state = State.RUNNING;
@@ -672,8 +702,11 @@ final class DefaultApplication implements Application, ExecutionAccess {
     };
   }
 
-  private Runtime snapshot(CompiledRouter router, Handler unmatched, Codecs codecs) {
+  private Runtime snapshot(
+      CompiledRouter router, Handler unmatched, Codecs codecs, CompiledRouter webSocketRouter) {
     var routes = List.copyOf(registrations.keySet());
+    var webSocketKeys = new HashMap<Route, Object>();
+    webSockets.keySet().forEach(route -> webSocketKeys.put(route, new Object()));
     var budget = executionBudget;
     // One dispatcher owns the counters, queue and workers for the whole application.
     var execution = router == null ? null : new RequestDispatcher(budget, streamPolicy, metrics);
@@ -688,7 +721,10 @@ final class DefaultApplication implements Application, ExecutionAccess {
         streamPolicy,
         codecs,
         maxRequestBody,
-        Set.copyOf(streamingRoutes));
+        Set.copyOf(streamingRoutes),
+        webSocketRouter,
+        Map.copyOf(webSockets),
+        Map.copyOf(webSocketKeys));
   }
 
   @Override
@@ -925,6 +961,25 @@ final class DefaultApplication implements Application, ExecutionAccess {
     return match == null || !match.methodAllowed() ? Optional.empty() : Optional.of(match.route());
   }
 
+  @Override
+  public Optional<WebSocketRoute> route(Request request) {
+    Objects.requireNonNull(request, "request");
+    var published = acceptingRuntime();
+    if (published.webSocketRouter() == null) {
+      return Optional.empty();
+    }
+    var match = published.webSocketRouter().match(request);
+    if (match == null || !match.methodAllowed()) {
+      return Optional.empty();
+    }
+    var handler = published.webSocketHandlers().get(match.route());
+    return handler == null
+        ? Optional.empty()
+        : Optional.of(
+            new WebSocketRoute(
+                match.route(), handler, published.webSocketKeys().get(match.route())));
+  }
+
   private static IllegalArgumentException notRegistered(Route route) {
     return new IllegalArgumentException("Route is not registered: " + route);
   }
@@ -1074,7 +1129,7 @@ final class DefaultApplication implements Application, ExecutionAccess {
       var published = runtime;
       runtime =
           published == null
-              ? snapshot(null, null, Codecs.of(List.of()))
+              ? snapshot(null, null, Codecs.of(List.of()), null)
               : published.withoutRouter();
       execution = published == null ? null : published.execution();
       state = State.CLOSED;
@@ -1089,6 +1144,8 @@ final class DefaultApplication implements Application, ExecutionAccess {
       shapes.clear();
       streamPolicies.clear();
       streamingRoutes.clear();
+      webSockets.clear();
+      webSocketShapes.clear();
       owned = List.copyOf(listeners);
       listeners.clear();
     }

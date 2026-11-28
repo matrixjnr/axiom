@@ -391,7 +391,8 @@ that is predictable within one process and must not be used as a secret or crede
 See [execution and deadlines](execution.md) for timing, cancellation and capacity ownership.
 
 A listener serves HTTPS when its options carry [TLS](tls.md). HTTP/2 is
-[opt-in](#http2); WebSocket is not implemented. [Conditional and range requests](#conditional-and-range-requests),
+[opt-in](#http2); [WebSocket](websocket.md) is registered per path on the HTTP/1.1 listener.
+[Conditional and range requests](#conditional-and-range-requests),
 streaming request bodies and [multipart parsing](bodies.md#streaming-request-bodies) are available.
 Observability adapters ship as opt-in modules ([observability](observability.md)).
 

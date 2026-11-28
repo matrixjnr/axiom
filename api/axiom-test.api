@@ -70,6 +70,10 @@ public final class com.jsgalactic.axiom.test.TestClient implements java.lang.Aut
     descriptor: (Lcom/jsgalactic/axiom/http/Request;)Lcom/jsgalactic/axiom/test/StreamedResponse;
   public com.jsgalactic.axiom.test.StreamedResponse stream(com.jsgalactic.axiom.http.Request, com.jsgalactic.axiom.http.BodyReader) throws java.lang.Exception;
     descriptor: (Lcom/jsgalactic/axiom/http/Request;Lcom/jsgalactic/axiom/http/BodyReader;)Lcom/jsgalactic/axiom/test/StreamedResponse;
+  public com.jsgalactic.axiom.websocket.WebSocketSession webSocket(java.lang.String);
+    descriptor: (Ljava/lang/String;)Lcom/jsgalactic/axiom/websocket/WebSocketSession;
+  public com.jsgalactic.axiom.websocket.WebSocketSession webSocket(java.lang.String, com.jsgalactic.axiom.websocket.WebSocketHandler);
+    descriptor: (Ljava/lang/String;Lcom/jsgalactic/axiom/websocket/WebSocketHandler;)Lcom/jsgalactic/axiom/websocket/WebSocketSession;
   public java.util.concurrent.CompletableFuture<com.jsgalactic.axiom.http.Response> submit(com.jsgalactic.axiom.http.Request);
     descriptor: (Lcom/jsgalactic/axiom/http/Request;)Ljava/util/concurrent/CompletableFuture;
   public java.util.concurrent.CompletableFuture<com.jsgalactic.axiom.http.Response> submit(com.jsgalactic.axiom.http.Request, com.jsgalactic.axiom.http.BodyReader);
